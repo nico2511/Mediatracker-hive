@@ -44,6 +44,10 @@ const props = defineProps<{
   seriesWatchMenu?: boolean;
   /** all (défaut), etat seul (repli Suivi), actions seul (en-tête). */
   section?: "all" | "etat" | "actions";
+  tmdbUrl?: string | null;
+  jellyfinWebUrl?: string | null;
+  /** Masque les titres de section (bandeau actions série). */
+  compact?: boolean;
 }>();
 
 const showEtat = computed(() => (props.section ?? "all") !== "actions");
@@ -238,8 +242,12 @@ function checkedFrom(event: Event): boolean {
         <p v-if="poll.last_message" class="hint">{{ poll.last_message }}</p>
       </section>
 
-      <section v-if="showActions" class="fiche-actions" aria-labelledby="fiche-actions-title">
-        <h2 id="fiche-actions-title">Actions</h2>
+      <section
+        v-if="showActions"
+        class="fiche-actions"
+        :aria-labelledby="compact ? undefined : 'fiche-actions-title'"
+      >
+        <h2 v-if="!compact" id="fiche-actions-title">Actions</h2>
         <p v-if="!followed">
           <button type="button" class="primary fiche-primary-action" @click="emit('followAgain')">Suivre à nouveau</button>
         </p>
@@ -255,6 +263,30 @@ function checkedFrom(event: Event): boolean {
         </p>
         <p v-else-if="filmNotYetAvailable && filmStatusLine" class="hint">{{ filmStatusLine }}</p>
         <p class="fiche-secondary-actions">
+          <span v-if="tmdbUrl || jellyfinWebUrl" class="fiche-ext-icon-links" role="group" aria-label="Liens externes">
+            <a
+              v-if="tmdbUrl"
+              class="icon-button fiche-ext-icon-link"
+              :href="tmdbUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Ouvrir la fiche TMDB"
+              aria-label="Ouvrir la fiche TMDB"
+            >
+              <span class="tmdb-mark" aria-hidden="true">TM</span>
+            </a>
+            <a
+              v-if="jellyfinWebUrl"
+              class="icon-button fiche-ext-icon-link"
+              :href="jellyfinWebUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Lire sur Jellyfin"
+              aria-label="Lire sur Jellyfin"
+            >
+              <StatusIcon name="play" label="Lire sur Jellyfin" />
+            </a>
+          </span>
           <button v-if="followed && !onHold" type="button" @click="emit('pause', true)">
             <StatusIcon name="pause" label="Pause" /> Mettre en pause
           </button>

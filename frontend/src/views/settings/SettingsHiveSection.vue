@@ -4,6 +4,13 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import { api, userFacingApiError } from "../../api";
 import { useHiveEnabled } from "../../composables/useHive";
+import {
+  hiveTransferMinutesToTime,
+  hiveTransferTimeToMinutes,
+  HIVE_TRANSFER_ALL_DAY_END,
+  HIVE_TRANSFER_ALL_DAY_START,
+  isHiveTransferAllDay,
+} from "../../hive/hiveTransferWindow";
 import { fetchSettings, patchSettings } from "../../settings";
 
 const router = useRouter();
@@ -43,7 +50,67 @@ const transferSend = ref(0);
 const transferRecv = ref(0);
 const transferWinStart = ref(0);
 const transferWinEnd = ref(24 * 60);
+const transferWinStartTime = ref("00:00");
+const transferWinEndTime = ref("00:00");
 const catalogAutoShare = ref(false);
+
+const transferWinAllDay = computed({
+  get: () => isHiveTransferAllDay(transferWinStart.value, transferWinEnd.value),
+  set: (on: boolean) => {
+    if (on) {
+      transferWinStart.value = HIVE_TRANSFER_ALL_DAY_START;
+      transferWinEnd.value = HIVE_TRANSFER_ALL_DAY_END;
+      transferWinStartTime.value = hiveTransferMinutesToTime(HIVE_TRANSFER_ALL_DAY_START);
+      transferWinEndTime.value = hiveTransferMinutesToTime(HIVE_TRANSFER_ALL_DAY_END);
+      return;
+    }
+    if (isHiveTransferAllDay(transferWinStart.value, transferWinEnd.value)) {
+      transferWinStart.value = HIVE_TRANSFER_ALL_DAY_START;
+      transferWinEnd.value = 23 * 60;
+      transferWinStartTime.value = hiveTransferMinutesToTime(transferWinStart.value);
+      transferWinEndTime.value = hiveTransferMinutesToTime(transferWinEnd.value);
+    }
+  },
+});
+
+function syncTransferWindowFieldsFromMinutes() {
+  transferWinStartTime.value = hiveTransferMinutesToTime(transferWinStart.value);
+  transferWinEndTime.value = hiveTransferMinutesToTime(transferWinEnd.value);
+}
+
+function applyTransferWindowTimesToMinutes() {
+  if (transferWinAllDay.value) {
+    transferWinStart.value = HIVE_TRANSFER_ALL_DAY_START;
+    transferWinEnd.value = HIVE_TRANSFER_ALL_DAY_END;
+    return;
+  }
+  transferWinStart.value = hiveTransferTimeToMinutes(transferWinStartTime.value);
+  transferWinEnd.value = Math.max(1, hiveTransferTimeToMinutes(transferWinEndTime.value));
+}
+
+function onTransferStartTimeInput(event: Event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+  transferWinStartTime.value = input.value;
+  if (transferWinAllDay.value) {
+    transferWinAllDay.value = false;
+  }
+  applyTransferWindowTimesToMinutes();
+}
+
+function onTransferEndTimeInput(event: Event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+  transferWinEndTime.value = input.value;
+  if (transferWinAllDay.value) {
+    transferWinAllDay.value = false;
+  }
+  applyTransferWindowTimesToMinutes();
+}
 
 const pullOnlyHint = computed(
   () => identity.value?.pull_only && "Mode tirage : vous recevez, sans envoyer.",
@@ -61,6 +128,7 @@ async function load() {
     transferRecv.value = Number(map.get("hive_transfer_recv_bps") ?? 0);
     transferWinStart.value = Number(map.get("hive_transfer_window_start") ?? 0);
     transferWinEnd.value = Number(map.get("hive_transfer_window_end") ?? 24 * 60);
+    syncTransferWindowFieldsFromMinutes();
     catalogAutoShare.value =
       map.get("hive_catalog_auto_share") === true || map.get("hive_catalog_auto_share") === "true";
     if (hiveOn.value) {
@@ -87,6 +155,7 @@ async function saveCore() {
   note.value = "";
   error.value = "";
   try {
+    applyTransferWindowTimesToMinutes();
     await patchSettings({
       values: {
         hive_enabled: hiveOn.value,
@@ -363,17 +432,42 @@ async function confirmReset() {
             <span class="label">Débit réception (o/s)</span>
             <input v-model.number="transferRecv" type="number" min="0" class="input" />
           </label>
-          <label class="hive-field">
-            <span class="label">Fenêtre début (minutes)</span>
-            <input v-model.number="transferWinStart" type="number" min="0" class="input" />
-          </label>
-          <label class="hive-field">
-            <span class="label">Fenêtre fin (minutes)</span>
-            <input v-model.number="transferWinEnd" type="number" min="1" class="input" />
-          </label>
+          <fieldset class="hive-field hive-transfer-window" data-testid="hive-transfer-window">
+            <legend class="label">Fenêtre horaire de transfert</legend>
+            <label class="row sp">
+              <span>Toute la journée</span>
+              <input v-model="transferWinAllDay" type="checkbox" data-testid="hive-transfer-all-day" />
+            </label>
+            <div class="hive-transfer-times">
+              <label>
+                <span class="label">De</span>
+                <input
+                  :value="transferWinStartTime"
+                  type="time"
+                  class="input"
+                  step="60"
+                  :disabled="transferWinAllDay"
+                  data-testid="hive-transfer-start"
+                  @input="onTransferStartTimeInput"
+                />
+              </label>
+              <label>
+                <span class="label">À</span>
+                <input
+                  :value="transferWinEndTime"
+                  type="time"
+                  class="input"
+                  step="60"
+                  :disabled="transferWinAllDay"
+                  data-testid="hive-transfer-end"
+                  @input="onTransferEndTimeInput"
+                />
+              </label>
+            </div>
+          </fieldset>
           <p class="hint">
-            Heures en minutes depuis minuit, évaluées dans le fuseau local de l’instance (variable TZ du
-            conteneur, par défaut Europe/Paris).
+            Fuseau local de l’instance (<code>TZ</code> du conteneur, par défaut Europe/Paris). Une plage peut
+            passer minuit (ex. 22:00 → 06:00).
           </p>
         </div>
         <button type="button" class="btn primary" @click="saveCore">Enregistrer les réglages Hive</button>
@@ -446,6 +540,22 @@ async function confirmReset() {
   display: grid;
   gap: 0.35rem;
   margin: 0;
+}
+
+.hive-transfer-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.hive-transfer-window {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.hive-transfer-window legend {
+  margin-bottom: 0.35rem;
 }
 
 .hive-field .label {

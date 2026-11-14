@@ -1376,6 +1376,17 @@ const ficheReglagesSummary = computed(() => {
   return parts.join(" · ");
 });
 
+const pollVerifLine = computed(() => {
+  const row = media.value;
+  if (!row) {
+    return { last: "—", next: "—" };
+  }
+  return {
+    last: formatParis(row.poll.last_check_at) || "—",
+    next: formatParis(row.poll.next_check_at) || "—",
+  };
+});
+
 const suiviSummaryLine = computed(() => {
   const row = media.value;
   if (!row) {
@@ -1428,7 +1439,11 @@ function episodeStatusIconName(episodeRow: Episode): string {
 </script>
 
 <template>
-  <section v-if="media" class="stack fiche-page fiche-page--a">
+  <section
+    v-if="media"
+    class="stack fiche-page fiche-page--a"
+    :class="{ 'fiche-page--series': media.type === 'series' }"
+  >
     <article class="hero panel fiche-hero fiche-hero--a">
       <div
         v-if="heroBackdropStyle"
@@ -1464,23 +1479,11 @@ function episodeStatusIconName(episodeRow: Episode): string {
               <StatusIcon :name="fileStatusIcon(media.file_status)" label="Fichier" /> Fichier présent
             </span>
           </p>
-          <p v-if="media.tmdb_url || media.jellyfin_web_url" class="links fiche-ext-links fiche-hero-links">
-            <a
-              v-if="media.tmdb_url"
-              class="fiche-ext-link"
-              :href="media.tmdb_url"
-              target="_blank"
-              rel="noopener noreferrer"
-            >TMDB</a>
-            <a
-              v-if="media.jellyfin_web_url"
-              class="fiche-ext-link"
-              :href="media.jellyfin_web_url"
-              target="_blank"
-              rel="noopener noreferrer"
-            >Lire sur Jellyfin</a>
-          </p>
-          <p v-if="media.type === 'series'" class="progress fiche-progress">
+          <p
+            v-if="media.type === 'series'"
+            class="progress fiche-progress fiche-series-hero-progress"
+            aria-label="Progression du visionnage"
+          >
             <span>{{ media.progress.watched }} vu sur {{ media.progress.total }}</span>
             <span class="bar fiche-progress-bar" aria-hidden="true"><i :style="{ width: `${progressPercent}%` }" /></span>
             <span v-if="media.next_episode" class="hint">
@@ -1489,21 +1492,70 @@ function episodeStatusIconName(episodeRow: Episode): string {
               <template v-if="media.next_episode.air_date">, le {{ formatDate(media.next_episode.air_date) }}</template>
             </span>
           </p>
+          <p v-if="media.type === 'series' && media.overview" class="overview fiche-overview hint fiche-series-overview">
+            {{ media.overview }}
+          </p>
         </div>
       </div>
       <div class="fiche-hero-stream">
-        <HiveSeriesShareSummary
-          v-if="hiveEnabled && media.type === 'series'"
-          :hive-enabled="hiveEnabled"
-          :episode-states="hiveEpisodeShares"
-          :media-id="media.id"
-          @changed="onHiveShareMenuChanged"
-          @open-empreintes="hiveEmpreintesSignal += 1"
-        />
-        <p v-if="media.overview" class="overview fiche-overview hint">{{ media.overview }}</p>
+        <p v-if="media.type !== 'series' && media.overview" class="overview fiche-overview hint">{{ media.overview }}</p>
+        <template v-if="media.type !== 'series'">
+          <FicheStateActions
+            section="actions"
+            compact
+            :media-type="media.type"
+            :tmdb-url="media.tmdb_url"
+            :jellyfin-web-url="media.jellyfin_web_url"
+            :followed="media.followed"
+            :on-hold="media.on_hold"
+            :auto-download="media.auto_download"
+            :poll="media.poll"
+            :progress-watched="media.progress.watched"
+            :progress-total="media.progress.total"
+            :available-not-downloaded="media.available_not_downloaded"
+            :next-episode="media.next_episode"
+            :file-status="media.file_status || 'absent'"
+            :film-file-absent="filmFileAbsent"
+            :film-obtained="filmObtained"
+            :film-not-yet-available="Boolean(media.film_not_yet_available)"
+            :film-status-line="media.film_status_line"
+            :checking="checking"
+            :primary-trash-entry-id="filmTrashEntryId"
+            :series-watch-menu="false"
+            @check="checkNow"
+            @pause="setPause"
+            @auto="setAuto"
+            @restore="restoreFilm"
+            @redownload="redownloadFilm"
+            @unfollow="unfollow"
+            @follow-again="followAgain"
+            @watch="markWatched"
+          />
+        </template>
+      </div>
+    </article>
+
+    <div v-if="media.type === 'series'" class="fiche-series-layout stack">
+      <article class="panel fiche-suivi-card fiche-layout-b" aria-label="Suivi">
+        <header class="fiche-suivi-card-head">
+          <StatusIcon name="clock" label="Suivi" />
+          <strong>Suivi</strong>
+        </header>
+        <p class="progress fiche-progress" aria-label="Progression du visionnage">
+          <span>{{ media.progress.watched }} vu sur {{ media.progress.total }}</span>
+          <span class="bar fiche-progress-bar" aria-hidden="true"><i :style="{ width: `${progressPercent}%` }" /></span>
+          <span v-if="media.next_episode" class="hint">
+            Prochain :
+            {{ slot(media.next_episode.season, media.next_episode.episode) }}
+            <template v-if="media.next_episode.air_date">, le {{ formatDate(media.next_episode.air_date) }}</template>
+          </span>
+        </p>
         <FicheStateActions
           section="actions"
+          compact
           :media-type="media.type"
+          :tmdb-url="media.tmdb_url"
+          :jellyfin-web-url="media.jellyfin_web_url"
           :followed="media.followed"
           :on-hold="media.on_hold"
           :auto-download="media.auto_download"
@@ -1519,7 +1571,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
           :film-status-line="media.film_status_line"
           :checking="checking"
           :primary-trash-entry-id="filmTrashEntryId"
-          :series-watch-menu="media.type === 'series'"
+          :series-watch-menu="true"
           @check="checkNow"
           @pause="setPause"
           @auto="setAuto"
@@ -1529,7 +1581,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
           @follow-again="followAgain"
           @watch="markWatched"
         />
-        <div v-if="media.type === 'series'" class="hero-toggles fiche-hero-toggles">
+        <div class="hero-toggles fiche-hero-toggles">
           <label class="toggle switch-line">
             <span>Garder la série</span>
             <span class="switch">
@@ -1545,11 +1597,149 @@ function episodeStatusIconName(episodeRow: Episode): string {
             </span>
           </label>
         </div>
+        <div class="fiche-verif-line">
+          <span class="hint">
+            Vérifié {{ pollVerifLine.last }}<br />
+            Prochaine {{ pollVerifLine.next }}
+          </span>
+          <button type="button" class="link-button" @click="suiviOpen = !suiviOpen">Détails ▾</button>
+        </div>
+        <details v-if="suiviOpen" class="fiche-suivi-inline-details" open>
+          <summary class="visually-hidden">État détaillé du suivi</summary>
+          <FicheStateActions
+            section="etat"
+            :media-type="media.type"
+            :followed="media.followed"
+            :on-hold="media.on_hold"
+            :auto-download="media.auto_download"
+            :poll="media.poll"
+            :progress-watched="media.progress.watched"
+            :progress-total="media.progress.total"
+            :available-not-downloaded="media.available_not_downloaded"
+            :next-episode="media.next_episode"
+            :file-status="media.file_status || 'absent'"
+            :film-file-absent="filmFileAbsent"
+            :film-obtained="filmObtained"
+            :film-not-yet-available="Boolean(media.film_not_yet_available)"
+            :film-status-line="media.film_status_line"
+            :checking="checking"
+            :primary-trash-entry-id="filmTrashEntryId"
+            :series-watch-menu="false"
+          />
+        </details>
+      </article>
+
+      <HiveSeriesShareSummary
+        v-if="hiveEnabled"
+        class="fiche-layout-b"
+        layout="card"
+        :hive-enabled="hiveEnabled"
+        :episode-states="hiveEpisodeShares"
+        :media-id="media.id"
+        @changed="onHiveShareMenuChanged"
+        @open-empreintes="hiveEmpreintesSignal += 1"
+      />
+
+      <div class="fiche-series-desktop stack fiche-layout-a">
+        <div class="panel fiche-action-bar">
+          <FicheStateActions
+            section="actions"
+            compact
+            :media-type="media.type"
+            :tmdb-url="media.tmdb_url"
+            :jellyfin-web-url="media.jellyfin_web_url"
+            :followed="media.followed"
+            :on-hold="media.on_hold"
+            :auto-download="media.auto_download"
+            :poll="media.poll"
+            :progress-watched="media.progress.watched"
+            :progress-total="media.progress.total"
+            :available-not-downloaded="media.available_not_downloaded"
+            :next-episode="media.next_episode"
+            :file-status="media.file_status || 'absent'"
+            :film-file-absent="filmFileAbsent"
+            :film-obtained="filmObtained"
+            :film-not-yet-available="Boolean(media.film_not_yet_available)"
+            :film-status-line="media.film_status_line"
+            :checking="checking"
+            :primary-trash-entry-id="filmTrashEntryId"
+            :series-watch-menu="true"
+            @check="checkNow"
+            @pause="setPause"
+            @auto="setAuto"
+            @restore="restoreFilm"
+            @redownload="redownloadFilm"
+            @unfollow="unfollow"
+            @follow-again="followAgain"
+            @watch="markWatched"
+          />
+          <div class="hero-toggles fiche-hero-toggles">
+            <label class="toggle switch-line">
+              <span>Garder la série</span>
+              <span class="switch">
+                <input type="checkbox" :checked="media.keep" @change="setMediaKeep(checkedFrom($event))" />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </span>
+            </label>
+            <label v-if="media.followed" class="toggle switch-line">
+              <span>Téléchargement automatique</span>
+              <span class="switch">
+                <input type="checkbox" :checked="media.auto_download" @change="setAuto(checkedFrom($event))" />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <HiveSeriesShareSummary
+          v-if="hiveEnabled"
+          layout="card"
+          :hive-enabled="hiveEnabled"
+          :episode-states="hiveEpisodeShares"
+          :media-id="media.id"
+          @changed="onHiveShareMenuChanged"
+          @open-empreintes="hiveEmpreintesSignal += 1"
+        />
+        <div class="fiche-verif-line">
+          <span class="hint">
+            Vérifié {{ pollVerifLine.last }}<br />
+            Prochaine {{ pollVerifLine.next }}
+          </span>
+          <button type="button" class="link-button" @click="suiviOpen = !suiviOpen">Détails ▾</button>
+        </div>
+        <details v-if="suiviOpen" class="panel fiche-fold fiche-fold--suivi fiche-series-etat-panel" open>
+          <summary class="visually-hidden">État du suivi</summary>
+          <div class="fold-body">
+            <FicheStateActions
+              section="etat"
+              :media-type="media.type"
+              :followed="media.followed"
+              :on-hold="media.on_hold"
+              :auto-download="media.auto_download"
+              :poll="media.poll"
+              :progress-watched="media.progress.watched"
+              :progress-total="media.progress.total"
+              :available-not-downloaded="media.available_not_downloaded"
+              :next-episode="media.next_episode"
+              :file-status="media.file_status || 'absent'"
+              :film-file-absent="filmFileAbsent"
+              :film-obtained="filmObtained"
+              :film-not-yet-available="Boolean(media.film_not_yet_available)"
+              :film-status-line="media.film_status_line"
+              :checking="checking"
+              :primary-trash-entry-id="filmTrashEntryId"
+              :series-watch-menu="false"
+            />
+          </div>
+        </details>
       </div>
-    </article>
+    </div>
 
     <div class="fiche-status-row">
-    <details class="panel fiche-fold fiche-fold--suivi" :open="suiviOpen || undefined">
+    <details
+      v-if="media.type !== 'series'"
+      class="panel fiche-fold fiche-fold--suivi"
+      :open="suiviOpen || undefined"
+    >
       <summary class="fold-head">
         <StatusIcon name="clock" label="Suivi" />
         <span class="fold-title">
