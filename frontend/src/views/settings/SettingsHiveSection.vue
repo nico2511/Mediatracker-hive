@@ -371,6 +371,10 @@ async function confirmReset() {
             <span class="label">Fenêtre fin (minutes)</span>
             <input v-model.number="transferWinEnd" type="number" min="1" class="input" />
           </label>
+          <p class="hint">
+            Heures en minutes depuis minuit, évaluées dans le fuseau local de l’instance (variable TZ du
+            conteneur, par défaut Europe/Paris).
+          </p>
         </div>
         <button type="button" class="btn primary" @click="saveCore">Enregistrer les réglages Hive</button>
       </section>

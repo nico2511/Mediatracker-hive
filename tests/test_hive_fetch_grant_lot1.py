@@ -380,6 +380,7 @@ def test_grant_respects_transfer_window_closed(transfer_pair, monkeypatch):
     closed = NOW.replace(hour=3, minute=0)
     with TestClient(app_a) as ca, TestClient(app_b) as cb:
         rid = _setup_pair(app_a, app_b, ca, cb)
+        monkeypatch.setenv("TZ", "Europe/Paris")
         monkeypatch.setattr("mediatracker.api.hive_router._now", lambda: closed)
         min_video = catalog_min_logical_video_bytes()
         blob = b"R" * min_video
@@ -403,13 +404,49 @@ def test_grant_respects_transfer_window_closed(transfer_pair, monkeypatch):
             when=closed,
         )
         mint_resp = ca.post(path, headers=mint_headers)
+        assert mint_resp.status_code == 429, mint_resp.text
+
+
+def test_grant_get_denied_when_window_closes_after_mint(transfer_pair, monkeypatch):
+    from datetime import datetime, timezone
+
+    app_a, app_b = transfer_pair
+    open_at = datetime(2026, 1, 15, 23, 0, tzinfo=timezone.utc)
+    closed_at = datetime(2026, 1, 15, 23, 30, tzinfo=timezone.utc)
+    with TestClient(app_a) as ca, TestClient(app_b) as cb:
+        rid = _setup_pair(app_a, app_b, ca, cb)
+        monkeypatch.setenv("TZ", "Europe/Paris")
+        min_video = catalog_min_logical_video_bytes()
+        blob = b"W" * min_video
+        _, fid, _ = _seed_file_on_a(app_a, rid, blob)
+        db_a = app_a.state.session_factory()
+        try:
+            db_a.merge(Setting(key="hive_transfer_window_start", value="0"))
+            db_a.merge(Setting(key="hive_transfer_window_end", value="1"))
+            db_a.commit()
+        finally:
+            db_a.close()
+        path = _mint_path(rid, fid)
+        pk = load_private_key(app_b.state.settings)
+        monkeypatch.setattr("mediatracker.api.hive_router._now", lambda: open_at)
+        mint_headers = sign_request_headers(
+            private_key=pk,
+            method="POST",
+            path=path,
+            query="",
+            ruche_id=rid,
+            body=b"",
+            when=open_at,
+        )
+        mint_resp = ca.post(path, headers=mint_headers)
         assert mint_resp.status_code == 200, mint_resp.text
         grant = mint_resp.json()["grant"]
-        resp = ca.get(
+        monkeypatch.setattr("mediatracker.api.hive_router._now", lambda: closed_at)
+        get_resp = ca.get(
             _file_path(fid),
             headers=_grant_headers(rid, grant, extra={"Range": "bytes=0-99"}),
         )
-        assert resp.status_code == 429
+        assert get_resp.status_code == 429, get_resp.text
 
 
 def test_purge_expired_scoped_to_requester_on_mint(transfer_pair):

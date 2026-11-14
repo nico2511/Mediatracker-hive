@@ -3,6 +3,7 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import AllDebridAccountBlock from "../../components/AllDebridAccountBlock.vue";
+import PasswordFieldWithGenerator from "../../components/PasswordFieldWithGenerator.vue";
 import DatabaseBackupRestore from "../../components/DatabaseBackupRestore.vue";
 import DiskSpaceCard from "../../components/DiskSpaceCard.vue";
 import {api, ApiError, isNetworkError, isTransientHttpStatus, userFacingApiError} from "../../api";
@@ -1571,17 +1572,11 @@ async function saveProfileFallback() {
             required
           />
         </label>
-        <label>
-          <span>Nouveau mot de passe</span>
-          <input
-            v-model="accountNewPassword"
-            type="password"
-            autocomplete="new-password"
-            minlength="8"
-            required
-          />
-          <span class="hint">Huit caractères minimum.</span>
-        </label>
+        <PasswordFieldWithGenerator v-model="accountNewPassword" label="Nouveau mot de passe" />
+        <span class="hint">
+          Au moins 12 caractères, deux types (lettres, chiffres, symboles), sans suite évidente ni nom
+          d'utilisateur dedans.
+        </span>
         <p v-if="accountError" class="error">{{ accountError }}</p>
         <p v-if="accountMessage">{{ accountMessage }}</p>
         <button type="submit" :disabled="accountBusy">Changer le mot de passe</button>

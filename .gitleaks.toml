@@ -13,4 +13,5 @@ regexes = [
   '''test-secret-key-0123456789''',
   '''test-admin-password''',
   '''nas-secret-key-0123456789''',
+  '''Nouveau-Mot-Passe9''',
 ]

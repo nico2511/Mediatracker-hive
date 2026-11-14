@@ -1,4 +1,4 @@
-> Instantané public de MediaTracker, commit source a9feff7. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
+> Instantané public de MediaTracker, commit source 5b8eb87. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
 
 # MediaTracker
 
@@ -85,7 +85,7 @@ Les données restent dans les volumes `/config` et `/data`. Les migrations de ba
 
 ### Watchtower (automatique)
 
-MediaTracker peut demander à [Watchtower](https://containrrr.dev/watchtower/) de mettre à jour son image via l’API HTTP (Réglages → Mise à jour → **Mettre à jour maintenant**). MediaTracker **ne monte jamais** `docker.sock` : seul Watchtower y accède.
+MediaTracker peut demander à [Watchtower](https://watchtower.nickfedor.com/) de mettre à jour son image via l’API HTTP (Réglages → Mise à jour → **Mettre à jour maintenant**). MediaTracker **ne monte jamais** `docker.sock` : seul Watchtower y accède.
 
 Un service Watchtower commenté figure dans `docker-compose.yml`. Copiez `WATCHTOWER_HTTP_API_TOKEN` dans Réglages → Jetons d’API → Watchtower, avec l’URL `http://watchtower:8080` sur le réseau du compose.
 

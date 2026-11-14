@@ -37,7 +37,7 @@ from mediatracker.hive.peer_rate_limit import PeerRateLimited
 from mediatracker.hive.transfer_bandwidth import TransferBandwidthDenied
 from mediatracker.hive.transfer_parallel import TransferParallelGate
 from mediatracker.hive.transfer_policy import TransferQuotaExceeded, TransferWindowClosed
-from mediatracker.hive.transfer_settings import transfer_parallel_limit
+from mediatracker.hive.transfer_settings import in_transfer_window, transfer_parallel_limit
 
 _MAX_PEER_BODY = 1_000_000
 
@@ -401,6 +401,9 @@ def mount_hive_router(app) -> None:
                 now=now,
             )
             _enforce_peer_rate(request, ctx.hive_id)
+            if not in_transfer_window(session, now):
+                session.rollback()
+                return _peer_429()
             try:
                 minted = mint_fetch_grant(
                     session,

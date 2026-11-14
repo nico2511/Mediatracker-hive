@@ -17,7 +17,7 @@ def test_password_change_invalidates_other_sessions(client, app):
 
     changed = client.post(
         "/api/v1/auth/password",
-        json={"current_password": "test-admin-password", "new_password": "nouveau-mot-de-passe"},
+        json={"current_password": "test-admin-password", "new_password": "Nouveau-Mot-Passe9"},
         headers=csrf(client),
     )
     assert changed.status_code == 204
@@ -25,7 +25,7 @@ def test_password_change_invalidates_other_sessions(client, app):
     assert client.get("/api/v1/auth/me").status_code == 200
     assert other.get("/api/v1/auth/me").status_code == 401
 
-    login(client, password="nouveau-mot-de-passe")
+    login(client, password="Nouveau-Mot-Passe9")
     other.close()
 
 

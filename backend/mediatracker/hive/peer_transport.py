@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from starlette.testclient import TestClient
 
 from mediatracker.hive.peer_outbound import enforce_hive_peer_request_url
 from mediatracker.security.ssrf import httpx_request_event_hooks
@@ -48,6 +47,8 @@ def peer_request(
 ) -> httpx.Response:
     resolved = _resolve_test_app(base_url)
     if resolved is not None:
+        from starlette.testclient import TestClient
+
         client = TestClient(resolved, base_url=base_url.rstrip("/"))
         raw = client.request(method.upper(), url_path, content=body, headers=headers)
         return httpx.Response(

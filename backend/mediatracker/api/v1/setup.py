@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 from mediatracker.api.cookies import set_csrf_cookie, set_session_cookie
 from mediatracker.api.deps import client_ip, get_db, require_scope
 from mediatracker.api.errors import Problem
-from mediatracker.bootstrap import MIN_ADMIN_PASSWORD
 from mediatracker.db.models import Setting, User
 from mediatracker.integrations.tmdb import TmdbClient, TmdbError
 from mediatracker.library.scanner import ScanReport, force_scan
 from mediatracker.providers.debrid.alldebrid import AllDebridConfig, AllDebridProvider
 from mediatracker.providers.sources.wawacity import WawacityConfig, WawacitySource
 from mediatracker.security.crypto import decrypt_secret
+from mediatracker.security.password_policy import validate_new_password
 from mediatracker.security.passwords import hash_password
 from mediatracker.security.setup_bootstrap import prepare_setup_bootstrap_token, token_matches
 from mediatracker.security.ssrf import OutboundUrlRejected, settings_rejection_message, validate_outbound_url_static
@@ -37,7 +37,7 @@ class SetupStatus(BaseModel):
 
 class AccountIn(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=8, max_length=200)
+    password: str = Field(min_length=1, max_length=200)
     setup_token: str = ""
 
 
@@ -123,8 +123,7 @@ def create_account(
             "Jeton d'installation incorrect ou manquant. Consultez les journaux du conteneur ou SETUP_TOKEN.",
         )
     limiter.reset(limit_key)
-    if len(body.password) < MIN_ADMIN_PASSWORD:
-        raise Problem(422, "Requête invalide", "Le mot de passe doit faire au moins 8 caractères.")
+    validate_new_password(body.password, username=body.username.strip())
     user = User(
         username=body.username.strip(),
         password_hash=hash_password(body.password),

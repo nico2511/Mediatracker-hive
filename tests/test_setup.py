@@ -45,6 +45,11 @@ def test_wizard_creates_the_account_and_scans(tmp_path):
         assert status.json() == {"needs_password": True, "completed": False}
         token = application.state.setup_bootstrap_token
         assert token
+        weak = client.post(
+            "/api/v1/setup/account",
+            json={"username": "nico", "password": "123456789012", "setup_token": token},
+        )
+        assert weak.status_code == 422
         created = client.post(
             "/api/v1/setup/account",
             json={"username": "nico", "password": "mot-de-passe", "setup_token": token},

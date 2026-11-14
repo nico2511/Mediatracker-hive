@@ -30,9 +30,10 @@ services:
       - /chemin/vers/medias:/data                  # films, séries, téléchargements
 
   # watchtower:
-  #   image: containrrr/watchtower
+  #   image: nickfedor/watchtower:latest
   #   container_name: watchtower
   #   restart: unless-stopped
+  #   command: mediatracker   # ne surveille que ce conteneur
   #   volumes:
   #     - /var/run/docker.sock:/var/run/docker.sock
   #     # - /root/.docker/config.json:/config.json:ro   # si l'image GHCR est privée

@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 
 import {api, userFacingApiError} from "../api";
 import CollapsibleSection from "../components/CollapsibleSection.vue";
+import PasswordFieldWithGenerator from "../components/PasswordFieldWithGenerator.vue";
 import { fetchSettings, patchSettings } from "../settings";
 import { clearSession, noteSetupCompleted } from "../session";
 
@@ -385,15 +386,16 @@ async function run(action: () => Promise<void>) {
     <p v-if="notice && !error" class="hint">{{ notice }}</p>
 
     <form v-if="step === 0" class="panel stack" @submit.prevent="run(createAccount)">
-      <p class="hint">Choisissez le mot de passe du compte unique. Huit caractères minimum.</p>
+      <p class="hint">
+        Choisissez le mot de passe du compte unique : au moins 12 caractères, deux types de caractères
+        (lettres, chiffres, symboles), sans suite évidente ni mot de passe trop courant, et sans le nom
+        d'utilisateur.
+      </p>
       <label>
         <span>Nom d'utilisateur</span>
         <input v-model="username" autocomplete="username" required />
       </label>
-      <label>
-        <span>Mot de passe</span>
-        <input v-model="password" type="password" autocomplete="new-password" minlength="8" required />
-      </label>
+      <PasswordFieldWithGenerator v-model="password" label="Mot de passe" autocomplete="new-password" />
       <label>
         <span>Jeton d'installation</span>
         <input v-model="setupToken" type="password" autocomplete="off" required />

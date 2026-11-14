@@ -8,9 +8,12 @@ networks:
 
 services:
   watchtower:
-    image: containrrr/watchtower:latest
+    image: nickfedor/watchtower:latest
     container_name: watchtower
     restart: unless-stopped
+    command: mediatracker   # nom du conteneur à surveiller (les autres sont ignorés)
+    # Variante par label : command: --label-enable --interval 3600
+    # et, dans le compose de MediaTracker : labels: { com.centurylinklabs.watchtower.enable: "true" }
     networks:
       - mediatracker_net
     ports:
@@ -26,7 +29,6 @@ services:
       WATCHTOWER_HTTP_API_PERIODIC_POLLS: "true"
       WATCHTOWER_POLL_INTERVAL: "3600"
       WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_CONTAINER_NAMES: mediatracker
 
 # Créez le réseau partagé une fois :
 #   docker network create mediatracker_net

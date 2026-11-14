@@ -7,12 +7,11 @@ from mediatracker.api.cookies import clear_auth_cookies, set_csrf_cookie, set_se
 from mediatracker.api.deps import Principal, client_ip, get_db, get_principal
 from mediatracker.api.errors import Problem
 from mediatracker.db.models import User
+from mediatracker.security.password_policy import validate_new_password
 from mediatracker.security.passwords import hash_password, verify_dummy, verify_password
 from mediatracker.security.session_epoch import bump_session_epoch
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-MIN_PASSWORD_LEN = 8
 
 
 class LoginIn(BaseModel):
@@ -27,7 +26,7 @@ class UserOut(BaseModel):
 
 class PasswordChangeIn(BaseModel):
     current_password: str = Field(min_length=1, max_length=200)
-    new_password: str = Field(min_length=MIN_PASSWORD_LEN, max_length=200)
+    new_password: str = Field(min_length=1, max_length=200)
 
 
 @router.post("/login", response_model=UserOut)
@@ -93,6 +92,7 @@ def change_password(
         raise Problem(401, "Identifiants refusés", "Mot de passe actuel incorrect.")
     if body.current_password == body.new_password:
         raise Problem(422, "Requête invalide", "Le nouveau mot de passe doit être différent.")
+    validate_new_password(body.new_password, username=user.username)
     user.password_hash = hash_password(body.new_password)
     bump_session_epoch(db, user)
     _refresh_session_state(request, user)

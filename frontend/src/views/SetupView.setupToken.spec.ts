@@ -36,6 +36,12 @@ beforeEach(() => {
 });
 
 describe("SetupView — aide jeton d'installation (étape mot de passe)", () => {
+  it("affiche les règles de mot de passe", async () => {
+    const w = await mountSetupStep0();
+    expect(w.text()).toContain("au moins 12 caractères");
+    w.unmount();
+  });
+
   it("affiche le texte obligatoire sous le champ", async () => {
     const w = await mountSetupStep0();
     const help = w.get("[data-testid='setup-token-help']");

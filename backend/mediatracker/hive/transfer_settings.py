@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,7 @@ DEFAULT_PARALLEL = 2
 DEFAULT_WEEKLY_QUOTA = 100 * 1024 * 1024 * 1024
 DEFAULT_SEND_BPS = 0
 DEFAULT_RECV_BPS = 0
+DEFAULT_LOCAL_TZ = "Europe/Paris"
 
 
 def _read_int(db: Session, key: str, default: int) -> int:
@@ -44,21 +47,40 @@ def transfer_recv_bps(db: Session) -> int:
     return max(0, _read_int(db, "hive_transfer_recv_bps", DEFAULT_RECV_BPS))
 
 
+def hive_instance_timezone() -> ZoneInfo:
+    """Fuseau de l'instance (variable d'environnement TZ, défaut Europe/Paris)."""
+    name = (os.environ.get("TZ") or DEFAULT_LOCAL_TZ).strip() or DEFAULT_LOCAL_TZ
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo(DEFAULT_LOCAL_TZ)
+
+
 def window_bounds_minutes(db: Session) -> tuple[int, int]:
     start = _read_int(db, "hive_transfer_window_start", 0)
     end = _read_int(db, "hive_transfer_window_end", 24 * 60)
     start = max(0, min(start, 24 * 60 - 1))
     end = max(1, min(end, 24 * 60))
-    if end <= start:
-        end = 24 * 60
     return start, end
 
 
-def in_transfer_window(db: Session, now: datetime) -> bool:
+def _minutes_since_midnight_local(now: datetime) -> int:
     moment = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
-    minutes = moment.hour * 60 + moment.minute
+    local = moment.astimezone(hive_instance_timezone())
+    return local.hour * 60 + local.minute
+
+
+def in_transfer_window(db: Session, now: datetime) -> bool:
+    """Créneau quotidien en heure locale du conteneur (TZ). Début == fin → toujours ouvert."""
     start, end = window_bounds_minutes(db)
-    return start <= minutes < end
+    if start == end:
+        return True
+    minutes = _minutes_since_midnight_local(now)
+    if end > start:
+        return start <= minutes < end
+    if end < start:
+        return minutes >= start or minutes < end
+    return False
 
 
 def week_start_date(now: datetime) -> date:
