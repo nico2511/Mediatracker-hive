@@ -1,0 +1,15 @@
+archives
+.git
+.venv
+.env
+mediatracker.env
+frontend/node_modules
+frontend/dist
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/*.db
+**/*.db-shm
+**/*.db-wal
+tests
+.openapi.db

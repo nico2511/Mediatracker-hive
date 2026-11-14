@@ -1,0 +1,36 @@
+#!/command/with-contenv sh
+# aria2 n'écoute qu'en IPv4 sur 127.0.0.1. Sans disable-ipv6, le conteneur
+# logue « IPv6 RPC: failed to bind TCP port 6800 … Name or service not known ».
+# Le secret est dans le fichier de conf,
+# pas sur la ligne de commande. À l'arrêt (SIGTERM), la session est écrite
+# et rechargée au démarrage suivant (--input-file).
+set -eu
+umask "${UMASK:-022}"
+user_name="$(cat /run/mediatracker/user)"
+secret="$(cat /config/aria2.secret)"
+downloads="${DOWNLOADS_DIR:-/data/downloads}"
+umask 077
+cat > /config/aria2.conf <<EOF
+enable-rpc=true
+disable-ipv6=true
+rpc-listen-all=false
+rpc-listen-port=6800
+rpc-secret=${secret}
+dir=${downloads}/incomplete
+save-session=/config/aria2.session
+input-file=/config/aria2.session
+save-session-interval=30
+force-save=false
+save-not-found=false
+auto-file-renaming=false
+max-tries=5
+file-allocation=none
+continue=true
+enable-color=false
+console-log-level=warn
+max-concurrent-downloads=2
+EOF
+chown "$user_name" /config/aria2.conf
+chmod 600 /config/aria2.conf
+umask "${UMASK:-022}"
+exec s6-setuidgid "$user_name" aria2c --conf-path=/config/aria2.conf

@@ -1,0 +1,46 @@
+# MediaTracker : suit tes films et séries, les télécharge et les range pour Jellyfin.
+#
+# Démarrage : 1) remplace les valeurs REMPLACER  2) docker compose up -d
+#             3) ouvre http://<ip-du-nas>:8080 : l'assistant demande le reste
+#                (mot de passe admin, clés TMDB / AllDebrid, clé Jellyfin).
+#
+# Tout ce qui est sous /medias doit être sur le même disque :
+# le rangement d'un fichier téléchargé est alors instantané.
+
+services:
+  mediatracker:
+    image: ghcr.io/nico2511/mediatracker-hive:latest
+    container_name: mediatracker
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Paris
+      PUID: "1000"            # ton utilisateur (commande : id -u)
+      PGID: "100"             # son groupe (commande : id -g)
+      SECRET_KEY: REMPLACER   # une longue phrase au hasard, à garder secrète
+      MOVIES_DIR: /data/Films
+      SERIES_DIR: /data/Séries
+      DOWNLOADS_DIR: /data/.mediatracker/downloads
+      TRASH_DIR: /data/.mediatracker/trash
+      # --- Accès depuis Internet derrière un proxy HTTPS (facultatif) ---
+      # PUBLIC_URL: https://mediatracker.example.com
+    volumes:
+      - /chemin/vers/mediatracker/config:/config   # base et réglages
+      - /chemin/vers/medias:/data                  # films, séries, téléchargements
+
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     # - /root/.docker/config.json:/config.json:ro   # si l'image GHCR est privée
+  #   environment:
+  #     TZ: Europe/Paris
+  #     WATCHTOWER_HTTP_API_UPDATE: "true"
+  #     WATCHTOWER_HTTP_API_TOKEN: REMPLACER          # à recopier dans Réglages > Jetons d'API > Watchtower
+  #     WATCHTOWER_HTTP_API_PERIODIC_POLLS: "true"    # garde la vérification horaire
+  #     WATCHTOWER_POLL_INTERVAL: "3600"
+  #     WATCHTOWER_CLEANUP: "true"
+  #   # pas de "ports:" : MediaTracker appelle http://watchtower:8080 sur le réseau du compose

@@ -1,0 +1,29 @@
+# MediaTracker
+> Documentation utilisateur assemblée pour assistants IA (installation, réglages, intégrations).
+
+## Sections
+- docs/installation.md — Installation — Ce guide décrit l’installation de MediaTracker avec Docker et Docker Compose sur un NAS ou un serveur Linux.
+- docs/premier-demarrage.md — Premier démarrage — Route : /configuration (accessible sans session tant qu’aucun compte n’existe, ou pour terminer l’assistant).
+- docs/telechargements.md — Chaîne de téléchargement — 1. Un scan ou une action manuelle interroge les sources dans l’ordre défini (downloadsourceorder).
+- docs/reglages/README.md — Réglages — Dans l’application : Réglages → choisir une section, ou URL directe http://<hôte>:8080/reglages/<slug>.
+- docs/reglages/compte.md — Compte — URL : /reglages/compte
+- docs/reglages/qualite.md — Profils de qualité — URL : /reglages/qualite
+- docs/reglages/sources.md — Sources — URL : /reglages/sources
+- docs/reglages/scan.md — Réglages de scan — URL : /reglages/scan
+- docs/reglages/jellyfin.md — Jellyfin — URL : /reglages/jellyfin
+- docs/reglages/notifications.md — Notifications — URL : /reglages/notifications
+- docs/reglages/nettoyage.md — Nettoyage — URL : /reglages/nettoyage
+- docs/reglages/alldebrid.md — AllDebrid — URL : /reglages/alldebrid
+- docs/reglages/disque.md — Disque et sauvegardes — URL : /reglages/disque
+- docs/reglages/hive.md — Hive — URL : /reglages/hive
+- docs/reglages/application.md — Application — URL : /reglages/application
+- docs/reglages/maj.md — Mise à jour et redémarrage — URL : /reglages/maj
+- docs/reglages/jetons.md — Jetons d'API — URL : /reglages/jetons
+- docs/reglages/reset.md — Réinitialiser la base — URL : /reglages/reset
+- docs/tmdb.md — TMDB — MediaTracker appelle l’API TMDB v4 avec un jeton de lecture (tmdbreadtoken) :
+- docs/jellyfin.md — Jellyfin — Exemple avec l’image linuxserver : /data/movies=/data/Films;/data/tvshows=/data/Séries.
+- docs/hive.md — Hive — 1. Activer l’interrupteur Hive (désactivé par défaut).
+- docs/home-assistant.md — Home Assistant — MediaTracker peut être piloté depuis Home Assistant via un jeton d’API et le package YAML fourni dans le dépôt.
+- docs/mises-a-jour.md — Mises à jour — Les données dans /config et /data sont conservées ; les migrations SQLite s’exécutent au démarrage.
+- docs/sauvegarde.md — Sauvegarde et restauration — Gardez la même SECRETKEY si vous restaurez une sauvegarde ou copiez /config : sinon les secrets chiffrés en base (clés API, jetons) deviennent illisibles.
+- docs/depannage-faq.md — Dépannage et FAQ — Vérifiez :

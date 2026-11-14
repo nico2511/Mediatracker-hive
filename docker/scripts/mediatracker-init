@@ -1,0 +1,7 @@
+#!/command/with-contenv sh
+# Appelé par le oneshot s6 « init ». Le fichier up est de l'execline :
+# il ne fait qu'exécuter ce script.
+set -eu
+user_name="$(cat /run/mediatracker/user)"
+cd /app
+exec s6-setuidgid "$user_name" /usr/local/bin/python -m mediatracker.bootstrap

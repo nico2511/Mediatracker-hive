@@ -1,0 +1,41 @@
+#!/command/with-contenv sh
+# Prépare /config et les dossiers de travail sur /data.
+# Films et Séries existent déjà : on ne les recrée pas (NFC et NFD seraient
+# deux dossiers). DOWNLOADS_DIR et TRASH_DIR sont créés s'ils manquent,
+# puis attribués à PUID:PGID. Jamais de chown -R sur la bibliothèque.
+set -eu
+umask "${UMASK:-022}"
+
+PUID="${PUID:-1000}"
+PGID="${PGID:-100}"
+DOWNLOADS_DIR="${DOWNLOADS_DIR:-/data/downloads}"
+TRASH_DIR="${TRASH_DIR:-/data/.trash}"
+
+mkdir -p \
+  /config/logs \
+  /config/backups \
+  "$DOWNLOADS_DIR/incomplete" \
+  "$TRASH_DIR" \
+  /run/mediatracker
+
+if ! getent group "$PGID" >/dev/null 2>&1; then
+  groupadd -g "$PGID" mediatracker
+fi
+if ! getent passwd "$PUID" >/dev/null 2>&1; then
+  useradd -u "$PUID" -g "$PGID" -M -d /config -s /usr/sbin/nologin mediatracker
+fi
+user_name="$(getent passwd "$PUID" | cut -d: -f1)"
+printf '%s\n' "$user_name" > /run/mediatracker/user
+
+chown "$PUID:$PGID" \
+  /config /config/logs /config/backups \
+  "$DOWNLOADS_DIR" "$DOWNLOADS_DIR/incomplete" \
+  "$TRASH_DIR"
+for parent in "$(dirname "$DOWNLOADS_DIR")" "$(dirname "$TRASH_DIR")"; do
+  if [ "$parent" != "/" ]; then
+    chown "$PUID:$PGID" "$parent"
+  fi
+done
+touch /config/aria2.session
+chown "$PUID:$PGID" /config/aria2.session
+chmod 600 /config/aria2.session

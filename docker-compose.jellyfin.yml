@@ -1,0 +1,47 @@
+# MediaTracker : suit tes films et séries, les télécharge et les range pour Jellyfin.
+#
+# Démarrage : 1) remplace les valeurs REMPLACER  2) docker compose -f docker-compose.jellyfin.yml up -d
+#             3) ouvre http://<ip-du-nas>:8080 : l'assistant demande le reste
+#                (mot de passe admin, clés TMDB / AllDebrid, clé Jellyfin).
+#
+# Tout ce qui est sous /medias doit être sur le même disque :
+# le rangement d'un fichier téléchargé est alors instantané.
+
+services:
+  mediatracker:
+    image: ghcr.io/nico2511/mediatracker-hive:latest
+    container_name: mediatracker
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Paris
+      PUID: "1000"            # ton utilisateur (commande : id -u)
+      PGID: "100"             # son groupe (commande : id -g)
+      SECRET_KEY: REMPLACER   # une longue phrase au hasard, à garder secrète
+      MOVIES_DIR: /data/Films
+      SERIES_DIR: /data/Séries
+      DOWNLOADS_DIR: /data/.mediatracker/downloads
+      TRASH_DIR: /data/.mediatracker/trash
+      JELLYFIN_URL: http://jellyfin:8096
+      JELLYFIN_PATH_MAP: /data/movies=/data/Films;/data/tvshows=/data/Séries
+      # --- Accès depuis Internet derrière un proxy HTTPS (facultatif) ---
+      # PUBLIC_URL: https://mediatracker.example.com
+    volumes:
+      - /chemin/vers/mediatracker/config:/config   # base et réglages
+      - /chemin/vers/medias:/data                  # films, séries, téléchargements
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    environment:
+      TZ: Europe/Paris
+      PUID: "1000"
+      PGID: "100"
+    volumes:
+      - /chemin/vers/jellyfin/config:/config
+      - /chemin/vers/medias/Films:/data/movies
+      - /chemin/vers/medias/Séries:/data/tvshows

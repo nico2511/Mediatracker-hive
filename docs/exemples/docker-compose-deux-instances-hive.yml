@@ -1,0 +1,46 @@
+# Deux instances MediaTracker pour Hive (identités et volumes séparés)
+# Chaque instance doit avoir une adresse publique distincte (reverse proxy conseillé).
+
+services:
+  mediatracker-a:
+    image: ghcr.io/nico2511/mediatracker-hive:latest
+    container_name: mediatracker-a
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      TZ: Europe/Paris
+      PUID: "1000"
+      PGID: "100"
+      SECRET_KEY: changeme-secret-instance-a
+      PUBLIC_URL: https://mtr-a.example.com
+      MOVIES_DIR: /data/Films
+      SERIES_DIR: /data/Series
+      DOWNLOADS_DIR: /data/downloads
+      TRASH_DIR: /data/.trash
+    volumes:
+      - /chemin/instances/a/config:/config
+      - /chemin/instances/a/data:/data
+
+  mediatracker-b:
+    image: ghcr.io/nico2511/mediatracker-hive:latest
+    container_name: mediatracker-b
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      TZ: Europe/Paris
+      PUID: "1000"
+      PGID: "100"
+      SECRET_KEY: changeme-secret-instance-b
+      PUBLIC_URL: https://mtr-b.example.com
+      MOVIES_DIR: /data/Films
+      SERIES_DIR: /data/Series
+      DOWNLOADS_DIR: /data/downloads
+      TRASH_DIR: /data/.trash
+    volumes:
+      - /chemin/instances/b/config:/config
+      - /chemin/instances/b/data:/data
+
+# Après démarrage : activer Hive sur chaque UI, renseigner hive_public_address,
+# créer une ruche sur A, inviter B via /hive/rejoindre

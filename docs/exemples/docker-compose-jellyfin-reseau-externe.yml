@@ -1,0 +1,35 @@
+# MediaTracker + Jellyfin sur un réseau Docker externe partagé (ex. stack Jellyfin déjà créé)
+
+networks:
+  medias:
+    external: true
+    name: medias
+
+services:
+  mediatracker:
+    image: ghcr.io/nico2511/mediatracker-hive:latest
+    container_name: mediatracker
+    restart: unless-stopped
+    networks:
+      - medias
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: Europe/Paris
+      PUID: "1000"
+      PGID: "100"
+      SECRET_KEY: changeme-generer-un-secret-long
+      MOVIES_DIR: /data/Films
+      SERIES_DIR: /data/Series
+      DOWNLOADS_DIR: /data/.mediatracker/downloads
+      TRASH_DIR: /data/.mediatracker/trash
+      JELLYFIN_URL: http://jellyfin:8096
+      JELLYFIN_PATH_MAP: /data/movies=/data/Films;/data/tvshows=/data/Series
+    volumes:
+      - /chemin/vers/mediatracker/config:/config
+      - /chemin/vers/medias:/data
+
+  # Jellyfin est supposé déjà attaché au réseau "medias" avec le nom de conteneur jellyfin
+  # et des montages cohérents, par ex. :
+  #   /chemin/vers/medias/Films  -> /data/movies
+  #   /chemin/vers/medias/Series -> /data/tvshows

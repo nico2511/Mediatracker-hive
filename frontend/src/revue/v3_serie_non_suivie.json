@@ -1,0 +1,86 @@
+{
+  "media": {
+    "id": 201,
+    "type": "series",
+    "title": "Serie-exemple",
+    "year": 2026,
+    "overview": null,
+    "poster_url": null,
+    "backdrop_url": null,
+    "tmdb_id": null,
+    "tmdb_url": null,
+    "series_status": "returning",
+    "followed": false,
+    "on_hold": false,
+    "auto_download": false,
+    "new_episode_policy": "propose",
+    "auto_status": "idle",
+    "pref_quality": "HD",
+    "pref_language": "VFF",
+    "allow_fallback": false,
+    "source_order": null,
+    "quality_profile_id": null,
+    "scan_interval_min": null,
+    "keep": false,
+    "auto_delete": false,
+    "auto_delete_days": null,
+    "poll": {
+      "allowed": false,
+      "reason": "policy_off",
+      "last_check_at": null,
+      "next_check_at": null,
+      "last_result": null,
+      "last_message": null,
+      "interval_min": 60
+    },
+    "next_episode": { "season": 1, "episode": 2, "title": "E2-exemple", "air_date": null },
+    "progress": { "watched": 1, "total": 12 },
+    "available_not_downloaded": 0,
+    "file_status": "present",
+    "on_disk": true,
+    "film_not_yet_available": false
+  },
+  "items": {
+    "seasons": [
+      {
+        "number": 1,
+        "name": "Saison 1",
+        "air_date": null,
+        "episode_count": 2,
+        "keep": false,
+        "file_status": "present",
+        "file_status_counts": { "present": 1, "trash": 0, "absent": 1, "downloading": 0 },
+        "episodes": [
+          {
+            "id": 2001,
+            "season": 1,
+            "episode": 1,
+            "state": "downloaded",
+            "title": "E1-exemple",
+            "air_date": null,
+            "downloaded": true,
+            "watched": true,
+            "source_available": false,
+            "download_active": false,
+            "keep": false,
+            "file_status": "present"
+          },
+          {
+            "id": 2002,
+            "season": 1,
+            "episode": 2,
+            "state": "missing",
+            "title": "E2-exemple",
+            "air_date": null,
+            "downloaded": false,
+            "watched": false,
+            "source_available": false,
+            "download_active": false,
+            "keep": false,
+            "file_status": "absent"
+          }
+        ]
+      }
+    ]
+  }
+}

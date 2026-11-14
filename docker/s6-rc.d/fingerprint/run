@@ -1,0 +1,7 @@
+#!/command/with-contenv sh
+set -eu
+umask "${UMASK:-022}"
+export S6_LOGGING=0
+user_name="$(cat /run/mediatracker/user)"
+cd /app
+exec s6-setuidgid "$user_name" /usr/local/bin/python -m mediatracker.hive.fingerprint_daemon

@@ -1,0 +1,99 @@
+# Chaîne de téléchargement
+
+## Vue d’ensemble
+
+```mermaid
+flowchart LR
+  subgraph sources [Sources]
+    W[Wawacity]
+    F[Free-Télécharger]
+    H[Hive]
+    C[Comet]
+    T[Torrentio]
+  end
+  subgraph mt [MediaTracker]
+    S[Sélection lien / profil]
+    A[AllDebrid unlock]
+    R[aria2 RPC interne]
+    P[Rangement bibliothèque]
+  end
+  sources --> S --> A --> R --> P
+```
+
+1. Un **scan** ou une action manuelle interroge les sources dans l’**ordre** défini (`download_source_order`).
+2. Le lien retenu respecte le **profil de qualité** de la fiche, la **préférence d’hébergeurs** et les hébergeurs refusés par l’application (`BLOCKED_SOURCE_HOSTERS` — non configurables).
+3. **AllDebrid** débloque le lien ; MediaTracker ne expose **pas** aria2 sur le réseau (RPC local + secret en `/config`).
+4. À la fin, le fichier est **déplacé** vers Films / Séries (structure façon Jellyfin), la bibliothèque est rescannée, Jellyfin peut être notifié.
+
+Page **Téléchargements** : file des jobs, progression aria2, actions d’annulation / relance selon l’état.
+
+## Sources disponibles
+
+Identifiants dans l’UI (**Réglages → Sources**) :
+
+| Id | Rôle |
+| --- | --- |
+| `wawacity` | Scraping HTML ; URL de base requise |
+| `free_telecharger` | Scraping ; URL via fiche fournisseur |
+| `hive` | Pairs des ruches ; nécessite Hive activé et membre joignable |
+| `comet` | Instance(s) Comet (liste d’URLs, défaut public possible) |
+| `torrentio` | Torrentio / aimants |
+
+Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio`. Au moins une source doit rester activée.
+
+Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](reglages/sources.md)), ordre des **hébergeurs** (`hoster_preference`).
+
+### Wawacity — films
+
+Pour un **film**, la découverte passe d’abord par une recherche **sans filtre de liste** (`plain_search_url`) : titre français (avec `year=` quand l’année TMDB est connue, puis la même requête **sans** année), puis le titre original si besoin. Les **séries** conservent le modèle par listes `s=`.
+
+Sur une fiche Wawacity ouverte, si l’en-tête ne correspond pas au profil de la fiche, le moteur peut ouvrir une **version sœur** proposée dans le bloc **« Autres qualités »** (qualité et langue lues sur le bouton, titre et année repris de la fiche courante).
+
+## Journal des tentatives par source
+
+Chaque passage sur une source pendant un job de téléchargement peut créer ou mettre à jour un événement **`download.source_attempt`** (un enregistrement par couple téléchargement × source). Le détail affiché reprend des libellés du type :
+
+- `Wawacity : N lien(s) trouvé(s).`
+- `Wawacity : aucun résultat.`
+- `Wawacity : refusé (filtre profil).` (ou autre motif, ex. filtre de taille)
+- `Comet : refusé (Aucun flux Comet ne correspond au profil « … ».)` lorsque les flux ne passent pas le profil
+- `… : ignoré (…)` ou `… : erreur (…)`
+
+Lorsque plusieurs sources ont été essayées dans le même passage, le message d’échec du job peut **concaténer** une ligne par source (séparateur ` · `). En l’absence de liens Wawacity en base, le worker peut **réveiller** un sondage source immédiat au lieu d’appliquer seul le long recul après erreur.
+
+## Hive dans la file Download
+
+Depuis la standardisation LOT4, un téléchargement Hive passe par la **même file** qu’un lien AllDebrid : octroi pair (`fetch-grant`) et téléchargement HTTP via aria2 avec en-têtes dédiés — **pas** d’onglet « transferts » séparé ni de `HiveTransferJob` actif. Détails : [Hive](hive.md).
+
+## AllDebrid
+
+- Clé API : assistant ou **Réglages → AllDebrid** (bloc compte + PIN éventuel).
+- **Purger après dépôt** : retire le lien / l’aimant du compte une fois le fichier rangé (défaut activé).
+- Téléchargements **manuels** : possible depuis une fiche si l’URL est autorisée (certains hébergeurs sont refusés côté serveur).
+
+## aria2
+
+- Processus dans le conteneur MediaTracker ; secret `aria2_rpc_secret` généré et écrit dans `/config/aria2.secret`.
+- Alerte si aria2 reste injoignable pendant les téléchargements (`aria2_unreachable_alert_min`, défaut 15 minutes).
+
+## Rangement « façon Jellyfin »
+
+Après téléchargement réussi :
+
+- Film : dossier sous le chemin **films** configuré.
+- Série : structure saison / épisode sous le chemin **séries**.
+- **Repasse bibliothèque** planifiée (`library_scan_interval_hours`) et après chaque dépôt.
+
+**Réglages de scan** : chemins absolus, action après téléchargement (`archive` ou `remove` dans la liste UI uniquement — le fichier disque reste).
+
+## Corbeille et suppression automatique
+
+- Fichiers supprimés ou auto-nettoyés vont dans `trash_dir` (même volume que la bibliothèque).
+- **Nettoyage** : suppression auto après visionnage, préavis, rétention corbeille — voir [reglages/nettoyage.md](reglages/nettoyage.md).
+- **Disque** : pause des téléchargements si espace libre sous le seuil (`disk_min_free_gb`, `0` désactive).
+
+## Nouveautés catalogue
+
+Worker séparé : films/séries « nouveautés » selon `catalog_interval_hours`, filtres qualité/langue, rétention `catalog_retention_days` (réglages en base, pas de page dédiée dans l’index Réglages — modifiable via API / env au premier boot).
+
+Voir aussi : [Sources](reglages/sources.md), [Scan](reglages/scan.md), [AllDebrid](reglages/alldebrid.md).

@@ -1,0 +1,1003 @@
+# Package Home Assistant — un seul GET /api/v1/ha/summary toutes les 60 s.
+# Copier ce fichier vers /config/packages/mediatracker.yaml
+# (configuration.yaml : homeassistant.packages: !include_dir_named packages).
+# L'adresse n'est pas dans ce fichier. Elle est le secret mediatracker_url
+# (voir secrets.yaml), exposé par sensor.mediatracker_adresse.
+# Le secret mediatracker_token vaut « Bearer mt_… ». Ne jamais l'écrire ici.
+# La file d'attente (input_text.mediatracker_file_attente) survit au redémarrage.
+
+rest:
+  - resource_template: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/summary"
+    method: GET
+    scan_interval: 60
+    timeout: 15
+    headers:
+      Authorization: !secret mediatracker_token
+    sensor:
+      - name: MediaTracker
+        unique_id: mediatracker_summary
+        value_template: "{{ value_json.health.label | default('indisponible') }}"
+        force_update: true
+        json_attributes:
+          - downloads
+          - queue
+          - to_watch
+          - upcoming
+          - catalog
+          - source_scan
+          - health
+          - disk
+          - library_scan_at
+          - update_available
+          - update
+          - digital_releases
+          - airing_series
+          - build
+
+rest_command:
+  mediatracker_verifier_sources:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/check-sources"
+    method: POST
+    timeout: 30
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_actualiser_nouveautes:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/refresh-catalog"
+    method: POST
+    timeout: 120
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_scanner_bibliotheque:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/scan-library"
+    method: POST
+    timeout: 180
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_pause_telechargements:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/downloads/pause"
+    method: POST
+    timeout: 30
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_reprendre_telechargements:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/downloads/resume"
+    method: POST
+    timeout: 30
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_redemarrer:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/restart"
+    method: POST
+    timeout: 20
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_verifier_mise_a_jour:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/check-update"
+    method: POST
+    timeout: 30
+    headers:
+      Authorization: !secret mediatracker_token
+  mediatracker_suivre:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/follow"
+    method: POST
+    content_type: application/json
+    timeout: 60
+    headers:
+      Authorization: !secret mediatracker_token
+    payload: >
+      {"tmdb_id": {{ states('input_text.mediatracker_tmdb_id') | int(0) }},
+       "type": "{{ 'tv' if is_state('input_select.mediatracker_type', 'Série') else 'movie' }}"}
+  mediatracker_suivre_sortie:
+    url: "{{ states('sensor.mediatracker_adresse') | regex_replace('/+$', '') }}/api/v1/ha/actions/follow"
+    method: POST
+    content_type: application/json
+    timeout: 60
+    headers:
+      Authorization: !secret mediatracker_token
+    payload: >
+      {"tmdb_id": {{ tmdb_id | int(0) }}, "type": "{{ media_type | default('movie') }}"}
+
+input_text:
+  mediatracker_tmdb_id:
+    name: Identifiant TMDB
+    min: 0
+    max: 12
+    initial: ""
+    mode: text
+    icon: mdi:identifier
+  # File persistante : « id:m|t:a|h|e » séparés par des virgules.
+  # m film, t série ; a en attente (réessai), h refusé (pas de réessai), e envoyé.
+  # input_text survit au redémarrage. 12 identifiants maximum, 255 caractères.
+  mediatracker_file_attente:
+    name: File d'attente MediaTracker
+    min: 0
+    max: 255
+    initial: ""
+    mode: text
+    icon: mdi:playlist-clock
+
+input_select:
+  mediatracker_type:
+    name: Type
+    options:
+      - Film
+      - Série
+    initial: Série
+    icon: mdi:movie-open
+
+script:
+  # Enregistre l'identifiant AVANT l'appel. Sans réponse, il reste « a ».
+  # « e » seulement après un corps JSON 2xx. « h » sur un 4xx : visible, sans réessai.
+  mediatracker_envoyer:
+    alias: MediaTracker — envoyer un suivi
+    mode: queued
+    max: 20
+    fields:
+      tmdb_id:
+        required: true
+        selector:
+          number:
+            min: 1
+            mode: box
+      media_type:
+        required: true
+        selector:
+          select:
+            options:
+              - movie
+              - tv
+      notify:
+        selector:
+          boolean:
+    sequence:
+      - variables:
+          id: "{{ tmdb_id | int(0) }}"
+          kind: "{{ 't' if media_type | default('movie') == 'tv' else 'm' }}"
+          status: a
+          raw: "{{ states('input_text.mediatracker_file_attente') | default('', true) }}"
+      - condition: template
+        value_template: "{{ id | int(0) > 0 }}"
+      - variables:
+          attente: &queue_upsert |
+            {# BEGIN queue_upsert #}
+            {%- if raw is not defined -%}
+            {%- set raw = states('input_text.mediatracker_file_attente') | default('', true) -%}
+            {%- endif -%}
+            {%- if raw is none or raw in ['unknown', 'unavailable', 'none', 'None'] -%}
+            {%- set raw = '' -%}
+            {%- endif -%}
+            {%- set id = id | default(0) | int(0) -%}
+            {%- set kind = 't' if kind | default('m') == 't' else 'm' -%}
+            {%- set status = status | default('a') -%}
+            {%- if status not in ['a', 'h', 'e'] -%}{%- set status = 'a' -%}{%- endif -%}
+            {%- set ns = namespace(items=[], seen=false) -%}
+            {%- for part in raw.split(',') -%}
+            {%- set bits = part.split(':') -%}
+            {%- if bits | length == 3 and bits[0] | int(0) > 0 and bits[1] in ['m', 't'] and bits[2] in ['a', 'h', 'e'] -%}
+            {%- if bits[0] | int(0) == id and bits[1] == kind -%}
+            {%- set ns.items = ns.items + [id ~ ':' ~ kind ~ ':' ~ status] -%}
+            {%- set ns.seen = true -%}
+            {%- else -%}
+            {%- set ns.items = ns.items + [bits[0] ~ ':' ~ bits[1] ~ ':' ~ bits[2]] -%}
+            {%- endif -%}
+            {%- endif -%}
+            {%- endfor -%}
+            {%- if not ns.seen and id > 0 -%}
+            {%- set ns.items = ns.items + [id ~ ':' ~ kind ~ ':' ~ status] -%}
+            {%- endif -%}
+            {%- for _ in range(16) -%}
+            {%- set line = ns.items | join(',') -%}
+            {%- if line | length > 255 or ns.items | length > 12 -%}
+            {%- set drop = namespace(idx=-1) -%}
+            {%- for i in range(ns.items | length) -%}
+            {%- if drop.idx < 0 and ns.items[i].endswith(':e') and not ns.items[i].startswith(id ~ ':' ~ kind ~ ':') -%}
+            {%- set drop.idx = i -%}
+            {%- endif -%}
+            {%- endfor -%}
+            {%- if drop.idx < 0 -%}
+            {%- for i in range(ns.items | length) -%}
+            {%- if drop.idx < 0 and not ns.items[i].startswith(id ~ ':' ~ kind ~ ':') -%}
+            {%- set drop.idx = i -%}
+            {%- endif -%}
+            {%- endfor -%}
+            {%- endif -%}
+            {%- if drop.idx < 0 -%}{%- set drop.idx = 0 -%}{%- endif -%}
+            {%- if ns.items | length > 0 -%}
+            {%- set ns.items = ns.items[:drop.idx] + ns.items[drop.idx + 1:] -%}
+            {%- endif -%}
+            {%- endif -%}
+            {%- endfor -%}
+            {{- ns.items | join(',') -}}
+            {# END queue_upsert #}
+          marker: "{{ id ~ ':' ~ kind ~ ':' }}"
+      - if:
+          - condition: template
+            value_template: "{{ marker not in attente }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              title: MediaTracker
+              message: La file d'attente est pleine. L'identifiant n'a pas été ajouté.
+              notification_id: mediatracker_suivre
+          - variables:
+              sortie:
+                verdict: full
+          - stop: File pleine
+            response_variable: sortie
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.mediatracker_file_attente
+        data:
+          value: "{{ attente | trim }}"
+      - action: rest_command.mediatracker_suivre_sortie
+        response_variable: resultat
+        continue_on_error: true
+        data:
+          tmdb_id: "{{ id | int(0) }}"
+          media_type: "{{ 'tv' if kind == 't' else 'movie' }}"
+      - variables:
+          verdict: &follow_verdict |
+            {# BEGIN follow_verdict #}
+            {%- set resultat = resultat | default(none) -%}
+            {%- set body = resultat.get('content') if resultat is mapping else none -%}
+            {%- set code = (resultat.get('status', 0) | int(0)) if resultat is mapping else 0 -%}
+            {%- set okflag = body.get('ok') if body is mapping else none -%}
+            {%- if code >= 200 and code < 400 and body is mapping and okflag != false -%}
+            {{- 'confirmed' -}}
+            {%- elif code >= 400 and code < 500 -%}
+            {{- 'refused' -}}
+            {%- else -%}
+            {{- 'pending' -}}
+            {%- endif -%}
+            {# END follow_verdict #}
+          notice: &follow_message |
+            {# BEGIN follow_message #}
+            {%- set resultat = resultat | default(none) -%}
+            {%- set body = resultat.get('content') if resultat is mapping else none -%}
+            {%- set code = (resultat.get('status', 0) | int(0)) if resultat is mapping else 0 -%}
+            {%- set detail = body.get('detail') if body is mapping else none -%}
+            {%- if detail is not string or not detail -%}{%- set detail = '' -%}{%- endif -%}
+            {%- set okflag = body.get('ok') if body is mapping else none -%}
+            {%- set confirmed = code >= 200 and code < 400 and body is mapping and okflag != false -%}
+            {%- if confirmed -%}
+            {{- detail if detail else 'Suivi envoyé.' -}}
+            {%- elif code >= 400 and code < 500 -%}
+            {{- (detail if detail else 'Suivi refusé.') -}}
+            {%- if detail and not detail.endswith('.') -%}.{%- endif %} L'identifiant reste en attente.
+            {%- elif code >= 200 and code < 400 and detail -%}
+            {{- detail -}}
+            {%- if not detail.endswith('.') -%}.{%- endif %} L'identifiant reste en attente.
+            {%- elif code >= 200 and code < 400 -%}
+            {{- "Réponse vide. L'identifiant reste en attente." -}}
+            {%- else -%}
+            {{- "MediaTracker ne répond pas. L'identifiant reste en attente." -}}
+            {%- endif -%}
+            {# END follow_message #}
+      - variables:
+          status: "{{ 'e' if verdict | trim == 'confirmed' else ('h' if verdict | trim == 'refused' else 'a') }}"
+          raw: "{{ attente }}"
+      - variables:
+          stored: *queue_upsert
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.mediatracker_file_attente
+        data:
+          value: "{{ stored | trim }}"
+      - if:
+          - condition: template
+            value_template: "{{ notify | default(true) or (verdict | trim) in ['confirmed', 'refused'] }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              title: MediaTracker
+              message: "{{ notice | trim }}"
+              notification_id: mediatracker_suivre
+      - variables:
+          sortie:
+            verdict: "{{ verdict | trim }}"
+      - stop: Suivi traité
+        response_variable: sortie
+  mediatracker_envoyer_file:
+    alias: MediaTracker — envoyer la file
+    mode: single
+    sequence:
+      - variables:
+          queue_rows_template: &queue_rows |
+            {# BEGIN queue_rows #}
+            {%- if raw is not defined -%}
+            {%- set raw = states('input_text.mediatracker_file_attente') | default('', true) -%}
+            {%- endif -%}
+            {%- if raw is none or raw in ['unknown', 'unavailable', 'none', 'None'] -%}
+            {%- set raw = '' -%}
+            {%- endif -%}
+            {%- set ns = namespace(items=[]) -%}
+            {%- for part in raw.split(',') -%}
+            {%- set bits = part.split(':') -%}
+            {%- if bits | length == 3 and bits[0] | int(0) > 0 and bits[1] in ['m', 't'] and bits[2] in ['a', 'h', 'e'] -%}
+            {%- set ns.items = ns.items + [bits[0] ~ ':' ~ bits[1] ~ ':' ~ bits[2]] -%}
+            {%- endif -%}
+            {%- endfor -%}
+            {{- ns.items | join(',') -}}
+            {# END queue_rows #}
+          queue_next_template: &queue_next |
+            {# BEGIN queue_next #}
+            {%- if raw is not defined -%}
+            {%- set raw = states('input_text.mediatracker_file_attente') | default('', true) -%}
+            {%- endif -%}
+            {%- if raw is none or raw in ['unknown', 'unavailable', 'none', 'None'] -%}
+            {%- set raw = '' -%}
+            {%- endif -%}
+            {%- set ns = namespace(found='') -%}
+            {%- for part in raw.split(',') -%}
+            {%- set bits = part.split(':') -%}
+            {%- if ns.found == '' and bits | length == 3 and bits[2] == 'a' and bits[0] | int(0) > 0 and bits[1] in ['m', 't'] -%}
+            {%- set ns.found = bits[0] ~ ':' ~ bits[1] -%}
+            {%- endif -%}
+            {%- endfor -%}
+            {{- ns.found -}}
+            {# END queue_next #}
+      - repeat:
+          count: 12
+          sequence:
+            - delay:
+                seconds: 1
+            - variables:
+                raw: "{{ states('input_text.mediatracker_file_attente') | default('', true) }}"
+            - variables:
+                nxt: *queue_next
+            - condition: template
+              value_template: "{{ nxt.split(':') | length == 2 and nxt.split(':')[0] | int(0) > 0 and nxt.split(':')[1] in ['m', 't'] }}"
+            - action: script.mediatracker_envoyer
+              response_variable: envoi
+              continue_on_error: true
+              data:
+                tmdb_id: "{{ nxt.split(':')[0] | int(0) }}"
+                media_type: "{{ 'tv' if nxt.endswith(':t') else 'movie' }}"
+                notify: false
+            - condition: template
+              value_template: "{{ envoi is mapping and (envoi.verdict | default('') | trim) in ['confirmed', 'refused'] }}"
+  mediatracker_suivre:
+    alias: MediaTracker — suivre
+    mode: queued
+    max: 10
+    sequence:
+      - variables:
+          saisi: "{{ states('input_text.mediatracker_tmdb_id') | trim }}"
+      - if:
+          - condition: template
+            value_template: "{{ saisi | int(0) < 1 }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              title: MediaTracker
+              message: Indiquez un identifiant TMDB.
+              notification_id: mediatracker_suivre
+        else:
+          - action: script.mediatracker_envoyer
+            response_variable: envoi
+            continue_on_error: true
+            data:
+              tmdb_id: "{{ saisi | int(0) }}"
+              media_type: "{{ 'tv' if is_state('input_select.mediatracker_type', 'Série') else 'movie' }}"
+          - if:
+              - condition: template
+                value_template: "{{ envoi is mapping and (envoi.verdict | default('') | trim) in ['confirmed', 'refused'] }}"
+            then:
+              - action: script.mediatracker_envoyer_file
+  mediatracker_suivre_sortie:
+    alias: MediaTracker — suivre une sortie numérique
+    mode: queued
+    max: 10
+    fields:
+      index:
+        selector:
+          number:
+            min: 0
+            max: 5
+    sequence:
+      - variables:
+          row: "{{ (state_attr('sensor.mediatracker', 'digital_releases') or [])[index | int(0)] | default(none) }}"
+      - condition: template
+        value_template: "{{ row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 }}"
+      - action: script.mediatracker_envoyer
+        response_variable: envoi
+        continue_on_error: true
+        data:
+          tmdb_id: "{{ row.tmdb_id | int(0) }}"
+          media_type: "{{ row.type | default('movie') }}"
+      - if:
+          - condition: template
+            value_template: "{{ envoi is mapping and (envoi.verdict | default('') | trim) in ['confirmed', 'refused'] }}"
+        then:
+          - action: script.mediatracker_envoyer_file
+  mediatracker_suivre_antenne:
+    alias: MediaTracker — suivre une série à l'antenne
+    mode: queued
+    max: 10
+    fields:
+      index:
+        selector:
+          number:
+            min: 0
+            max: 5
+    sequence:
+      - variables:
+          row: "{{ (state_attr('sensor.mediatracker', 'airing_series') or [])[index | int(0)] | default(none) }}"
+      - condition: template
+        value_template: "{{ row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 }}"
+      - action: script.mediatracker_envoyer
+        response_variable: envoi
+        continue_on_error: true
+        data:
+          tmdb_id: "{{ row.tmdb_id | int(0) }}"
+          media_type: "{{ row.type | default('tv') }}"
+      - if:
+          - condition: template
+            value_template: "{{ envoi is mapping and (envoi.verdict | default('') | trim) in ['confirmed', 'refused'] }}"
+        then:
+          - action: script.mediatracker_envoyer_file
+  mediatracker_verifier_mise_a_jour:
+    alias: MediaTracker — vérifier la mise à jour
+    mode: single
+    sequence:
+      - action: rest_command.mediatracker_verifier_mise_a_jour
+        response_variable: resultat
+        continue_on_error: true
+      - variables:
+          notice: &update_message |
+            {# BEGIN update_message #}
+            {%- set resultat = resultat | default(none) -%}
+            {%- set body = resultat.get('content') if resultat is mapping else none -%}
+            {%- set detail = body.get('detail') if body is mapping else none -%}
+            {%- if detail is string and detail -%}
+            {{- detail -}}
+            {%- else -%}
+            {{- "Vérification impossible. MediaTracker ne répond pas." -}}
+            {%- endif -%}
+            {# END update_message #}
+      - action: persistent_notification.create
+        data:
+          title: MediaTracker
+          message: "{{ notice | trim }}"
+          notification_id: mediatracker_mise_a_jour
+
+template:
+  - sensor:
+      - name: MediaTracker adresse
+        unique_id: mediatracker_adresse
+        icon: mdi:server-network
+        state: !secret mediatracker_url
+      - name: MediaTracker sante
+        unique_id: mediatracker_sante
+        icon: mdi:heart-pulse
+        state: "{{ state_attr('sensor.mediatracker', 'health').label | default(states('sensor.mediatracker'), true) }}"
+      - name: MediaTracker telechargements
+        unique_id: mediatracker_telechargements
+        icon: mdi:download
+        state: "{{ state_attr('sensor.mediatracker', 'downloads').active | default(0) }}"
+      - name: MediaTracker progression
+        unique_id: mediatracker_progression
+        icon: mdi:progress-download
+        unit_of_measurement: "%"
+        state: "{{ state_attr('sensor.mediatracker', 'downloads').progress | default(0) }}"
+      - name: MediaTracker vitesse
+        unique_id: mediatracker_vitesse
+        icon: mdi:speedometer
+        unit_of_measurement: "Mo/s"
+        state: "{{ ((state_attr('sensor.mediatracker', 'downloads').speed | default(0) | float(0)) / 1048576) | round(1) }}"
+      - name: MediaTracker file
+        unique_id: mediatracker_file
+        icon: mdi:playlist-play
+        state: "{{ state_attr('sensor.mediatracker', 'queue').count | default(0) }}"
+      - name: MediaTracker episodes
+        unique_id: mediatracker_episodes
+        icon: mdi:television-play
+        state: "{{ state_attr('sensor.mediatracker', 'to_watch').episodes | default(0) }}"
+      - name: MediaTracker films
+        unique_id: mediatracker_films
+        icon: mdi:movie-open
+        state: "{{ state_attr('sensor.mediatracker', 'to_watch').films | default(0) }}"
+      - name: MediaTracker nouveautes
+        unique_id: mediatracker_nouveautes
+        icon: mdi:new-box
+        state: "{{ (state_attr('sensor.mediatracker', 'catalog').films | default(0) | int(0)) + (state_attr('sensor.mediatracker', 'catalog').series | default(0) | int(0)) }}"
+      - name: MediaTracker disque
+        unique_id: mediatracker_disque
+        icon: mdi:harddisk
+        unit_of_measurement: "Go"
+        state: "{{ state_attr('sensor.mediatracker', 'disk').free_gb | default(0) }}"
+      - name: MediaTracker version
+        unique_id: mediatracker_version
+        icon: mdi:tag-outline
+        state: >-
+          {% set build = state_attr('sensor.mediatracker', 'build') or {} %}
+          {{ build.version | default('inconnue', true) }}{% if build.sha %} · {{ build.sha }}{% endif %}
+        attributes:
+          version: "{{ (state_attr('sensor.mediatracker', 'build') or {}).version | default('', true) }}"
+          sha: "{{ (state_attr('sensor.mediatracker', 'build') or {}).sha | default('', true) }}"
+          date: "{{ (state_attr('sensor.mediatracker', 'build') or {}).build_date | default('', true) }}"
+      - name: MediaTracker sortie 1
+        unique_id: mediatracker_sortie_1
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[0] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[0] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[0] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[0] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/movie/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker sortie 2
+        unique_id: mediatracker_sortie_2
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[1] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[1] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[1] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[1] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/movie/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker sortie 3
+        unique_id: mediatracker_sortie_3
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[2] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[2] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[2] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[2] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/movie/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker sortie 4
+        unique_id: mediatracker_sortie_4
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[3] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[3] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[3] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[3] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/movie/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker sortie 5
+        unique_id: mediatracker_sortie_5
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[4] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[4] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[4] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[4] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/movie/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker sortie 6
+        unique_id: mediatracker_sortie_6
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[5] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[5] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[5] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'digital_releases') or [])[5] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/movie/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker antenne 1
+        unique_id: mediatracker_antenne_1
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[0] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[0] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[0] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[0] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/tv/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker antenne 2
+        unique_id: mediatracker_antenne_2
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[1] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[1] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[1] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[1] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/tv/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker antenne 3
+        unique_id: mediatracker_antenne_3
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[2] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[2] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[2] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[2] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/tv/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker antenne 4
+        unique_id: mediatracker_antenne_4
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[3] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[3] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[3] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[3] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/tv/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker antenne 5
+        unique_id: mediatracker_antenne_5
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[4] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[4] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[4] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[4] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/tv/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker antenne 6
+        unique_id: mediatracker_antenne_6
+        state: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[5] | default(none) %}
+          {% if row is mapping %}{{ row.title }}{% if row.tracked %} · suivi{% endif %}{% else %}—{% endif %}
+        picture: >
+          {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[5] | default(none) %}
+          {% set url = row.poster_url if row is mapping and row.poster_url is string else '' %}
+          {{ url if url is match('^https?://') else '' }}
+        attributes:
+          tmdb_id: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[5] | default(none) %}
+            {{ row.tmdb_id if row is mapping else 0 }}
+          tmdb_url: >
+            {% set row = (state_attr('sensor.mediatracker', 'airing_series') or [])[5] | default(none) %}
+            {% if row is mapping and (row.tmdb_id | default(0) | int(0)) > 0 %}https://www.themoviedb.org/tv/{{ row.tmdb_id | int(0) }}{% endif %}
+      - name: MediaTracker file attente
+        unique_id: mediatracker_file_attente
+        default_entity_id: sensor.mediatracker_file_attente
+        icon: mdi:playlist-clock
+        state: >
+          {% set raw = states('input_text.mediatracker_file_attente') %}
+          {% if raw in ['unknown', 'unavailable', 'none', 'None'] %}{% set raw = '' %}{% endif %}
+          {% set ns = namespace(n=0) %}
+          {% for part in raw.split(',') %}
+          {% set bits = part.split(':') %}
+          {% if bits | length == 3 and bits[2] == 'a' and bits[0] | int(0) > 0 %}{% set ns.n = ns.n + 1 %}{% endif %}
+          {% endfor %}
+          {{ ns.n }}
+        attributes:
+          rows: *queue_rows
+          next: *queue_next
+      - name: MediaTracker attente 01
+        unique_id: mediatracker_attente_01
+        default_entity_id: sensor.mediatracker_attente_01
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[0] if items | length > 0 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[0] if items | length > 0 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[0] if items | length > 0 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 02
+        unique_id: mediatracker_attente_02
+        default_entity_id: sensor.mediatracker_attente_02
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[1] if items | length > 1 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[1] if items | length > 1 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[1] if items | length > 1 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 03
+        unique_id: mediatracker_attente_03
+        default_entity_id: sensor.mediatracker_attente_03
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[2] if items | length > 2 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[2] if items | length > 2 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[2] if items | length > 2 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 04
+        unique_id: mediatracker_attente_04
+        default_entity_id: sensor.mediatracker_attente_04
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[3] if items | length > 3 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[3] if items | length > 3 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[3] if items | length > 3 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 05
+        unique_id: mediatracker_attente_05
+        default_entity_id: sensor.mediatracker_attente_05
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[4] if items | length > 4 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[4] if items | length > 4 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[4] if items | length > 4 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 06
+        unique_id: mediatracker_attente_06
+        default_entity_id: sensor.mediatracker_attente_06
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[5] if items | length > 5 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[5] if items | length > 5 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[5] if items | length > 5 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 07
+        unique_id: mediatracker_attente_07
+        default_entity_id: sensor.mediatracker_attente_07
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[6] if items | length > 6 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[6] if items | length > 6 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[6] if items | length > 6 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 08
+        unique_id: mediatracker_attente_08
+        default_entity_id: sensor.mediatracker_attente_08
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[7] if items | length > 7 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[7] if items | length > 7 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[7] if items | length > 7 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 09
+        unique_id: mediatracker_attente_09
+        default_entity_id: sensor.mediatracker_attente_09
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[8] if items | length > 8 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[8] if items | length > 8 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[8] if items | length > 8 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 10
+        unique_id: mediatracker_attente_10
+        default_entity_id: sensor.mediatracker_attente_10
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[9] if items | length > 9 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[9] if items | length > 9 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[9] if items | length > 9 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 11
+        unique_id: mediatracker_attente_11
+        default_entity_id: sensor.mediatracker_attente_11
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[10] if items | length > 10 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[10] if items | length > 10 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[10] if items | length > 10 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+      - name: MediaTracker attente 12
+        unique_id: mediatracker_attente_12
+        default_entity_id: sensor.mediatracker_attente_12
+        icon: mdi:bookmark-outline
+        state: >
+          {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+          {% set items = raw.split(',') | reject('equalto', '') | list %}
+          {% set row = items[11] if items | length > 11 else '' %}
+          {% if row.endswith(':a') or row.endswith(':h') %}en attente{% elif row.endswith(':e') %}envoyé{% else %}vide{% endif %}
+        attributes:
+          label: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[11] if items | length > 11 else '' %}
+            {{ 'TMDB #' ~ row.split(':')[0] if row else '—' }}
+          type: >
+            {% set raw = state_attr('sensor.mediatracker_file_attente', 'rows') | default('', true) %}
+            {% set items = raw.split(',') | reject('equalto', '') | list %}
+            {% set row = items[11] if items | length > 11 else '' %}
+            {{ 'Série' if row.split(':')[1] | default('') == 't' else ('Film' if row else '—') }}
+
+
+automation:
+  - id: mediatracker_file_attente_envoi
+    alias: MediaTracker — envoyer la file dès que le NAS répond
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.mediatracker
+        to:
+          - "ok"
+          - "dégradé"
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: state
+        entity_id: sensor.mediatracker
+        state:
+          - "ok"
+          - "dégradé"
+      - condition: template
+        value_template: "{{ state_attr('sensor.mediatracker_file_attente', 'next') | default('', true) | trim != '' }}"
+    actions:
+      - action: script.mediatracker_envoyer_file

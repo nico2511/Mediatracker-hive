@@ -1,0 +1,78 @@
+{
+  "streams": [
+    {
+      "name": "Comet\n1080p",
+      "title": "Clinique.Demo.S01E01.1080p.WEB.H264.MULTi\n💾 1.4 GB",
+      "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "Clinique.Demo.S01E01.1080p.WEB.H264.MULTi.mkv",
+        "videoSize": 1503238553
+      }
+    },
+    {
+      "name": "Comet\n720p",
+      "title": "Clinique.Demo.S01E01.720p.WEB.H264.VF.mkv",
+      "infoHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "Clinique.Demo.S01E01.720p.WEB.H264.VF.mkv",
+        "videoSize": 700000000
+      }
+    },
+    {
+      "name": "Comet\n1080p",
+      "title": "Clinique.Demo.S01E01.1080p.WEB.H264.VOSTFR.mkv",
+      "infoHash": "cccccccccccccccccccccccccccccccccccccccc",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "Clinique.Demo.S01E01.1080p.WEB.H264.VOSTFR.mkv",
+        "videoSize": 1400000000
+      }
+    },
+    {
+      "name": "Comet\nCAM",
+      "title": "Clinique.Demo.S01E01.CAM.XviD-GROUP.avi",
+      "infoHash": "dddddddddddddddddddddddddddddddddddddddd",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "Clinique.Demo.S01E01.CAM.XviD-GROUP.avi",
+        "videoSize": 900000000
+      }
+    },
+    {
+      "name": "Comet\n4K",
+      "resolution": "2160p",
+      "title": "Clinique.Demo.S01E01.2160p.WEB.H265.MULTI.mkv",
+      "infoHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "fileIdx": 1,
+      "behaviorHints": {
+        "filename": "Clinique.Demo.S01E01.2160p.WEB.H265.MULTI.mkv",
+        "videoSize": 8000000000
+      }
+    },
+    {
+      "name": "Comet",
+      "title": "Clinique.Demo.S01E02.1080p.WEB.H264.MULTi.mkv",
+      "infoHash": "ffffffffffffffffffffffffffffffffffffffff",
+      "behaviorHints": {
+        "filename": "Clinique.Demo.S01E02.1080p.WEB.H264.MULTi.mkv",
+        "videoSize": 1500000000
+      }
+    },
+    {
+      "name": "Comet",
+      "title": "Atelier.Demo.S01E01.1080p.WEB.H264.MULTi.mkv",
+      "infoHash": "1111111111111111111111111111111111111111",
+      "behaviorHints": {
+        "filename": "Atelier.Demo.S01E01.1080p.WEB.H264.MULTi.mkv",
+        "videoSize": 1500000000
+      }
+    },
+    {
+      "name": "1fichier",
+      "url": "https://1fichier.com/abc",
+      "title": "Clinique.Demo.S01E01.1080p.WEB.H264.MULTi.mkv"
+    }
+  ]
+}

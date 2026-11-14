@@ -1,0 +1,31 @@
+{
+  "name": "mediatracker-web",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck",
+    "test:unit": "vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.5.22",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/test-utils": "^2.5.1",
+    "happy-dom": "^17.6.3",
+    "playwright": "^1.49.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^3.2.7",
+    "vue-tsc": "^2.2.12",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1"
+  }
+}

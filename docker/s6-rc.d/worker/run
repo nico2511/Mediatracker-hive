@@ -1,0 +1,8 @@
+#!/command/with-contenv sh
+set -eu
+umask "${UMASK:-022}"
+# s6 must not tee this service into a second logger (that doubled every line).
+export S6_LOGGING=0
+user_name="$(cat /run/mediatracker/user)"
+cd /app
+exec s6-setuidgid "$user_name" /usr/local/bin/python -m mediatracker.worker

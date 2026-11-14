@@ -1,0 +1,35 @@
+# Stack Watchtower séparé — surveille uniquement le conteneur "mediatracker"
+# MediaTracker appelle l'API HTTP (Réglages → Jetons → URL + jeton Watchtower)
+
+networks:
+  mediatracker_net:
+    external: true
+    name: mediatracker_net
+
+services:
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    networks:
+      - mediatracker_net
+    ports:
+      # Expose l'API HTTP sur l'hôte si MediaTracker n'est pas sur le même réseau ;
+      # sinon retirez "ports" et utilisez http://watchtower:8080 depuis MediaTracker.
+      - "8088:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TZ: Europe/Paris
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: changeme
+      WATCHTOWER_HTTP_API_PERIODIC_POLLS: "true"
+      WATCHTOWER_POLL_INTERVAL: "3600"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_CONTAINER_NAMES: mediatracker
+
+# Créez le réseau partagé une fois :
+#   docker network create mediatracker_net
+# Attachez MediaTracker au même réseau dans son compose :
+#   networks: [mediatracker_net]
+# Dans MediaTracker (UI) : watchtower_url = http://watchtower:8080 ou http://<hôte>:8088

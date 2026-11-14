@@ -1,0 +1,74 @@
+{
+  "media": {
+    "id": 102,
+    "type": "film",
+    "title": "Film-exemple",
+    "year": 2020,
+    "overview": null,
+    "poster_url": null,
+    "backdrop_url": null,
+    "tmdb_id": null,
+    "tmdb_url": null,
+    "series_status": null,
+    "followed": false,
+    "on_hold": false,
+    "auto_download": false,
+    "new_episode_policy": "propose",
+    "auto_status": "idle",
+    "pref_quality": "HD",
+    "pref_language": "VFF",
+    "allow_fallback": false,
+    "source_order": null,
+    "quality_profile_id": null,
+    "scan_interval_min": null,
+    "keep": false,
+    "auto_delete": false,
+    "auto_delete_days": null,
+    "poll": {
+      "allowed": false,
+      "reason": "film_obtained",
+      "last_check_at": null,
+      "next_check_at": null,
+      "last_result": null,
+      "last_message": null,
+      "interval_min": 60
+    },
+    "next_episode": null,
+    "progress": { "watched": 1, "total": 1 },
+    "available_not_downloaded": 0,
+    "file_status": "trash",
+    "on_disk": false,
+    "film_not_yet_available": false
+  },
+  "items": {
+    "seasons": [
+      {
+        "number": null,
+        "name": "Film",
+        "air_date": null,
+        "episode_count": 1,
+        "keep": false,
+        "file_status": "trash",
+        "file_status_counts": { "present": 0, "trash": 1, "absent": 0, "downloading": 0 },
+        "episodes": [
+          {
+            "id": 1002,
+            "season": null,
+            "episode": null,
+            "state": "downloaded",
+            "title": "Film-exemple",
+            "air_date": null,
+            "downloaded": true,
+            "watched": true,
+            "source_available": false,
+            "download_active": false,
+            "keep": false,
+            "file_status": "trash",
+            "trash_entry_id": 55,
+            "filename": "Film-exemple (2020).mkv"
+          }
+        ]
+      }
+    ]
+  }
+}

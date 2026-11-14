@@ -1,0 +1,16 @@
+# Configuration gitleaks : règles par défaut + liste blanche minimale.
+# Seules ces valeurs de test fictives exactes sont ignorées ; un vrai secret
+# placé dans tests/ reste détecté.
+title = "MediaTracker"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valeurs de test fictives"
+regexTarget = "match"
+regexes = [
+  '''test-secret-key-0123456789''',
+  '''test-admin-password''',
+  '''nas-secret-key-0123456789''',
+]

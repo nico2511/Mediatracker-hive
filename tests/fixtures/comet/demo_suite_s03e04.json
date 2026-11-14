@@ -1,0 +1,52 @@
+{
+  "streams": [
+    {
+      "name": "Comet\n1080p",
+      "title": "Suite.Ville.Démo.S03E04.1080p.WEB.x264.VFF.mkv",
+      "infoHash": "2222222222222222222222222222222222222222",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "Suite.Ville.Démo.S03E04.1080p.WEB.x264.VFF.mkv",
+        "videoSize": 1600000000
+      }
+    },
+    {
+      "name": "Comet",
+      "title": "Suite.Ville.Démo.S03E04.720p.WEB.FRENCH.mkv",
+      "infoHash": "3333333333333333333333333333333333333333",
+      "fileIdx": 0,
+      "behaviorHints": {
+        "filename": "Suite.Ville.Démo.S03E04.720p.WEB.FRENCH.mkv",
+        "videoSize": 800000000
+      }
+    },
+    {
+      "name": "Comet",
+      "title": "Suite.Ville.Démo.S03E04.1080p.TRUEFRENCH.WEB.mkv",
+      "infoHash": "4444444444444444444444444444444444444444",
+      "fileIdx": 2,
+      "behaviorHints": {
+        "filename": "Suite.Ville.Démo.S03E04.1080p.TRUEFRENCH.WEB.mkv",
+        "videoSize": 1700000000
+      }
+    },
+    {
+      "name": "Comet",
+      "title": "Suite.Ville.Démo.S03E04.HDTS.mkv",
+      "infoHash": "5555555555555555555555555555555555555555",
+      "behaviorHints": {
+        "filename": "Suite.Ville.Démo.S03E04.HDTS.mkv",
+        "videoSize": 900000000
+      }
+    },
+    {
+      "name": "Comet",
+      "title": "Suite.Ville.Démo.S03E04.SCREENER.VF.mkv",
+      "infoHash": "6666666666666666666666666666666666666666",
+      "behaviorHints": {
+        "filename": "Suite.Ville.Démo.S03E04.SCREENER.VF.mkv",
+        "videoSize": 900000000
+      }
+    }
+  ]
+}

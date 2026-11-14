@@ -1,0 +1,48 @@
+# Exemple isolé pour recette Hive T8 — SANS construction d'image MediaTracker.
+#
+# Usage typique sur NAS : une instance MTR par conteneur ou processus, chacun avec
+# ses propres volumes config/data. Ce fichier montre seulement le reverse proxy
+# multi-domaines et la séparation des volumes.
+#
+#   docker compose -f docs/exemples/docker-compose-hive-sandbox.example.yml up -d
+#
+# Les services mediatracker-* ci-dessous sont commentés : utilisez l'image déjà
+# publiée sur le NAS ou un uvicorn local (voir scripts/hive_t8_e2e.py).
+
+services:
+  hive-proxy:
+    image: nginx:1.27-alpine
+    container_name: hive-sandbox-proxy
+    restart: "no"
+    ports:
+      - "203.0.113.99:443:443"
+    volumes:
+      - ./sandbox/hive-t8/nginx.generated.conf:/etc/nginx/nginx.conf:ro
+      - ./sandbox/hive-t8/certs:/etc/nginx/certs:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # mediatracker-y:
+  #   image: ghcr.io/nico2511/mediatracker-hive:latest
+  #   environment:
+  #     SECRET_KEY: REMPLACER-INSTANCE-Y
+  #     FORWARDED_ALLOW_IPS: "203.0.113.0/24"
+  #   volumes:
+  #     - ./instances/y/config:/config
+  #     - ./instances/y/data:/data
+
+  # mediatracker-x:
+  #   image: ghcr.io/nico2511/mediatracker-hive:latest
+  #   environment:
+  #     SECRET_KEY: REMPLACER-INSTANCE-X
+  #   volumes:
+  #     - ./instances/x/config:/config
+  #     - ./instances/x/data:/data
+
+  # mediatracker-z:
+  #   image: ghcr.io/nico2511/mediatracker-hive:latest
+  #   environment:
+  #     SECRET_KEY: REMPLACER-INSTANCE-Z
+  #   volumes:
+  #     - ./instances/z/config:/config
+  #     - ./instances/z/data:/data
