@@ -4834,6 +4834,20 @@
         "title": "HealthSummary",
         "type": "object"
       },
+      "HiveChercheConfirmIn": {
+        "properties": {
+          "media_item_id": {
+            "minimum": 1.0,
+            "title": "Media Item Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_item_id"
+        ],
+        "title": "HiveChercheConfirmIn",
+        "type": "object"
+      },
       "HiveIdentityOut": {
         "properties": {
           "enabled": {
@@ -4948,6 +4962,21 @@
         "title": "HiveOverviewOut",
         "type": "object"
       },
+      "HiveRequestActionIn": {
+        "properties": {
+          "request_id": {
+            "maxLength": 48,
+            "minLength": 8,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "HiveRequestActionIn",
+        "type": "object"
+      },
       "HiveResetIn": {
         "description": "Nouveau nom obligatoire (2\u201332 caract\u00e8res).",
         "properties": {
@@ -4960,6 +4989,26 @@
           "name"
         ],
         "title": "HiveResetIn",
+        "type": "object"
+      },
+      "HiveWantedTakeIn": {
+        "properties": {
+          "release": {
+            "default": false,
+            "title": "Release",
+            "type": "boolean"
+          },
+          "work_key": {
+            "maxLength": 48,
+            "minLength": 8,
+            "title": "Work Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_key"
+        ],
+        "title": "HiveWantedTakeIn",
         "type": "object"
       },
       "IdentifyIn": {
@@ -7939,6 +7988,20 @@
             ],
             "title": "Disk Label"
           },
+          "fallback_profile_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Profile Ids"
+          },
           "file_absent": {
             "default": false,
             "title": "File Absent",
@@ -8446,6 +8509,20 @@
               }
             ],
             "title": "Auto Delete Days"
+          },
+          "fallback_profile_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Profile Ids"
           },
           "followed": {
             "anyOf": [
@@ -17586,6 +17663,255 @@
           }
         },
         "summary": "Get Hive Overview",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/announce": {
+      "post": {
+        "description": "Publication explicite du signal cherche (efface un retrait m\u00e9moris\u00e9 si besoin).",
+        "operationId": "post_confirm_hive_cherche_api_v1_hive_requests_announce_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HiveChercheConfirmIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Confirm Hive Cherche",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/mine": {
+      "get": {
+        "operationId": "get_my_hive_requests_api_v1_hive_requests_mine_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get My Hive Requests Api V1 Hive Requests Mine Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get My Hive Requests",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/received": {
+      "get": {
+        "operationId": "get_received_hive_requests_api_v1_hive_requests_received_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Received Hive Requests Api V1 Hive Requests Received Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Received Hive Requests",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/received/accept": {
+      "post": {
+        "operationId": "post_accept_hive_request_api_v1_hive_requests_received_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HiveRequestActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Accept Hive Request",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/received/refuse": {
+      "post": {
+        "operationId": "post_refuse_hive_request_api_v1_hive_requests_received_refuse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HiveRequestActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Refuse Hive Request",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/retract": {
+      "post": {
+        "description": "Retire l\u2019annonce cherche (ne plus demander \u00e0 la ruche).",
+        "operationId": "post_retract_hive_cherche_api_v1_hive_requests_retract_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HiveChercheConfirmIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Retract Hive Cherche",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/wanted": {
+      "get": {
+        "operationId": "get_wanted_hive_requests_api_v1_hive_requests_wanted_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Wanted Hive Requests Api V1 Hive Requests Wanted Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Wanted Hive Requests",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/requests/wanted/take": {
+      "post": {
+        "operationId": "post_wanted_hive_take_api_v1_hive_requests_wanted_take_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HiveWantedTakeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Wanted Hive Take",
         "tags": [
           "hive",
           "hive"

@@ -198,6 +198,7 @@ def _run_catalog_sync_then_gossip(
     parent = factory()
     try:
         sync_hive_catalog(parent, settings, now=NOW)
+        parent.flush()
         assert parent.scalar(select(HiveEntry).limit(1)) is not None, "sync_hive_catalog n'a pas publié"
         assert parent.get(Setting, HIVE_BURST_STATE_KEY) is not None
         if commit_catalog:
