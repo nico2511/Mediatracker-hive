@@ -53,6 +53,8 @@ from mediatracker.core.pipeline.jobs import (
     _text_setting,
     _throttle_poll,
     _usable_download_sources,
+    advance_download_profile_repli,
+    peek_next_download_profile_repli,
 )
 from mediatracker.core.pipeline.siblings import (
     _heal_obtained_item,
@@ -327,9 +329,21 @@ def _apply_status(
 
         handle = row.handle
         if is_hive_fetch_download(db, settings, row) and hive_peer_rate_failure(status.error):
-            from mediatracker.hive.download_pipeline import defer_hive_peer_busy
+            from mediatracker.hive.download_aria2 import hive_failover_after_peer_busy
+            from mediatracker.hive.download_pipeline import (
+                defer_hive_peer_busy,
+                hive_fetch_ctx,
+                schedule_hive_immediate_retry,
+            )
 
-            defer_hive_peer_busy(row, now, clear_handle=True)
+            ctx = hive_fetch_ctx(db, row)
+            switched = False
+            if ctx is not None:
+                switched = hive_failover_after_peer_busy(db, row, ctx, now)
+            if switched:
+                schedule_hive_immediate_retry(row, now, clear_handle=True)
+            else:
+                defer_hive_peer_busy(row, now, clear_handle=True)
             if handle:
                 _forget_aria2_gid(downloader, handle, download_id=row.id, delete_files=False)
             return
@@ -847,38 +861,56 @@ def _begin(
         row.error = None
         row.skipped_link_ids = []
     from mediatracker.core.precheck import should_bypass_remote_dedup
+    from mediatracker.core.remote_search_limit import begin_remote_search, remote_search_limit_phrase
 
-    reset_pass_error_fields(row)
-    begin_download_pass(row)
-    effective_known = [] if should_bypass_remote_dedup(row, item) else known
-    order = _usable_download_sources(db, media, settings)
     found = None
-    for index, name in enumerate(order):
-        defer_final = index < len(order) - 1
-        outcome = _from_named_source(
-            db,
-            name,
-            row,
-            item,
-            media,
-            now,
-            preference,
-            debrid_row,
-            debrid,
-            settings,
-            effective_known,
-            defer_final=defer_final,
-        )
-        if isinstance(outcome, str):
-            return outcome
-        if outcome is None:
-            if index < len(order) - 1:
-                _record_download_source_switch(
-                    db, row, media, item, order[index], order[index + 1], now=now
-                )
-            continue
-        found = outcome
-        break
+    while True:
+        reset_pass_error_fields(row)
+        begin_download_pass(row)
+        effective_known = [] if should_bypass_remote_dedup(row, item) else known
+        order = _usable_download_sources(db, media, settings)
+        for index, name in enumerate(order):
+            defer_final = index < len(order) - 1
+            outcome = _from_named_source(
+                db,
+                name,
+                row,
+                item,
+                media,
+                now,
+                preference,
+                debrid_row,
+                debrid,
+                settings,
+                effective_known,
+                defer_final=defer_final,
+            )
+            if isinstance(outcome, str):
+                return outcome
+            if outcome is None:
+                if index < len(order) - 1:
+                    _record_download_source_switch(db, row, media, item, order[index], order[index + 1], now=now)
+                continue
+            found = outcome
+            break
+        if found is not None:
+            break
+        if peek_next_download_profile_repli(db, media, settings, row) is None:
+            break
+        if not begin_remote_search(media, now, db, settings):
+            logger.info(
+                "Repli profil ignoré pour le média %s (%s).",
+                media.id,
+                remote_search_limit_phrase(db, settings),
+            )
+            break
+        if not advance_download_profile_repli(db, media, item, row, settings, now=now):
+            break
+        _rediscover(db, settings, media, now, download=row, search_slot_reserved=True)
+        row.error_code = None
+        row.error = None
+        row.skipped_link_ids = []
+        _commit(db)
     if found is None:
         composed = compose_download_pass_failure(row, order)
         if composed is not None:
@@ -923,9 +955,7 @@ def _begin(
             from mediatracker.hive.download_aria2 import aria2_headers_for_download
 
             extra_headers = aria2_headers_for_download(db, settings, row, now=now)
-        handle = downloader.add(
-            direct_url, incomplete, safe_name, headers=extra_headers, extra_options=hive_extra
-        )
+        handle = downloader.add(direct_url, incomplete, safe_name, headers=extra_headers, extra_options=hive_extra)
         if is_hive_fetch_download(db, settings, row):
             save = getattr(getattr(downloader, "client", downloader), "save_session", None)
             if save is not None:

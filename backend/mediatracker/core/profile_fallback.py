@@ -18,6 +18,7 @@ from mediatracker.core.quality_profile import Profile, profile_from_row
 from mediatracker.db.models import QualityProfile, Setting
 
 PROFILE_FALLBACK_ORDER_KEY = "profile_fallback_order"
+GLOBAL_ALLOW_FALLBACK_KEY = "allow_fallback"
 
 
 class ProfileResolveError(ValueError):
@@ -29,6 +30,7 @@ class ResolvedProfile:
     profile_id: int
     profile: Profile
     is_principal: bool
+    rank: int
 
 
 def parse_profile_fallback_order(raw: str) -> list[int]:
@@ -64,6 +66,40 @@ def read_profile_fallback_order(db: Session, settings: Settings | None = None) -
     return parse_profile_fallback_order(row.value or "")
 
 
+def _text_setting(db: Session, key: str, default: str) -> str:
+    row = db.get(Setting, key)
+    if row is None or row.value is None:
+        return default
+    return str(row.value)
+
+
+def global_profile_fallback_enabled(db: Session, settings: Settings | None = None) -> bool:
+    default = "true" if settings is not None and settings.allow_fallback else "false"
+    return _text_setting(db, GLOBAL_ALLOW_FALLBACK_KEY, default) == "true"
+
+
+def media_fallback_ids_raw(media: object) -> str | None:
+    return getattr(media, "fallback_profile_ids", None)
+
+
+def media_uses_global_fallback_chain(media: object) -> bool:
+    return media_fallback_ids_raw(media) is None
+
+
+def fallback_profile_ids_for_api(media: object) -> list[int] | None:
+    """``None`` = suit le global ; liste (éventuellement vide) = chaîne personnalisée."""
+    raw = media_fallback_ids_raw(media)
+    if raw is None:
+        return None
+    return parse_profile_fallback_order(raw)
+
+
+def encode_media_fallback_profile_ids(ids: list[int] | None) -> str | None:
+    if ids is None:
+        return None
+    return format_profile_fallback_order(ids)
+
+
 def validate_profile_fallback_ids(db: Session, ids: Sequence[int]) -> None:
     from mediatracker.settings_store import SettingsError
 
@@ -85,12 +121,12 @@ def _principal_row(db: Session, media: object) -> tuple[int, QualityProfile]:
     return int(row.id), row
 
 
-def _chain_ids(principal_id: int, global_ids: Sequence[int], *, allow_fallback: bool) -> list[int]:
+def _chain_ids(principal_id: int, fallback_ids: Sequence[int]) -> list[int]:
     chain = [principal_id]
-    if not allow_fallback or not global_ids:
+    if not fallback_ids:
         return chain
     seen = {principal_id}
-    for profile_id in global_ids:
+    for profile_id in fallback_ids:
         if profile_id in seen:
             continue
         seen.add(profile_id)
@@ -103,11 +139,16 @@ def resolve_profiles_for_media(
     media: object,
     settings: Settings | None = None,
 ) -> tuple[ResolvedProfile, ...]:
-    """Principal first, then configured fallbacks when the fiche allows fallback."""
+    """Principal first, then fallbacks according to global or per-fiche chain."""
     principal_id, _row = _principal_row(db, media)
-    global_ids = read_profile_fallback_order(db, settings)
-    allow_fallback = bool(getattr(media, "allow_fallback", False))
-    ids = _chain_ids(principal_id, global_ids, allow_fallback=allow_fallback)
+    raw = media_fallback_ids_raw(media)
+    if raw is None:
+        fallback_ids = (
+            read_profile_fallback_order(db, settings) if global_profile_fallback_enabled(db, settings) else []
+        )
+    else:
+        fallback_ids = parse_profile_fallback_order(raw)
+    ids = _chain_ids(principal_id, fallback_ids)
 
     resolved: list[ResolvedProfile] = []
     for index, profile_id in enumerate(ids):
@@ -119,6 +160,51 @@ def resolve_profiles_for_media(
                 profile_id=profile_id,
                 profile=profile_from_row(row),
                 is_principal=index == 0,
+                rank=index + 1,
             )
         )
     return tuple(resolved)
+
+
+def media_has_profile_repli_chain(db: Session, media: object, settings: Settings | None) -> bool:
+    try:
+        return len(resolve_profiles_for_media(db, media, settings)) > 1
+    except ProfileResolveError:
+        return False
+
+
+def purge_profile_id_from_fallback_references(
+    db: Session,
+    profile_id: int,
+    settings: Settings | None = None,
+) -> None:
+    """Retire un profil supprimé des chaînes globales et par fiche."""
+    from sqlalchemy import select
+
+    from mediatracker.db.models import Media, Setting
+
+    pid = int(profile_id)
+    global_ids = read_profile_fallback_order(db, settings)
+    if pid in global_ids:
+        remaining = [value for value in global_ids if value != pid]
+        encoded = format_profile_fallback_order(remaining)
+        row = db.get(Setting, PROFILE_FALLBACK_ORDER_KEY)
+        if row is None:
+            db.add(Setting(key=PROFILE_FALLBACK_ORDER_KEY, value=encoded, is_secret=False))
+        else:
+            row.value = encoded
+
+    for media in db.scalars(select(Media).where(Media.fallback_profile_ids.isnot(None))).all():
+        raw = media.fallback_profile_ids
+        if raw is None or not str(raw).strip():
+            continue
+        ids = parse_profile_fallback_order(str(raw))
+        if pid not in ids:
+            continue
+        media.fallback_profile_ids = encode_media_fallback_profile_ids([value for value in ids if value != pid])
+
+
+def poll_profile_repli_journal_note(profile: Profile, *, rank: int) -> str:
+    if rank <= 1:
+        return ""
+    return f" Page retenue avec le profil de repli « {profile.name} » (rang {rank})."

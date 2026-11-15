@@ -38,9 +38,6 @@ QUALITY_OPTIONS = ("HD", "1080p", "4K", "HDLight", "SD")
 LANGUAGE_OPTIONS = ("VFF", "VFQ", "VF", "MULTI", "VOSTFR", "VO")
 QUALITIES = frozenset(QUALITY_OPTIONS)
 LANGUAGES = frozenset(LANGUAGE_OPTIONS)
-# Fallback order, applied only when allow_fallback is on (global or per media).
-LANGUAGE_FALLBACK = ("VFF", "MULTI", "VF")
-QUALITY_FALLBACK = ("HD", "1080p", "HDLight")
 
 
 def registered_download_sources() -> tuple[str, ...]:

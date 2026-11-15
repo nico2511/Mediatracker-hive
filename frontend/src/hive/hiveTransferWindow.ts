@@ -36,3 +36,19 @@ export function hiveTransferTimeToMinutes(value: string): number {
   }
   return hours * 60 + mins;
 }
+
+/**
+ * Parse l’heure de fin : `00:00` avec un début après minuit signifie 24×60 (fin de journée),
+ * car les inputs `type=time` ne peuvent pas afficher 24:00.
+ */
+export function hiveTransferEndTimeToMinutes(endValue: string, startMinutes: number): number {
+  const parsed = hiveTransferTimeToMinutes(endValue);
+  if (
+    parsed === HIVE_TRANSFER_ALL_DAY_START &&
+    endValue.trim() === "00:00" &&
+    startMinutes > HIVE_TRANSFER_ALL_DAY_START
+  ) {
+    return HIVE_TRANSFER_ALL_DAY_END;
+  }
+  return parsed;
+}

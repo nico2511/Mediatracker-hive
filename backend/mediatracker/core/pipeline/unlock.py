@@ -33,7 +33,6 @@ from mediatracker.core.pipeline.jobs import (
     _cancel_present,
     _commit,
     _fail,
-    _fallback_allowed,
     _hoster_supported,
     _ingest_other_versions,
     _remember_skip,
@@ -141,6 +140,13 @@ def _debrid_hoster_preference(debrid, preference: list[str]) -> list[str]:
         return preference
 
 
+def _last_poll_rejected_by_profile(media: Media) -> bool:
+    if getattr(media, "last_poll_result", None) != "nothing":
+        return False
+    message = getattr(media, "last_poll_message", None) or ""
+    return message.startswith("Aucune version ne correspond au profil")
+
+
 def _stored_links_refused_by_profile(links, preference, profile, skipped: set[int]) -> bool:
     from mediatracker.core.profile_attempt_adapters import (
         link_eligible_for_hoster_attempt,
@@ -234,19 +240,23 @@ def _from_hosters(
                 skipped_link_ids=skipped,
             )
         if link is None:
-            if not looked_for_versions and attempt is not None and _fallback_allowed(db, media, settings):
+            from mediatracker.core.profile_fallback import media_has_profile_repli_chain
+
+            if not looked_for_versions and attempt is not None and media_has_profile_repli_chain(db, media, settings):
                 looked_for_versions = True
-                if _ingest_other_versions(db, settings, media, item, now, attempt_profile=attempt):
+                if _ingest_other_versions(
+                    db, settings, media, item, now, attempt_profile=attempt, from_next_repli=True
+                ):
                     continue
             if before_links == 0:
                 if last_code != "NO_LINK":
                     fail_code = last_code
                     fail_message = last_message
-                    issue = (
-                        "refused"
-                        if fail_code in {"SIZE_SANITY", "PROFILE", POLL_PROFILE_MISSING}
-                        else "empty"
-                    )
+                    issue = "refused" if fail_code in {"SIZE_SANITY", "PROFILE", POLL_PROFILE_MISSING} else "empty"
+                elif _last_poll_rejected_by_profile(media) and attempt is not None:
+                    fail_code = "PROFILE"
+                    fail_message = f"filtre profil — {attempt.name}"
+                    issue = "refused"
                 else:
                     fail_code = "NO_LINK"
                     fail_message = "aucun lien enregistré"
@@ -255,9 +265,7 @@ def _from_hosters(
                 fail_code = "SIZE_SANITY"
                 fail_message = "Tous les liens ont une taille incompatible avec la durée attendue."
                 issue = "refused"
-            elif attempt is not None and _stored_links_refused_by_profile(
-                links, preference, attempt, skipped
-            ):
+            elif attempt is not None and _stored_links_refused_by_profile(links, preference, attempt, skipped):
                 fail_code = "PROFILE"
                 fail_message = "filtre profil"
                 issue = "refused"
@@ -369,9 +377,7 @@ def _from_hosters(
                 last_message = bad
                 continue
         note_hoster_signal(link.hoster, up=True, message="Débridage réussi.")
-        _journal_source_attempt(
-            db, row, media, item, source_type, issue="found", link_count=1, now=now
-        )
+        _journal_source_attempt(db, row, media, item, source_type, issue="found", link_count=1, now=now)
         return (link, direct_url, filename, size, hoster_url)
 
 
@@ -442,9 +448,7 @@ def _from_hive(
 ):
     from mediatracker.hive.download_aria2 import prepare_hive_aria2_unlock
 
-    return prepare_hive_aria2_unlock(
-        db, settings, row=row, item=item, media=media, now=now, defer_final=defer_final
-    )
+    return prepare_hive_aria2_unlock(db, settings, row=row, item=item, media=media, now=now, defer_final=defer_final)
 
 
 def _short_exception_reason(exc: BaseException) -> str:
@@ -740,9 +744,7 @@ def _from_episode_source(
         row.state = "resolving"
         if row.attempt_started_at is None:
             row.attempt_started_at = now
-        _journal_source_attempt(
-            db, row, media, item, source_type, issue="found", link_count=len(candidates), now=now
-        )
+        _journal_source_attempt(db, row, media, item, source_type, issue="found", link_count=len(candidates), now=now)
         return (link, claimed.direct.url, filename, size, None)
     if rejected:
         row.error_code = "DISCONTINUED"

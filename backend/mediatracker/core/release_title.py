@@ -16,6 +16,7 @@ _TOKEN = (
     ("vostfr", "VOSTFR"),
     ("vfq", "VFQ"),
     ("vff", "VFF"),
+    ("vf2", "VFF"),
     ("multi", "MULTI"),
     ("webrrip", "HD"),
     ("webrip", "HD"),

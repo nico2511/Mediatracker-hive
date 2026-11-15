@@ -621,6 +621,10 @@ def _sync_one_media_item_hive_catalog(
     if item.id is None:
         return
 
+    from mediatracker.hive.signal import sync_possede_for_item
+
+    sync_possede_for_item(db, settings, media=media, item=item, now=moment)
+
     for rid in ruche_ids:
         excluded = is_excluded_from_ruche(db, item.id, rid)
         fp = db.get(HiveFileFingerprint, item.id)
@@ -677,6 +681,11 @@ def sync_hive_catalog_item(
         revoke_share_intent(db, media_item_id)
     elif hive_catalog_auto_share_enabled(db) or has_share_intent(db, media_item_id):
         grant_share_intent(db, media_item_id)
+    from mediatracker.hive.signal import item_file_present as _item_present
+    from mediatracker.hive.signal_wanted import complete_wanted_volunteer_share
+
+    if _item_present(db, item):
+        complete_wanted_volunteer_share(db, settings, media=media, item=item, now=moment)
     ruche_ids = member_ruche_ids_for_instance(db, origin_id)
     _sync_one_media_item_hive_catalog(
         db,
@@ -687,6 +696,11 @@ def sync_hive_catalog_item(
         origin_id=origin_id,
         moment=moment,
     )
+    from mediatracker.hive.signal import item_file_present
+    from mediatracker.hive.signal_policy import retract_cherche_follow_item
+
+    if item_file_present(db, item) or item.watched or not media.followed:
+        retract_cherche_follow_item(db, settings, media=media, item=item, now=moment)
 
 
 def tombstone_all_local_entries(db: Session, settings: Settings, *, now: datetime) -> None:
@@ -761,3 +775,16 @@ def sync_hive_catalog(db: Session, settings: Settings, *, now: datetime | None =
             origin_id=origin_id,
             moment=moment,
         )
+
+    from mediatracker.hive.signal import item_file_present, sync_possede_for_item
+
+    extra_ids = {i.id for i in items if i.id is not None}
+    for item in db.scalars(select(MediaItem).where(MediaItem.file_path.is_not(None))).all():
+        if item.id in extra_ids:
+            continue
+        if not item_file_present(db, item):
+            continue
+        media = db.get(Media, item.media_id)
+        if media is None:
+            continue
+        sync_possede_for_item(db, settings, media=media, item=item, now=moment)

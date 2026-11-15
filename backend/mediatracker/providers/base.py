@@ -59,6 +59,8 @@ class SourceResult(BaseModel):
     season: int | None = None
     quality: str | None = None
     language: str | None = None
+    # Raw listing or search anchor text when the parsed title dropped a language variant.
+    profile_hint: str = ""
     # Set by the source when it already knows the page must be refused.
     rejection: str | None = None
 

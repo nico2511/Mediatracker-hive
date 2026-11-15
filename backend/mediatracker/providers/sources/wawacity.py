@@ -341,6 +341,7 @@ class WawacitySource:
                         language=language,
                         url=hit.url,
                         rejection=hit.rejection,
+                        profile_hint=hit.profile_hint,
                     )
                 )
             )
@@ -369,12 +370,8 @@ class WawacitySource:
 
     def get_links(self, ref: SourceRef, *, profile=None) -> list[LinkCandidate]:
         heading, links, alternates = self._page(ref)
-        if (
-            profile is not None
-            and heading.media_type in {None, "film"}
-            and not _heading_matches_profile(heading, profile)
-        ):
-            sister = _pick_alternate_heading(alternates, profile)
+        if profile is not None and heading.media_type in {None, "film"}:
+            sister = _sister_heading_for_profile(heading, alternates, profile)
             if sister is not None:
                 sister_ref = SourceRef(ref=sister.url, url=sister.url)
                 heading, links, _alts = self._page(sister_ref)
@@ -507,6 +504,7 @@ def _result(hit: SearchHit) -> SourceResult:
         season=hit.season,
         quality=hit.quality,
         language=hit.language,
+        profile_hint=hit.profile_hint,
         rejection=hit.rejection,
     )
 
@@ -516,36 +514,44 @@ def _phrase_hit(results: list[SourceResult], title: str, original: str | None) -
     return any(any(titles_match(item.title, name) for name in names) for item in results)
 
 
-def _heading_matches_profile(heading, profile) -> bool:
-    from mediatracker.core.quality_profile import (
-        ReleaseCandidate,
-        acceptance_rank,
-        normalize_language,
-        normalize_resolution,
+def _release_candidate_from_heading(heading):
+    from mediatracker.core.quality_profile import release_candidate_from_fields
+
+    return release_candidate_from_fields(
+        language=heading.language,
+        quality=heading.quality,
+        hint=getattr(heading, "profile_hint", ""),
+        title=heading.title,
     )
 
+
+def _release_candidate_from_alternate(alt: AlternateQuality):
+    from mediatracker.core.quality_profile import release_candidate_from_fields
+
+    return release_candidate_from_fields(
+        language=alt.language,
+        quality=alt.quality,
+        hint=alt.label,
+        title=alt.title,
+    )
+
+
+def _heading_acceptance_rank(heading, profile) -> int | None:
+    from mediatracker.core.quality_profile import acceptance_rank
+
+    if profile is None:
+        return None
+    return acceptance_rank(_release_candidate_from_heading(heading), profile)
+
+
+def _heading_matches_profile(heading, profile) -> bool:
     if profile is None:
         return True
-    return (
-        acceptance_rank(
-            ReleaseCandidate(
-                language=normalize_language(heading.language),
-                resolution=normalize_resolution(heading.quality),
-                text=heading.title or "",
-            ),
-            profile,
-        )
-        is not None
-    )
+    return _heading_acceptance_rank(heading, profile) is not None
 
 
 def _pick_alternate_heading(alternates: list[AlternateQuality], profile) -> AlternateQuality | None:
-    from mediatracker.core.quality_profile import (
-        ReleaseCandidate,
-        acceptance_rank,
-        normalize_language,
-        normalize_resolution,
-    )
+    from mediatracker.core.quality_profile import acceptance_rank
 
     if not alternates:
         return None
@@ -553,14 +559,7 @@ def _pick_alternate_heading(alternates: list[AlternateQuality], profile) -> Alte
     for alt in alternates:
         if alt.rejection:
             continue
-        penalty = acceptance_rank(
-            ReleaseCandidate(
-                language=normalize_language(alt.language),
-                resolution=normalize_resolution(alt.quality),
-                text=alt.title or "",
-            ),
-            profile,
-        )
+        penalty = acceptance_rank(_release_candidate_from_alternate(alt), profile)
         if penalty is None:
             continue
         ranked.append((penalty, alt))
@@ -568,6 +567,21 @@ def _pick_alternate_heading(alternates: list[AlternateQuality], profile) -> Alte
         return None
     ranked.sort(key=lambda pair: pair[0])
     return ranked[0][1]
+
+
+def _sister_heading_for_profile(heading, alternates: list[AlternateQuality], profile) -> AlternateQuality | None:
+    linked_rank = _heading_acceptance_rank(heading, profile)
+    best = _pick_alternate_heading(alternates, profile)
+    if best is None:
+        return None
+    if linked_rank is None:
+        return best
+    from mediatracker.core.quality_profile import acceptance_rank
+
+    sister_rank = acceptance_rank(_release_candidate_from_alternate(best), profile)
+    if sister_rank is not None and sister_rank < linked_rank:
+        return best
+    return None
 
 
 def _seasons_covered(results: list[SourceResult], query: SourceQuery) -> bool:

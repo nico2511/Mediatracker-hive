@@ -143,6 +143,8 @@ class Media(Base):
     pref_quality: Mapped[str] = mapped_column(String(16), nullable=False, default="HD")
     pref_language: Mapped[str] = mapped_column(String(16), nullable=False, default="VFF")
     allow_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # CSV d'ids de profils ; NULL = chaîne globale. Colonne historique allow_fallback ignorée par le resolver.
+    fallback_profile_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Null uses the global download source order (wawacity, then Comet).
     source_order: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Null uses the global default quality profile.
@@ -730,7 +732,11 @@ class HiveRuche(Base):
 
     members: Mapped[list["HiveMember"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
     entries: Mapped[list["HiveEntry"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
+    signals: Mapped[list["HiveSignal"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
     versions: Mapped[list["HiveVersions"]] = relationship(
+        back_populates="ruche", cascade="all, delete-orphan"
+    )
+    signal_versions: Mapped[list["HiveSignalVersions"]] = relationship(
         back_populates="ruche", cascade="all, delete-orphan"
     )
 
@@ -1067,3 +1073,108 @@ class HiveEntry(Base):
     media_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     ruche: Mapped["HiveRuche"] = relationship(back_populates="entries")
+
+
+class HiveSignalVersions(Base):
+    """Dernier seq connu par origine pour les signaux gossip (flux séparé du catalogue)."""
+
+    __tablename__ = "hive_signal_versions"
+
+    ruche_id: Mapped[bytes] = mapped_column(
+        LargeBinary(16), ForeignKey("hive_ruche.ruche_id", ondelete="CASCADE"), primary_key=True
+    )
+    origin_instance_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    ruche: Mapped["HiveRuche"] = relationship(back_populates="signal_versions")
+
+
+class HiveSignal(Base):
+    """Signal signé possede/cherche/retire (document gossip distinct du catalogue)."""
+
+    __tablename__ = "hive_signal"
+    __table_args__ = (
+        Index("ix_hive_signal_ruche_origin", "ruche_id", "origin_instance_id"),
+        Index("ix_hive_signal_ruche_origin_seq", "ruche_id", "origin_instance_id", "seq"),
+        Index("ix_hive_signal_ruche_origin_cle", "ruche_id", "origin_instance_id", "cle_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ruche_id: Mapped[bytes] = mapped_column(
+        LargeBinary(16), ForeignKey("hive_ruche.ruche_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    origin_instance_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    signal: Mapped[str] = mapped_column(String(16), nullable=False)
+    cle_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    cle_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    signature_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
+    media_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mini_fiche_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    ruche: Mapped["HiveRuche"] = relationship(back_populates="signals")
+
+
+class HiveChercheMissPrompt(Base):
+    """Recherche sources échouée en mode ask : l’UI peut proposer d’annoncer à la ruche."""
+
+    __tablename__ = "hive_cherche_miss_prompt"
+
+    media_item_id: Mapped[int] = mapped_column(
+        ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True
+    )
+    prompted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class HiveChercheRetract(Base):
+    """Utilisateur a retiré sa demande : pas de republication auto tant que la ligne existe."""
+
+    __tablename__ = "hive_cherche_retract"
+
+    media_item_id: Mapped[int] = mapped_column(
+        ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True
+    )
+    retracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class HiveRequestResolution(Base):
+    """Décision locale accepter/refuser une demande cherche (origine jamais exposée en API)."""
+
+    __tablename__ = "hive_request_resolution"
+    __table_args__ = (
+        Index("ix_hive_request_resolution_ruche", "ruche_id"),
+        UniqueConstraint("ruche_id", "requester_origin", "cle_hash", name="uq_hive_request_resolution"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ruche_id: Mapped[bytes] = mapped_column(
+        LargeBinary(16), ForeignKey("hive_ruche.ruche_id", ondelete="CASCADE"), nullable=False
+    )
+    requester_origin: Mapped[str] = mapped_column(String(48), nullable=False)
+    cle_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    media_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class HiveWantedVolunteer(Base):
+    """Volontaire pour acquérir un titre listé dans Recherché (ne publie pas cherche)."""
+
+    __tablename__ = "hive_wanted_volunteer"
+    __table_args__ = (
+        Index("ix_hive_wanted_volunteer_ruche", "ruche_id"),
+        UniqueConstraint("ruche_id", "work_key", "volunteer_origin", name="uq_hive_wanted_volunteer"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ruche_id: Mapped[bytes] = mapped_column(
+        LargeBinary(16), ForeignKey("hive_ruche.ruche_id", ondelete="CASCADE"), nullable=False
+    )
+    work_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    volunteer_origin: Mapped[str] = mapped_column(String(48), nullable=False)
+    media_item_id: Mapped[int] = mapped_column(
+        ForeignKey("media_item.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

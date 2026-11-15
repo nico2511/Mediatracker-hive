@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
-from mediatracker.db.models import Media, Provider, SourceBinding
+from mediatracker.db.models import Media, MediaItem, Provider, SourceBinding
 from mediatracker.providers.base import SourceResult
 
 REVALIDATE_INTERVAL = timedelta(days=30)
@@ -160,8 +160,35 @@ def pick_bound_pages(
     return pages
 
 
+def should_persist_auto_binding(
+    media: Media,
+    items: list[MediaItem] | None,
+    *,
+    profile_rank: int,
+) -> bool:
+    """Films: no path when repli profile or not yet released. Series: always persist (repli included)."""
+    from mediatracker.core.film_availability import film_not_yet_available
+
+    if media.type == "film":
+        if profile_rank > 1:
+            return False
+        if film_not_yet_available(media, items):
+            return False
+    return True
+
+
+def clear_auto_binding_path(binding: SourceBinding) -> None:
+    """Drop stored path so the next poll runs a search instead of reusing a provisional page."""
+    if binding.path_manual:
+        return
+    binding.url = None
+    binding.path = None
+
+
 def remember_binding_fields(binding: SourceBinding, page_url: str | None, *, path: str | None = None) -> None:
     """Keep the historic absolute URL and the relative path used to rebuild it."""
+    if binding.path_manual:
+        return
     if page_url:
         binding.url = page_url
     extracted = path or path_from_url(page_url)

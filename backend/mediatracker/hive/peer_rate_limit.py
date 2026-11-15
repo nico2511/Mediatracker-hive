@@ -29,3 +29,22 @@ class PeerRateLimiter:
 
     def reset(self) -> None:
         self._hits.clear()
+
+
+def parse_retry_after_header(value: str | None, *, cap_seconds: float = 300.0) -> float | None:
+    """Délai HTTP Retry-After (secondes), plafonné."""
+    if not value or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    try:
+        return min(cap_seconds, max(0.0, float(raw)))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        moment = parsedate_to_datetime(raw)
+        delay = moment.timestamp() - time.time()
+        return min(cap_seconds, max(0.0, delay))
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None

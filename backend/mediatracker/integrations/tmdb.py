@@ -354,6 +354,7 @@ class TmdbClient:
         *,
         transport: httpx.BaseTransport | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        request_timeout: float = 20.0,
     ) -> None:
         from mediatracker.core.outbound_http import borrow_http_client
 
@@ -364,7 +365,7 @@ class TmdbClient:
             base_url="https://api.themoviedb.org/3",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
             params={"language": "fr-FR"},
-            timeout=20.0,
+            timeout=request_timeout,
         )
         self._sleeper = sleeper
 

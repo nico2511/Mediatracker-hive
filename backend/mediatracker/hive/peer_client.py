@@ -41,10 +41,19 @@ def gossip_sync_once(
     cursor: dict | None = None,
     limit: int | None = None,
     hint: bool = False,
+    signal_vector: dict[str, int] | None = None,
+    signals: list | None = None,
+    signal_cursor: dict | None = None,
 ) -> httpx.Response:
     import json
 
     doc: dict[str, object] = {"vector": vector, "entries": entries or []}
+    if signal_vector is not None:
+        doc["signal_vector"] = signal_vector
+    if signals is not None:
+        doc["signals"] = signals
+    if signal_cursor is not None:
+        doc["signal_cursor"] = signal_cursor
     if cursor is not None:
         doc["cursor"] = cursor
     if limit is not None:

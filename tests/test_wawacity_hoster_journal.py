@@ -45,7 +45,7 @@ def test_from_hosters_journals_refused_when_links_present_but_profile_rejects():
     with (
         patch("mediatracker.core.pipeline.unlock._journal_source_attempt", side_effect=_capture_journal),
         patch("mediatracker.core.pipeline.unlock.record_download_pass_verdict"),
-        patch("mediatracker.core.pipeline.unlock._fallback_allowed", return_value=False),
+        patch("mediatracker.core.profile_fallback.media_has_profile_repli_chain", return_value=False),
         patch("mediatracker.core.download_bitrate_sanity.filter_stored_links", return_value=[link]),
         patch("mediatracker.core.profile_attempt_adapters.choose_link_for_profile_attempt", return_value=None),
         patch(
@@ -121,7 +121,7 @@ def test_from_hosters_keeps_debrid_error_after_all_hosters_fail():
     with (
         patch("mediatracker.core.pipeline.unlock._journal_source_attempt"),
         patch("mediatracker.core.pipeline.unlock.record_download_pass_verdict", side_effect=_capture_verdict),
-        patch("mediatracker.core.pipeline.unlock._fallback_allowed", return_value=False),
+        patch("mediatracker.core.profile_fallback.media_has_profile_repli_chain", return_value=False),
         patch("mediatracker.core.download_bitrate_sanity.filter_stored_links", return_value=[link]),
         patch("mediatracker.core.profile_attempt_adapters.choose_link_for_profile_attempt", side_effect=_choose),
         patch(

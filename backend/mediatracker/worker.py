@@ -72,6 +72,14 @@ def _maybe_session(db, label: str, fn) -> None:
         db.rollback()
 
 
+def _catchup_cherche_signals(db, settings) -> None:
+    from datetime import datetime, timezone
+
+    from mediatracker.hive.signal_policy import maybe_catchup_cherche_for_followed
+
+    maybe_catchup_cherche_for_followed(db, settings, now=datetime.now(timezone.utc))
+
+
 def _hive_gossip_isolated(factory, settings) -> None:
     run_worker_hive_gossip_isolated(factory, settings)
 
@@ -102,6 +110,11 @@ def _run_worker_pass(db, settings, factory) -> None:
     commit_retry(db)
     _poll_sources_isolated(factory, settings)
     _maybe_session(db, "Hive catalogue", lambda: sync_hive_catalog(db, settings))
+    _maybe_savepoint(
+        db,
+        "Hive signaux cherche (rattrapage)",
+        lambda: _catchup_cherche_signals(db, settings),
+    )
     commit_retry(db)
     _hive_gossip_isolated(factory, settings)
     _maybe_session(db, "Catalogue", lambda: maybe_refresh_catalog(db, settings))

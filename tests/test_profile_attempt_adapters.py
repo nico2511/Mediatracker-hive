@@ -374,11 +374,12 @@ def test_legacy_comet_context_unchanged_without_explicit_profile(client, db):
     db.commit()
 
     profile, prefs = legacy_comet_context(db, media, settings)
-    from mediatracker.core.quality_profile import profile_for_media
+    from mediatracker.core.quality_profile import preferences_for, profile_for_media
 
-    assert profile == profile_for_media(db, media)
-    assert prefs.quality == "1080p"
-    assert prefs.language == "MULTI"
+    expected = profile_for_media(db, media)
+    assert profile == expected
+    assert expected is not None
+    assert prefs == preferences_for(expected)
 
 
 def test_adapters_do_not_embed_profile_chain_resolution():
@@ -389,7 +390,7 @@ def test_adapters_do_not_embed_profile_chain_resolution():
 
 def test_non_wired_call_sites_inventory_documents_legacy_boundaries():
     joined = "\n".join(NON_WIRED_PROFILE_ATTEMPT_CALL_SITES)
-    assert "legacy_comet_context" in joined
+    assert "_choose_link" in joined
     assert "unlock._from_named_source" not in joined
     assert "_ingest_other_versions" not in joined
 

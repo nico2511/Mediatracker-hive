@@ -5,6 +5,7 @@ import { RouterLink, useRoute, useRouter } from "vue-router";
 import { api, userFacingApiError } from "../../api";
 import { useHiveEnabled } from "../../composables/useHive";
 import {
+  hiveTransferEndTimeToMinutes,
   hiveTransferMinutesToTime,
   hiveTransferTimeToMinutes,
   HIVE_TRANSFER_ALL_DAY_END,
@@ -53,6 +54,8 @@ const transferWinEnd = ref(24 * 60);
 const transferWinStartTime = ref("00:00");
 const transferWinEndTime = ref("00:00");
 const catalogAutoShare = ref(false);
+const hiveRequestOnMiss = ref<"auto" | "ask" | "never">("auto");
+const hiveAutoAcceptRequests = ref(false);
 
 const transferWinAllDay = computed({
   get: () => isHiveTransferAllDay(transferWinStart.value, transferWinEnd.value),
@@ -85,7 +88,10 @@ function applyTransferWindowTimesToMinutes() {
     return;
   }
   transferWinStart.value = hiveTransferTimeToMinutes(transferWinStartTime.value);
-  transferWinEnd.value = Math.max(1, hiveTransferTimeToMinutes(transferWinEndTime.value));
+  transferWinEnd.value = Math.max(
+    1,
+    hiveTransferEndTimeToMinutes(transferWinEndTime.value, transferWinStart.value),
+  );
 }
 
 function onTransferStartTimeInput(event: Event) {
@@ -131,6 +137,10 @@ async function load() {
     syncTransferWindowFieldsFromMinutes();
     catalogAutoShare.value =
       map.get("hive_catalog_auto_share") === true || map.get("hive_catalog_auto_share") === "true";
+    const onMiss = String(map.get("hive_request_on_miss") || "auto").toLowerCase();
+    hiveRequestOnMiss.value = onMiss === "ask" || onMiss === "never" ? onMiss : "auto";
+    hiveAutoAcceptRequests.value =
+      map.get("hive_auto_accept_requests") === true || map.get("hive_auto_accept_requests") === "true";
     if (hiveOn.value) {
       identity.value = await api<Identity>("/api/v1/hive/identity");
       ruches.value = await api<RucheRow[]>("/api/v1/hive/ruches");
@@ -166,6 +176,8 @@ async function saveCore() {
         hive_transfer_window_start: transferWinStart.value,
         hive_transfer_window_end: transferWinEnd.value,
         hive_catalog_auto_share: catalogAutoShare.value,
+        hive_request_on_miss: hiveRequestOnMiss.value,
+        hive_auto_accept_requests: hiveAutoAcceptRequests.value,
       },
     });
     await load();
@@ -397,6 +409,58 @@ async function confirmReset() {
         <p v-if="inviteLink" class="token hive-invite">Lien d’invitation : {{ inviteLink }}</p>
       </section>
 
+      <section class="hive-block panel stack" aria-labelledby="hive-request-miss-title">
+        <h2 id="hive-request-miss-title" class="settings-section-title">Demandes à la ruche</h2>
+        <p class="hive-block-lead hint">
+          Sans clé AllDebrid, le suivi est toujours une demande à la ruche. Avec une clé, la recherche habituelle passe
+          d’abord ; ce réglage ne s’applique que s’il n’y a aucun résultat. Un média suivi ainsi annoncé fait office de
+          demande anonyme : il n’y a pas de file de demandes séparée.
+        </p>
+        <fieldset class="hive-request-miss-options">
+          <legend class="visually-hidden">Demander à la ruche quand rien n’est trouvé</legend>
+          <label class="hive-request-miss-opt" :class="{ selected: hiveRequestOnMiss === 'auto' }">
+            <input v-model="hiveRequestOnMiss" type="radio" name="hive_request_on_miss" value="auto" />
+            <span class="stack tight">
+              <strong>Automatique</strong>
+              <span class="hint">Dès que la recherche ne trouve rien, le suivi en attente est annoncé à la ruche.</span>
+            </span>
+          </label>
+          <label class="hive-request-miss-opt" :class="{ selected: hiveRequestOnMiss === 'ask' }">
+            <input v-model="hiveRequestOnMiss" type="radio" name="hive_request_on_miss" value="ask" />
+            <span class="stack tight">
+              <strong>Me demander</strong>
+              <span class="hint"
+                >Un bouton « Demander à la ruche » apparaît sur la fiche. Rien n’est annoncé sans votre accord.</span
+              >
+            </span>
+          </label>
+          <label class="hive-request-miss-opt" :class="{ selected: hiveRequestOnMiss === 'never' }">
+            <input v-model="hiveRequestOnMiss" type="radio" name="hive_request_on_miss" value="never" />
+            <span class="stack tight">
+              <strong>Jamais</strong>
+              <span class="hint"
+                >S’il y a une clé AllDebrid, le suivi reste local et aucune demande n’est envoyée. Sans clé, le suivi
+                reste une demande à la ruche.</span
+              >
+            </span>
+          </label>
+        </fieldset>
+        <label class="hive-field row sp">
+          <span>
+            <span class="label">Accepter automatiquement les demandes reçues</span>
+            <span class="hint block">Désactivé par défaut : chaque demande reste à valider dans Reçues.</span>
+          </span>
+          <span class="row">
+            <input
+              v-model="hiveAutoAcceptRequests"
+              type="checkbox"
+              data-testid="hive-auto-accept-requests-toggle"
+            />
+            <span>{{ hiveAutoAcceptRequests ? "Activé" : "Désactivé" }}</span>
+          </span>
+        </label>
+      </section>
+
       <section class="hive-block panel stack" aria-labelledby="hive-share-title">
         <h2 id="hive-share-title" class="settings-section-title">Partage reçu</h2>
         <label class="hive-field row sp">
@@ -614,6 +678,37 @@ async function confirmReset() {
 
 .hive-invite {
   margin-top: 0.5rem;
+}
+
+.hive-request-miss-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.hive-request-miss-opt {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.hive-request-miss-opt.selected {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--hair));
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+}
+
+.hive-request-miss-opt input {
+  margin-top: 0.2rem;
+}
+
+.stack.tight {
+  gap: 0.15rem;
 }
 
 .token {

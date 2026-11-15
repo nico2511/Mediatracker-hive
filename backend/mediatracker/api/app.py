@@ -138,6 +138,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             from mediatracker.hive.transfer_runtime import apply_hive_send_bandwidth
 
             apply_hive_send_bandwidth(app, db)
+            from datetime import datetime, timezone
+
+            from mediatracker.hive.signal_policy import maybe_catchup_cherche_for_followed
+
+            maybe_catchup_cherche_for_followed(db, app.state.settings, now=datetime.now(timezone.utc))
+            db.commit()
         from mediatracker.integrations.jellyfin_db_sessions import purge_stale_sessions
 
         purge_stale_sessions(Path(app.state.settings.config_dir))

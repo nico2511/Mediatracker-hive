@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hiveTransferEndTimeToMinutes,
   hiveTransferMinutesToTime,
   hiveTransferTimeToMinutes,
   isHiveTransferAllDay,
@@ -24,5 +25,16 @@ describe("hiveTransferWindow", () => {
   it("gère 1440 minutes comme fin de journée", () => {
     expect(hiveTransferMinutesToTime(HIVE_TRANSFER_ALL_DAY_END)).toBe("00:00");
     expect(hiveTransferTimeToMinutes("24:00")).toBe(HIVE_TRANSFER_ALL_DAY_END);
+  });
+
+  it("réinterprète 00:00 en fin de journée si le début n’est pas minuit", () => {
+    const start = 22 * 60;
+    const endDisplay = hiveTransferMinutesToTime(HIVE_TRANSFER_ALL_DAY_END);
+    expect(endDisplay).toBe("00:00");
+    expect(hiveTransferEndTimeToMinutes(endDisplay, start)).toBe(HIVE_TRANSFER_ALL_DAY_END);
+    expect(hiveTransferEndTimeToMinutes("06:00", start)).toBe(6 * 60);
+    expect(hiveTransferEndTimeToMinutes("00:00", HIVE_TRANSFER_ALL_DAY_START)).toBe(
+      HIVE_TRANSFER_ALL_DAY_START,
+    );
   });
 });

@@ -22,6 +22,9 @@ import HiveCatalogueView from "./views/hive/HiveCatalogueView.vue";
 import HiveWorkView from "./views/hive/HiveWorkView.vue";
 import HiveJoinView from "./views/hive/HiveJoinView.vue";
 import HiveRucheMembersView from "./views/hive/HiveRucheMembersView.vue";
+import HiveMyRequestsView from "./views/hive/HiveMyRequestsView.vue";
+import HiveReceivedRequestsView from "./views/hive/HiveReceivedRequestsView.vue";
+import HiveWantedRequestsView from "./views/hive/HiveWantedRequestsView.vue";
 import SettingsHiveSection from "./views/settings/SettingsHiveSection.vue";
 import SettingsSourcesSection from "./views/settings/SettingsSourcesSection.vue";
 import { useHiveEnabled } from "./composables/useHive";
@@ -55,6 +58,9 @@ const router = createRouter({
           children: [
             { path: "", redirect: "/hive/catalogue" },
             { path: "catalogue", component: HiveCatalogueView },
+            { path: "demandes", component: HiveMyRequestsView },
+            { path: "recues", component: HiveReceivedRequestsView },
+            { path: "recherche", component: HiveWantedRequestsView },
             { path: "catalogue/:workKey", component: HiveWorkView },
             { path: "rejoindre", component: HiveJoinView },
             { path: "ruches/:rucheIdHex/membres", component: HiveRucheMembersView },

@@ -6,6 +6,7 @@ import {
   formatProfileFallbackOrder,
   parseProfileFallbackOrder,
   qualityProfileSummary,
+  resolveEffectiveChainIds,
   type QualityProfileLike,
 } from "./profileFallback";
 
@@ -36,11 +37,16 @@ describe("profileFallback order", () => {
     expect(formatProfileFallbackOrder([7, 3, 12])).toBe("7,3,12");
   });
 
-  it("chaîne effective avec repli et déduplication du principal", () => {
-    expect(buildEffectiveProfileChain(1, [1, 2], true)).toEqual([1, 2]);
+  it("chaîne effective globale avec repli et déduplication du principal", () => {
+    expect(resolveEffectiveChainIds(1, [1, 2], true, null)).toEqual([1, 2]);
+    expect(resolveEffectiveChainIds(1, [2, 3], true, null)).toEqual([1, 2, 3]);
+    expect(resolveEffectiveChainIds(1, [2], false, null)).toEqual([1]);
+    expect(resolveEffectiveChainIds(1, [], true, null)).toEqual([1]);
     expect(buildEffectiveProfileChain(1, [2, 3], true)).toEqual([1, 2, 3]);
-    expect(buildEffectiveProfileChain(1, [2], false)).toEqual([1]);
-    expect(buildEffectiveProfileChain(1, [], true)).toEqual([1]);
+  });
+
+  it("chaîne personnalisée vide : principal seul", () => {
+    expect(resolveEffectiveChainIds(1, [2, 3], true, [])).toEqual([1]);
   });
 
   it("résume un profil et la chaîne affichée", () => {
@@ -50,8 +56,13 @@ describe("profileFallback order", () => {
       [1, compact],
       [2, souple],
     ]);
-    const chain = buildEffectiveProfileChain(1, [1, 2], true);
-    const { rows, hint } = describeEffectiveChain(chain, byId, 1, [1, 2]);
+    const chain = resolveEffectiveChainIds(1, [1, 2], true, null);
+    const { rows, hint } = describeEffectiveChain(chain, byId, {
+      usesGlobal: true,
+      globalAllowFallback: true,
+      globalOrder: [1, 2],
+      principalId: 1,
+    });
     expect(rows.map((r) => r.role)).toEqual(["principal", "repli global"]);
     expect(hint).toContain("n'est pas répété");
   });

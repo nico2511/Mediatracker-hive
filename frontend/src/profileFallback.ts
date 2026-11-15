@@ -1,4 +1,5 @@
 export const PROFILE_FALLBACK_ORDER_KEY = "profile_fallback_order";
+export const GLOBAL_ALLOW_FALLBACK_KEY = "allow_fallback";
 
 export interface QualityProfileLike {
   id: number;
@@ -34,28 +35,43 @@ export function formatProfileFallbackOrder(ids: number[]): string {
   return ids.join(",");
 }
 
-/** Principal first, then global fallbacks when allowed; dedupe by id. */
-export function buildEffectiveProfileChain(
-  principalId: number | null,
-  globalOrder: number[],
-  allowFallback: boolean,
-): number[] {
-  if (principalId == null || principalId <= 0) {
-    return [];
-  }
+function chainIds(principalId: number, fallbackIds: number[]): number[] {
   const chain = [principalId];
-  if (!allowFallback || globalOrder.length === 0) {
-    return chain;
-  }
   const seen = new Set(chain);
-  for (const profileId of globalOrder) {
-    if (seen.has(profileId)) {
+  for (const profileId of fallbackIds) {
+    if (profileId === principalId || seen.has(profileId)) {
       continue;
     }
     seen.add(profileId);
     chain.push(profileId);
   }
   return chain;
+}
+
+/** Chaîne effective : global (NULL côté API) ou liste personnalisée (éventuellement vide). */
+export function resolveEffectiveChainIds(
+  principalId: number | null,
+  globalOrder: number[],
+  globalAllowFallback: boolean,
+  mediaFallbackIds: number[] | null,
+): number[] {
+  if (principalId == null || principalId <= 0) {
+    return [];
+  }
+  if (mediaFallbackIds === null) {
+    const fallbacks = globalAllowFallback ? globalOrder : [];
+    return chainIds(principalId, fallbacks);
+  }
+  return chainIds(principalId, mediaFallbackIds);
+}
+
+/** @deprecated utiliser resolveEffectiveChainIds */
+export function buildEffectiveProfileChain(
+  principalId: number | null,
+  globalOrder: number[],
+  allowFallback: boolean,
+): number[] {
+  return resolveEffectiveChainIds(principalId, globalOrder, allowFallback, null);
 }
 
 function formatResolution(profile: QualityProfileLike): string | null {
@@ -102,39 +118,85 @@ export function qualityProfileSummary(profile: QualityProfileLike): string {
   return parts.join(" · ") || profile.name;
 }
 
+export type ChainRowRole = "principal" | "repli global" | "repli fiche";
+
 export interface ChainRow {
   profileId: number;
   name: string;
-  role: "principal" | "repli global";
+  role: ChainRowRole;
 }
 
 export function describeEffectiveChain(
   chainIds: number[],
   profileById: Map<number, QualityProfileLike>,
-  principalId: number | null,
-  globalOrder: number[],
+  options: {
+    usesGlobal: boolean;
+    globalAllowFallback: boolean;
+    globalOrder: number[];
+    principalId: number | null;
+  },
 ): { rows: ChainRow[]; hint: string } {
+  const { usesGlobal, globalAllowFallback, globalOrder, principalId } = options;
   const rows: ChainRow[] = chainIds.map((profileId, index) => {
     const profile = profileById.get(profileId);
+    let role: ChainRowRole = "principal";
+    if (index > 0) {
+      role = usesGlobal ? "repli global" : "repli fiche";
+    }
     return {
       profileId,
       name: profile?.name ?? `Profil ${profileId}`,
-      role: index === 0 ? "principal" : "repli global",
+      role,
     };
   });
-  const globalNames = globalOrder
-    .map((id) => profileById.get(id)?.name ?? `Profil ${id}`)
-    .filter(Boolean);
   let hint = "";
-  if (globalNames.length && principalId != null) {
-    const principalName = profileById.get(principalId)?.name ?? "principal";
-    const dup = globalOrder.includes(principalId);
-    hint = `Liste globale : ${globalNames.join(", puis ")}.`;
-    if (dup) {
-      hint += ` ${principalName} est déjà principal : il n'est pas répété.`;
+  if (usesGlobal) {
+    if (!globalAllowFallback) {
+      hint = "Repli global désactivé : seul le profil principal est essayé.";
+    } else if (globalOrder.length === 0) {
+      hint = "Ordre global vide : seul le profil principal est essayé.";
+    } else {
+      const globalNames = globalOrder.map((id) => profileById.get(id)?.name ?? `Profil ${id}`);
+      hint = `Réglage global : repli Oui. Ordre global après le principal : ${globalNames.join(", puis ")}.`;
+      if (principalId != null && globalOrder.includes(principalId)) {
+        const principalName = profileById.get(principalId)?.name ?? "principal";
+        hint += ` ${principalName} est déjà principal : il n'est pas répété.`;
+      }
     }
-  } else if (globalNames.length === 0) {
-    hint = "Liste globale vide : aucun profil de repli.";
+  } else if (chainIds.length <= 1) {
+    hint = "Chaîne personnalisée sans repli : seul le profil principal est essayé.";
+  } else {
+    hint = "Chaîne personnalisée pour cette fiche (ordre ci-dessus).";
   }
   return { rows, hint };
+}
+
+export function toggleCustomFallbackSelection(
+  ordered: number[],
+  profileId: number,
+  principalId: number | null,
+  checked: boolean,
+): number[] {
+  if (principalId != null && profileId === principalId) {
+    return ordered;
+  }
+  if (checked) {
+    return ordered.includes(profileId) ? ordered : [...ordered, profileId];
+  }
+  return ordered.filter((id) => id !== profileId);
+}
+
+export function moveCustomFallback(ordered: number[], profileId: number, delta: number): number[] {
+  const index = ordered.indexOf(profileId);
+  if (index < 0) {
+    return ordered;
+  }
+  const next = index + delta;
+  if (next < 0 || next >= ordered.length) {
+    return ordered;
+  }
+  const copy = [...ordered];
+  const [row] = copy.splice(index, 1);
+  copy.splice(next, 0, row);
+  return copy;
 }

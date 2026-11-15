@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -59,9 +60,10 @@ def active_hive_fetches_for_peer(
 
 
 class HiveGrantMintError(Exception):
-    def __init__(self, code: str, message: str = "") -> None:
+    def __init__(self, code: str, message: str = "", *, retry_after_seconds: float | None = None) -> None:
         self.code = code
         self.message = message
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(message or code)
 
 
@@ -76,6 +78,211 @@ def _source_at(sources: list[dict[str, Any]], index: int) -> dict[str, Any] | No
         return None
     src = sources[index]
     return src if isinstance(src, dict) else None
+
+
+def _ranked_sources_for_ctx(db: Session, ctx: DownloadHiveFetch) -> list[dict[str, Any]]:
+    try:
+        raw = json.loads(ctx.sources_json or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw, list):
+        return []
+    return rank_sources(db, [s for s in raw if isinstance(s, dict)])
+
+
+def hive_source_identity(source: dict[str, Any]) -> tuple[str, str] | None:
+    origin = str(source.get("origine") or "").strip()
+    file_hex = str(source.get("file_id_hex") or "").strip().lower()
+    if not origin or not file_hex:
+        return None
+    return origin, file_hex
+
+
+def hive_ctx_source_identity(ctx: DownloadHiveFetch) -> tuple[str, str]:
+    return ctx.origin_instance_id.strip(), ctx.file_id.hex().lower()
+
+
+def hive_source_index_for_identity(ranked: list[dict[str, Any]], identity: tuple[str, str]) -> int | None:
+    for index, source in enumerate(ranked):
+        ident = hive_source_identity(source)
+        if ident == identity:
+            return index
+    return None
+
+
+def current_ranked_source_index(ranked: list[dict[str, Any]], ctx: DownloadHiveFetch) -> int:
+    found = hive_source_index_for_identity(ranked, hive_ctx_source_identity(ctx))
+    if found is not None:
+        return found
+    if not ranked:
+        return 0
+    return max(0, min(int(ctx.active_source_index), len(ranked) - 1))
+
+
+def _ring_indices_from(rank_len: int, cur: int) -> list[int]:
+    """Anneau inclusif : source courante en premier."""
+    if rank_len <= 0:
+        return []
+    return [(cur + i) % rank_len for i in range(rank_len)]
+
+
+def _ring_indices_after(rank_len: int, cur: int) -> list[int]:
+    """Anneau à partir de la source suivante (failover après occupé/429)."""
+    if rank_len <= 0:
+        return []
+    return [(cur + 1 + i) % rank_len for i in range(rank_len)]
+
+
+@dataclass(frozen=True)
+class _HiveFetchCtxSnapshot:
+    active_source_index: int
+    ruche_id: bytes
+    file_id: bytes
+    origin_instance_id: str
+    peer_base_url: str
+    grant_ciphertext: str | None
+    grant_expires_at: datetime | None
+    updated_at: datetime | None
+
+
+def _snapshot_hive_fetch_ctx(ctx: DownloadHiveFetch) -> _HiveFetchCtxSnapshot:
+    return _HiveFetchCtxSnapshot(
+        active_source_index=int(ctx.active_source_index),
+        ruche_id=bytes(ctx.ruche_id),
+        file_id=bytes(ctx.file_id),
+        origin_instance_id=str(ctx.origin_instance_id or ""),
+        peer_base_url=str(ctx.peer_base_url or ""),
+        grant_ciphertext=ctx.grant_ciphertext,
+        grant_expires_at=ctx.grant_expires_at,
+        updated_at=ctx.updated_at,
+    )
+
+
+def _restore_hive_fetch_ctx(ctx: DownloadHiveFetch, snap: _HiveFetchCtxSnapshot) -> None:
+    ctx.active_source_index = snap.active_source_index
+    ctx.ruche_id = snap.ruche_id
+    ctx.file_id = snap.file_id
+    ctx.origin_instance_id = snap.origin_instance_id
+    ctx.peer_base_url = snap.peer_base_url
+    ctx.grant_ciphertext = snap.grant_ciphertext
+    ctx.grant_expires_at = snap.grant_expires_at
+    ctx.updated_at = snap.updated_at
+
+
+def _peer_unusable_for_job(
+    db: Session,
+    row: Download,
+    peer_base_url: str,
+    now: datetime,
+    *,
+    limit: int,
+) -> bool:
+    from mediatracker.hive.download_pipeline import (
+        hive_peer_busy_key,
+        hive_peer_marked_busy,
+        mark_hive_peer_busy,
+    )
+
+    if not peer_base_url:
+        return True
+    peer_key = hive_peer_busy_key(peer_base_url)
+    if hive_peer_marked_busy(row.id, peer_key, now):
+        return True
+    if active_hive_fetches_for_peer(db, peer_base_url, exclude_download_id=row.id) >= limit:
+        mark_hive_peer_busy(row.id, peer_key, now)
+        return True
+    return False
+
+
+def apply_hive_fetch_source(
+    db: Session,
+    ctx: DownloadHiveFetch,
+    source: dict[str, Any],
+    *,
+    index: int,
+    now: datetime,
+) -> bool:
+    resolved = _resolve_active_source(db, source)
+    if resolved is None:
+        return False
+    ruche_id, file_id, origin, peer_base = resolved
+    moment = _aware_utc(now)
+    ctx.active_source_index = int(index)
+    ctx.ruche_id = ruche_id
+    ctx.file_id = file_id
+    ctx.origin_instance_id = origin
+    ctx.peer_base_url = peer_base
+    ctx.grant_ciphertext = None
+    ctx.grant_expires_at = None
+    ctx.updated_at = moment
+    return True
+
+
+def hive_failover_after_peer_busy(
+    db: Session,
+    row: Download,
+    ctx: DownloadHiveFetch,
+    now: datetime,
+    *,
+    retry_after: timedelta | None = None,
+) -> bool:
+    """Bascule en anneau sur les sources classées ; False si aucune libre (ctx restauré)."""
+    from mediatracker.hive.download_pipeline import (
+        hive_failover_switch_cap_reached,
+        hive_peer_busy_key,
+        mark_hive_peer_busy,
+        record_hive_failover_switch,
+    )
+    from mediatracker.hive.transfer_settings import transfer_parallel_limit
+
+    moment = _aware_utc(now)
+    snap = _snapshot_hive_fetch_ctx(ctx)
+    ranked = _ranked_sources_for_ctx(db, ctx)
+    if len(ranked) <= 1:
+        if ctx.peer_base_url:
+            mark_hive_peer_busy(
+                row.id,
+                hive_peer_busy_key(ctx.peer_base_url),
+                moment,
+                retry_after=retry_after,
+            )
+        return False
+    if hive_failover_switch_cap_reached(row.id):
+        if ctx.peer_base_url:
+            mark_hive_peer_busy(
+                row.id,
+                hive_peer_busy_key(ctx.peer_base_url),
+                moment,
+                retry_after=retry_after,
+            )
+        return False
+    if ctx.peer_base_url:
+        mark_hive_peer_busy(
+            row.id,
+            hive_peer_busy_key(ctx.peer_base_url),
+            moment,
+            retry_after=retry_after,
+        )
+    cur = current_ranked_source_index(ranked, ctx)
+    limit = transfer_parallel_limit(db)
+    for index in _ring_indices_after(len(ranked), cur):
+        if hive_failover_switch_cap_reached(row.id):
+            _restore_hive_fetch_ctx(ctx, snap)
+            return False
+        source = ranked[index]
+        resolved = _resolve_active_source(db, source)
+        if resolved is None:
+            continue
+        _, _, _, peer_base = resolved
+        if _peer_unusable_for_job(db, row, peer_base, moment, limit=limit):
+            continue
+        if not apply_hive_fetch_source(db, ctx, source, index=index, now=moment):
+            continue
+        if index != cur:
+            record_hive_failover_switch(row.id)
+        return True
+    _restore_hive_fetch_ctx(ctx, snap)
+    return False
 
 
 def _resolve_active_source(db: Session, src: dict[str, Any]) -> tuple[bytes, bytes, str, str] | None:
@@ -165,7 +372,16 @@ def mint_remote_fetch_grant(
     )
     if resp.status_code != 200:
         code = {401: "peer_auth", 404: "peer_file", 429: "peer_rate"}.get(resp.status_code, "peer_mint")
-        raise HiveGrantMintError(code, f"Mint grant refusé ({resp.status_code}).")
+        retry_after_seconds = None
+        if resp.status_code == 429:
+            from mediatracker.hive.peer_rate_limit import parse_retry_after_header
+
+            retry_after_seconds = parse_retry_after_header(resp.headers.get("Retry-After"))
+        raise HiveGrantMintError(
+            code,
+            f"Mint grant refusé ({resp.status_code}).",
+            retry_after_seconds=retry_after_seconds,
+        )
     try:
         body = resp.json()
     except ValueError as exc:
@@ -226,8 +442,8 @@ def attach_or_refresh_hive_fetch(
 
         if hive_catalog_drift(ctx, match):
             return None
-        index = max(0, int(ctx.active_source_index))
-        active = _source_at(sources, index) or sources[0]
+        index = current_ranked_source_index(sources, ctx)
+        active = sources[index]
         resolved = _resolve_active_source(db, active)
         if resolved is None:
             return None
@@ -443,9 +659,26 @@ def prepare_hive_aria2_unlock(
         _journal_source_attempt(db, row, media, item, "hive", issue="empty", now=now)
         return None
 
-    if ctx.peer_base_url:
-        limit = transfer_parallel_limit(db)
-        if active_hive_fetches_for_peer(db, ctx.peer_base_url, exclude_download_id=row.id) >= limit:
+    from datetime import timedelta
+
+    from mediatracker.hive.download_pipeline import (
+        hive_failover_switch_cap_reached,
+        hive_peer_busy_key,
+        mark_hive_peer_busy,
+        record_hive_failover_switch,
+    )
+
+    ranked = _ranked_sources_for_ctx(db, ctx)
+    limit = transfer_parallel_limit(db)
+    grant = None
+    ranked_snap: _HiveFetchCtxSnapshot | None = None
+    if not ranked:
+        peer_key = hive_peer_busy_key(ctx.peer_base_url)
+        peer_full = (
+            ctx.peer_base_url
+            and active_hive_fetches_for_peer(db, ctx.peer_base_url, exclude_download_id=row.id) >= limit
+        )
+        if peer_full:
             _journal_source_attempt(
                 db,
                 row,
@@ -458,17 +691,80 @@ def prepare_hive_aria2_unlock(
             )
             defer_hive_peer_busy(row, now)
             return "waiting"
-
-    try:
-        grant = ensure_mint_for_download(db, settings, ctx, now=now)
-    except HiveGrantMintError as exc:
-        _journal_source_attempt(db, row, media, item, "hive", issue="error", reason=exc.message, now=now)
-        if exc.code == "peer_rate":
-            defer_hive_peer_busy(row, now)
+        try:
+            grant = ensure_mint_for_download(db, settings, ctx, now=now)
+        except HiveGrantMintError as exc:
+            _journal_source_attempt(db, row, media, item, "hive", issue="error", reason=exc.message, now=now)
+            if exc.code == "peer_rate":
+                retry_after = None
+                if exc.retry_after_seconds is not None:
+                    retry_after = timedelta(seconds=float(exc.retry_after_seconds))
+                mark_hive_peer_busy(row.id, peer_key, now, retry_after=retry_after)
+                defer_hive_peer_busy(row, now)
+                return "waiting"
+            if defer_final:
+                return None
+            _fail(db, row, "HIVE_GRANT", exc.message or "Grant Hive refusé.", now)
             return "waiting"
-        if defer_final:
-            return None
-        _fail(db, row, "HIVE_GRANT", exc.message or "Grant Hive refusé.", now)
+    else:
+        ranked_snap = _snapshot_hive_fetch_ctx(ctx)
+        cur = current_ranked_source_index(ranked, ctx)
+        for index in _ring_indices_from(len(ranked), cur):
+            if hive_failover_switch_cap_reached(row.id):
+                break
+            source = ranked[index]
+            resolved = _resolve_active_source(db, source)
+            if resolved is None:
+                continue
+            _, _, _, peer_base = resolved
+            if _peer_unusable_for_job(db, row, peer_base, now, limit=limit):
+                _journal_source_attempt(
+                    db,
+                    row,
+                    media,
+                    item,
+                    "hive",
+                    issue="empty",
+                    reason=HIVE_PEER_BUSY_MESSAGE,
+                    now=now,
+                )
+                continue
+            if not apply_hive_fetch_source(db, ctx, source, index=index, now=now):
+                continue
+            try:
+                grant = ensure_mint_for_download(db, settings, ctx, now=now)
+                if index != cur:
+                    record_hive_failover_switch(row.id)
+                break
+            except HiveGrantMintError as exc:
+                _journal_source_attempt(db, row, media, item, "hive", issue="error", reason=exc.message, now=now)
+                if exc.code == "peer_rate":
+                    retry_after = None
+                    if exc.retry_after_seconds is not None:
+                        retry_after = timedelta(seconds=float(exc.retry_after_seconds))
+                    peer_key = hive_peer_busy_key(peer_base)
+                    mark_hive_peer_busy(row.id, peer_key, now, retry_after=retry_after)
+                    continue
+                _restore_hive_fetch_ctx(ctx, ranked_snap)
+                if defer_final:
+                    return None
+                _fail(db, row, "HIVE_GRANT", exc.message or "Grant Hive refusé.", now)
+                return "waiting"
+
+    if grant is None and ranked:
+        if ranked_snap is not None:
+            _restore_hive_fetch_ctx(ctx, ranked_snap)
+        _journal_source_attempt(
+            db,
+            row,
+            media,
+            item,
+            "hive",
+            issue="empty",
+            reason=HIVE_PEER_BUSY_MESSAGE,
+            now=now,
+        )
+        defer_hive_peer_busy(row, now)
         return "waiting"
 
     from mediatracker.hive.download_pipeline import validate_hive_download_url

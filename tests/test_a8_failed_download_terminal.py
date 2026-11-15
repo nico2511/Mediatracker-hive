@@ -132,13 +132,66 @@ def test_worker_does_not_resume_failed_download(client, app):
         db.close()
 
 
-def test_fill_missing_does_not_queue_while_failed(client, app):
+def test_fill_missing_requeues_failed_when_poll_finds_links(client, app):
+    login(client)
+    media_body = client.post(
+        "/api/v1/media",
+        json={"type": "series", "title": "Lac Virtuel", "year": 2026},
+        headers=csrf(client),
+    )
+    assert media_body.status_code == 201
+    mid = media_body.json()["id"]
+    ep = client.post(
+        f"/api/v1/media/{mid}/items",
+        json={"season": 1, "episode": 1, "title": "Un", "air_date": "2020-01-01"},
+        headers=csrf(client),
+    )
+    assert ep.status_code == 201
+    item_id = ep.json()["id"]
+    db = app.state.session_factory()
+    try:
+        item = db.get(MediaItem, item_id)
+        media = db.get(Media, mid)
+        download = Download(
+            media_item_id=item.id,
+            state="failed",
+            error_code="NO_LINK",
+            error="aucun lien enregistré",
+            created_at=NOW,
+        )
+        db.add(download)
+        item.state = "missing"
+        item.downloaded = False
+        item.watched = False
+        media.followed = True
+        media.new_episode_policy = "auto"
+        db.commit()
+        assert _blocking_download(db, item.id) is False
+        report = run_poll(
+            db,
+            media,
+            _provider_id(db),
+            _Source(episode=item.episode or 1),
+            app.state.settings,
+            now=LATER,
+            force=True,
+        )
+        assert report.queued == 1
+        db.refresh(download)
+        assert download.state == "pending"
+        assert download.error_code is None
+    finally:
+        db.close()
+
+
+def test_fill_missing_keeps_debrid_failed_blocking(client, app):
     download_id, _debrid = _fail_job(client, app)
     db = app.state.session_factory()
     try:
         download = db.get(Download, download_id)
         item = db.get(MediaItem, download.media_item_id)
         media = db.get(Media, item.media_id)
+        assert download.error_code not in {None, "NO_LINK", "PROFILE", "POLL_PROFILE_MISSING"}
         item.state = "missing"
         item.downloaded = False
         item.watched = False
@@ -157,12 +210,8 @@ def test_fill_missing_does_not_queue_while_failed(client, app):
             force=True,
         )
         assert report.queued == 0
-        assert (
-            db.scalar(
-                select(Download.id).where(Download.media_item_id == item.id, Download.state == "pending")
-            )
-            is None
-        )
+        db.refresh(download)
+        assert download.state == "failed"
     finally:
         db.close()
 

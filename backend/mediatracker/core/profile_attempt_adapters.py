@@ -20,8 +20,7 @@ from mediatracker.db.models import Link, Media, MediaItem
 from mediatracker.providers.base import EpisodeQuery, LinkCandidate, SourcePreferences, SourceResult
 
 NON_WIRED_PROFILE_ATTEMPT_CALL_SITES: tuple[str, ...] = (
-    "mediatracker.core.pipeline.unlock._from_episode_source (Comet NULL legacy : legacy_comet_context CSV)",
-    "mediatracker.core.pipeline.jobs._choose_link (repli CSV pref_* si résolution profil impossible)",
+    "mediatracker.core.pipeline.jobs._choose_link (repli pref_* si résolution profil impossible)",
 )
 
 
@@ -49,20 +48,16 @@ def attempt_selection_criteria(profile: Profile) -> AttemptSelectionCriteria:
 
 
 def rank_pages_for_profile_attempt(result: SourceResult, *, profile: Profile) -> int | None:
-    from mediatracker.core.quality_profile import (
-        ReleaseCandidate,
-        acceptance_rank,
-        normalize_language,
-        normalize_resolution,
-    )
+    from mediatracker.core.quality_profile import acceptance_rank, release_candidate_from_fields
 
     if result.rejection:
         return None
     return acceptance_rank(
-        ReleaseCandidate(
-            language=normalize_language(result.language),
-            resolution=normalize_resolution(result.quality),
-            text=result.title or "",
+        release_candidate_from_fields(
+            language=result.language,
+            quality=result.quality,
+            hint=result.profile_hint,
+            title=result.title,
         ),
         profile,
     )
@@ -203,19 +198,14 @@ def comet_context_for_attempt(*, profile: Profile) -> tuple[Profile, SourcePrefe
 
 
 def legacy_comet_context(db: Session, media: Media, settings: Settings) -> tuple[Profile | None, SourcePreferences]:
-    """Historical Comet context: fiche prefs + CSV; profile only for stream filtering."""
-    from mediatracker.core.pipeline.jobs import _choice_list, _fallback_allowed
-    from mediatracker.core.quality_profile import profile_for_media
+    """Comet sans profil explicite : fiche pref_* et listes dérivées du profil principal si présent."""
+    del settings
+    from mediatracker.core.quality_profile import preferences_for, profile_for_media
 
     spec = profile_for_media(db, media)
-    preferences = SourcePreferences(
-        quality=media.pref_quality or "HD",
-        language=media.pref_language or "VFF",
-        allow_fallback=_fallback_allowed(db, media, settings),
-        quality_fallback=_choice_list(db, "quality_fallback", settings.quality_fallback),
-        language_fallback=_choice_list(db, "language_fallback", settings.language_fallback),
-    )
-    return spec, preferences
+    if spec is not None:
+        return spec, preferences_for(spec)
+    return None, SourcePreferences(quality=media.pref_quality or "HD", language=media.pref_language or "VFF")
 
 
 def rank_catalog_version_for_profile_attempt(

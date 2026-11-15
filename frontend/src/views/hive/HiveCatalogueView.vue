@@ -44,7 +44,7 @@ const error = ref("");
 const loading = ref(false);
 const query = ref("");
 const typeFilter = ref<"" | "film" | "series">("");
-const hideOwned = ref(false);
+const hideOwned = ref(true);
 
 const subtitle = (row: WorkRow) => {
   if (row.type === "series") {

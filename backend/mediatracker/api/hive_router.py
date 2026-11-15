@@ -29,11 +29,14 @@ from mediatracker.hive.peer_gossip import (
     entries_page_for_peer,
     ingest_signed_entries,
     record_reachability,
+    signals_page_for_peer,
     version_vector_for_ruche,
 )
 from mediatracker.hive.peer_inbound import authenticate_join_peer, authenticate_member_peer
 from mediatracker.hive.peer_join import process_peer_join_preview, process_peer_join_request
 from mediatracker.hive.peer_rate_limit import PeerRateLimited
+from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
+from mediatracker.hive.signal_requests import try_auto_accept_incoming
 from mediatracker.hive.transfer_bandwidth import TransferBandwidthDenied
 from mediatracker.hive.transfer_parallel import TransferParallelGate
 from mediatracker.hive.transfer_policy import TransferQuotaExceeded, TransferWindowClosed
@@ -297,12 +300,21 @@ def mount_hive_router(app) -> None:
             if isinstance(k, str) and isinstance(v, int):
                 vector[k] = v
         entries_in: list = inbound if isinstance(inbound, list) else []
+        peer_signal_vector = doc.get("signal_vector")
+        signal_vector_in: dict[str, int] = {}
+        if isinstance(peer_signal_vector, dict):
+            for k, v in peer_signal_vector.items():
+                if isinstance(k, str) and isinstance(v, int):
+                    signal_vector_in[k] = v
+        signals_in: list = doc.get("signals") if isinstance(doc.get("signals"), list) else []
         cursor = doc.get("cursor")
+        signal_cursor = doc.get("signal_cursor")
         limit_raw = doc.get("limit")
         limit = GOSSIP_PAGE_DEFAULT
         if isinstance(limit_raw, int) and 1 <= limit_raw <= GOSSIP_PAGE_DEFAULT:
             limit = limit_raw
         page_cursor = cursor if isinstance(cursor, dict) else None
+        signal_page_cursor = signal_cursor if isinstance(signal_cursor, dict) else None
         is_hint = doc.get("hint") is True
 
         session = request.app.state.session_factory()
@@ -321,7 +333,11 @@ def mount_hive_router(app) -> None:
             _enforce_peer_rate(request, ctx.hive_id)
             record_reachability(session, ruche_id=ruche_id, origin_id=ctx.hive_id, now=now)
             ingest_signed_entries(session, ruche_id=ruche_id, items=entries_in, now=now)
+            ingest_signed_signals(session, ruche_id=ruche_id, items=signals_in, now=now)
+            settings = request.app.state.settings
+            try_auto_accept_incoming(session, settings, ruche_id=ruche_id, now=now)
             our_vector = version_vector_for_ruche(session, ruche_id)
+            our_signal_vector = signal_version_vector_for_ruche(session, ruche_id)
             if is_hint:
                 session.commit()
                 return JSONResponse(
@@ -330,10 +346,21 @@ def mount_hive_router(app) -> None:
                         "entries": [],
                         "has_more": False,
                         "cursor": None,
+                        "signal_vector": our_signal_vector,
+                        "signals": [],
+                        "signal_has_more": False,
+                        "signal_cursor": None,
                     }
                 )
             page = entries_page_for_peer(
                 session, ruche_id=ruche_id, peer_vector=vector, limit=limit, cursor=page_cursor
+            )
+            sig_page = signals_page_for_peer(
+                session,
+                ruche_id=ruche_id,
+                peer_vector=signal_vector_in,
+                limit=limit,
+                cursor=signal_page_cursor,
             )
             session.commit()
             return JSONResponse(
@@ -342,6 +369,10 @@ def mount_hive_router(app) -> None:
                     "entries": page.entries,
                     "has_more": page.has_more,
                     "cursor": page.cursor,
+                    "signal_vector": our_signal_vector,
+                    "signals": sig_page.entries,
+                    "signal_has_more": sig_page.has_more,
+                    "signal_cursor": sig_page.cursor,
                 }
             )
         except PeerAuthMalformed:

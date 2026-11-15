@@ -48,12 +48,80 @@ HIVE_PEER_BUSY_BACKOFFS = (
     timedelta(minutes=2),
     timedelta(minutes=5),
 )
+HIVE_PEER_BUSY_MARK_DEFAULT = timedelta(seconds=30)
+HIVE_MAX_SOURCE_SWITCHES = 8
 _peer_busy_strikes: dict[int, int] = {}
+_peer_busy_until: dict[tuple[int, str], datetime] = {}
+_hive_failover_switches: dict[int, int] = {}
+
+
+def hive_peer_busy_key(peer_base_url: str) -> str:
+    return (peer_base_url or "").strip().rstrip("/").casefold()
+
+
+def mark_hive_peer_busy(
+    download_id: int | None,
+    peer_key: str,
+    now: datetime,
+    *,
+    retry_after: timedelta | None = None,
+) -> None:
+    if download_id is None or not peer_key:
+        return
+    delay = retry_after if retry_after is not None else HIVE_PEER_BUSY_MARK_DEFAULT
+    if delay < timedelta(0):
+        delay = HIVE_PEER_BUSY_MARK_DEFAULT
+    cap = timedelta(minutes=5)
+    if delay > cap:
+        delay = cap
+    _peer_busy_until[(int(download_id), peer_key)] = _aware_utc(now) + delay
+
+
+def hive_peer_marked_busy(download_id: int | None, peer_key: str, now: datetime) -> bool:
+    if download_id is None or not peer_key:
+        return False
+    key = (int(download_id), peer_key)
+    until = _peer_busy_until.get(key)
+    if until is None:
+        return False
+    if _aware_utc(now) >= until:
+        _peer_busy_until.pop(key, None)
+        return False
+    return True
+
+
+def hive_failover_switch_cap_reached(download_id: int | None) -> bool:
+    if download_id is None:
+        return True
+    return _hive_failover_switches.get(int(download_id), 0) >= HIVE_MAX_SOURCE_SWITCHES
+
+
+def record_hive_failover_switch(download_id: int | None) -> None:
+    if download_id is None:
+        return
+    did = int(download_id)
+    _hive_failover_switches[did] = min(_hive_failover_switches.get(did, 0) + 1, HIVE_MAX_SOURCE_SWITCHES)
+
+
+def schedule_hive_immediate_retry(row: Download, now: datetime, *, clear_handle: bool = True) -> None:
+    moment = _aware_utc(now)
+    row.state = "pending"
+    row.error_code = None
+    row.error = None
+    row.next_retry_at = moment
+    if clear_handle:
+        row.handle = None
+        row.attempt_started_at = None
 
 
 def clear_hive_peer_busy_strike(download_id: int | None) -> None:
     if download_id is not None:
-        _peer_busy_strikes.pop(int(download_id), None)
+        did = int(download_id)
+        _peer_busy_strikes.pop(did, None)
+        _hive_failover_switches.pop(did, None)
+        for key in list(_peer_busy_until):
+            if key[0] == did:
+                del _peer_busy_until[key]
 
 
 def defer_hive_peer_busy(row: Download, now: datetime, *, clear_handle: bool = True) -> None:

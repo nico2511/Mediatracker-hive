@@ -1066,7 +1066,10 @@ def post_catalogue_follow(
     work = _work_row(db, settings, work_key)
     if work is None:
         raise Problem(404, "Introuvable", "Œuvre absente du catalogue Hive.")
-    _ensure_media_for_work(db, work, settings)
+    media, item = _ensure_media_for_work(db, work, settings)
+    from mediatracker.hive.signal_policy import maybe_publish_cherche_on_follow
+
+    maybe_publish_cherche_on_follow(db, settings, media=media, item=item, now=_now())
     db.commit()
 
 
@@ -1137,3 +1140,161 @@ def post_catalogue_request(
     if result.outcome == "pending":
         raise Problem(409, "Conflit", "Téléchargement Hive en attente (source indisponible).")
     return {"queued": True, "state": result.outcome}
+
+
+@router.get("/requests/mine")
+def get_my_hive_requests(
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> dict:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.signal_requests import list_my_requests
+
+    rows = list_my_requests(db, _settings(request))
+    return {"items": rows}
+
+
+@router.get("/requests/received")
+def get_received_hive_requests(
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> dict:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.signal_requests import list_received_requests
+
+    rows = list_received_requests(db, _settings(request))
+    return {"items": rows}
+
+
+class HiveRequestActionIn(BaseModel):
+    request_id: str = Field(min_length=8, max_length=48)
+
+
+@router.post("/requests/received/accept", status_code=204)
+def post_accept_hive_request(
+    body: HiveRequestActionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> None:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.signal_requests import accept_received_request
+
+    accept_received_request(db, _settings(request), request_id=body.request_id, now=_now())
+    db.commit()
+
+
+@router.post("/requests/received/refuse", status_code=204)
+def post_refuse_hive_request(
+    body: HiveRequestActionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> None:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.signal_requests import refuse_received_request
+
+    refuse_received_request(db, _settings(request), request_id=body.request_id, now=_now())
+    db.commit()
+
+
+class HiveChercheConfirmIn(BaseModel):
+    media_item_id: int = Field(ge=1)
+
+
+@router.post("/requests/retract", status_code=204)
+def post_retract_hive_cherche(
+    body: HiveChercheConfirmIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> None:
+    """Retire l’annonce cherche (ne plus demander à la ruche)."""
+    del _principal
+    _require_hive(db)
+    item = db.get(MediaItem, body.media_item_id)
+    if item is None:
+        raise Problem(404, "Introuvable", "Épisode introuvable.")
+    media = db.get(Media, item.media_id)
+    if media is None or not media.followed:
+        raise Problem(422, "Requête invalide", "Suivi requis.")
+    from mediatracker.hive.signal_policy import retract_cherche_follow_item
+
+    retract_cherche_follow_item(
+        db,
+        _settings(request),
+        media=media,
+        item=item,
+        now=_now(),
+        remember_user_withdraw=True,
+    )
+    db.commit()
+
+
+@router.get("/requests/wanted")
+def get_wanted_hive_requests(
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> dict:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.signal_wanted import list_wanted_requests
+
+    rows = list_wanted_requests(db, _settings(request), now=_now())
+    return {"items": rows}
+
+
+class HiveWantedTakeIn(BaseModel):
+    work_key: str = Field(min_length=8, max_length=48)
+    release: bool = False
+
+
+@router.post("/requests/wanted/take", status_code=204)
+def post_wanted_hive_take(
+    body: HiveWantedTakeIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> None:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.signal_wanted import take_wanted_request
+
+    take_wanted_request(
+        db,
+        _settings(request),
+        work_key=body.work_key.strip(),
+        release=body.release,
+        now=_now(),
+    )
+    db.commit()
+
+
+@router.post("/requests/announce", status_code=204)
+def post_confirm_hive_cherche(
+    body: HiveChercheConfirmIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> None:
+    """Publication explicite du signal cherche (efface un retrait mémorisé si besoin)."""
+    del _principal
+    _require_hive(db)
+    item = db.get(MediaItem, body.media_item_id)
+    if item is None:
+        raise Problem(404, "Introuvable", "Épisode introuvable.")
+    media = db.get(Media, item.media_id)
+    if media is None or not media.followed:
+        raise Problem(422, "Requête invalide", "Suivi requis pour annoncer une recherche.")
+    from mediatracker.hive.signal_policy import explicit_announce_cherche
+
+    if not explicit_announce_cherche(db, _settings(request), media=media, item=item, now=_now()):
+        raise Problem(422, "Requête invalide", "Annonce impossible pour cet épisode.")
+    db.commit()

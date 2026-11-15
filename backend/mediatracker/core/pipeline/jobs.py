@@ -24,6 +24,7 @@ _SOURCE_SWITCH_JOURNAL_COOLDOWN = timedelta(hours=1)
 def _commit(db: Session) -> None:
     commit_retry(db)
 
+
 def _download_sources(db: Session, media: Media, settings: Settings) -> list[str]:
     from mediatracker.core.selection import DEFAULT_DOWNLOAD_SOURCE_ORDER, parse_download_source_order
 
@@ -40,6 +41,7 @@ def _usable_download_sources(db: Session, media: Media, settings: Settings) -> l
     from mediatracker.core.source_availability import filter_usable_source_order
 
     return filter_usable_source_order(db, settings, _download_sources(db, media, settings))
+
 
 def _already_local(db: Session, item: MediaItem, now: datetime, settings: Settings) -> bool:
     """True only when a video file for this episode is still on disk."""
@@ -121,20 +123,13 @@ def _choose_link(
     ]
     ranked: list[tuple[int, Link]] = []
     for link in links:
-        penalty = _version_penalty(
-            link, media, allow_fallback, qualities or [], languages or [], profile=profile
-        )
+        penalty = _version_penalty(link, media, allow_fallback, qualities or [], languages or [], profile=profile)
         if penalty is None:
             continue
         ranked.append((penalty, link))
     if row.link_id and row.attempts > 0:
         current = db.get(Link, row.link_id)
-        if (
-            current is not None
-            and not current.dead
-            and current.id not in skipped
-            and _hoster_ok(current, preference)
-        ):
+        if current is not None and not current.dead and current.id not in skipped and _hoster_ok(current, preference):
             return current
     if not ranked:
         return None
@@ -235,11 +230,83 @@ def _bury(db: Session, row: Download, link: Link, code: str, message: str) -> No
     )
 
 
-def _source_switch_journal_dedupe_key(
-    row: Download, from_source: str, to_source: str, *, now: datetime
-) -> str:
+def _source_switch_journal_dedupe_key(row: Download, from_source: str, to_source: str, *, now: datetime) -> str:
     hour = int(now.timestamp() // int(_SOURCE_SWITCH_JOURNAL_COOLDOWN.total_seconds()))
     return f"download.source_switched:{row.id}:{row.state}:{from_source}:{to_source}:{hour}"
+
+
+def _download_profile_repli_journal_message(profile, *, rank: int) -> str:
+    from mediatracker.core.quality_profile import Profile
+
+    name = profile.name if isinstance(profile, Profile) else str(profile)
+    return f"Passage au profil de repli « {name} » (rang {rank})."
+
+
+def _record_download_profile_repli_switch(
+    db: Session,
+    row: Download,
+    media: Media,
+    item: MediaItem,
+    profile,
+    *,
+    rank: int,
+    now: datetime | None = None,
+) -> None:
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    message = _download_profile_repli_journal_message(profile, rank=rank)
+    record_event(
+        db,
+        "download.profile_repli",
+        media_id=media.id,
+        item_id=item.id,
+        payload={
+            "download_id": row.id,
+            "profile_id": getattr(profile, "quality_profile_id", None),
+            "profile_name": getattr(profile, "name", None),
+            "rank": rank,
+            "message": message,
+            "title": media.title,
+            "season": item.season,
+            "episode": item.episode,
+        },
+        when=moment,
+    )
+
+
+def peek_next_download_profile_repli(
+    db: Session,
+    media: Media,
+    settings: Settings,
+    download: Download,
+):
+    from mediatracker.core.profile_attempt_orchestration import (
+        download_attempt_profile,
+        next_profile_repli_in_chain,
+    )
+
+    current = download_attempt_profile(db, media, settings, download)
+    if current is None:
+        return None
+    return next_profile_repli_in_chain(db, media, settings, current)
+
+
+def advance_download_profile_repli(
+    db: Session,
+    media: Media,
+    item: MediaItem,
+    row: Download,
+    settings: Settings,
+    *,
+    now: datetime,
+) -> bool:
+    nxt = peek_next_download_profile_repli(db, media, settings, row)
+    if nxt is None:
+        return False
+    row.poll_quality_profile_id = nxt.profile_id
+    _record_download_profile_repli_switch(db, row, media, item, nxt.profile, rank=nxt.rank, now=now)
+    return True
 
 
 def _record_download_source_switch(
@@ -276,12 +343,6 @@ def _record_download_source_switch(
         dedupe_key=_source_switch_journal_dedupe_key(row, from_source, to_source, now=moment),
         when=moment,
     )
-
-
-def _fallback_allowed(db: Session, media: Media, settings: Settings) -> bool:
-    if media.allow_fallback:
-        return True
-    return _text_setting(db, "allow_fallback", "true" if settings.allow_fallback else "false") == "true"
 
 
 def _choice_list(db: Session, key: str, default: str) -> list[str]:
@@ -383,10 +444,11 @@ def _ingest_other_versions(
     now: datetime,
     *,
     attempt_profile=None,
+    from_next_repli: bool = False,
 ) -> bool:
-    """Réingest explicite sur l'ordre utilisateur des sources (un profil d'attempt)."""
+    """Réingest sur l'ordre utilisateur des sources, en progressant dans la chaîne profil."""
     from mediatracker.core.profile_attempt_adapters import attempt_selection_criteria, reingest_select_pages
-    from mediatracker.core.profile_attempt_orchestration import load_profile_chain
+    from mediatracker.core.profile_attempt_orchestration import load_profile_chain, profile_chain_from_anchor
     from mediatracker.core.profile_fallback import ProfileResolveError
     from mediatracker.core.quality_profile import Profile, preferences_for
     from mediatracker.core.remote_search_limit import begin_remote_search, remote_search_limit_phrase
@@ -394,12 +456,16 @@ def _ingest_other_versions(
     from mediatracker.providers.sources.loading import remote_links_source
     from mediatracker.providers.sources.registry import for_type
 
-    spec: Profile | None = attempt_profile
-    if spec is None:
+    if attempt_profile is not None:
+        chain = profile_chain_from_anchor(db, media, settings, attempt_profile)
+        specs: tuple[Profile, ...] = chain.profiles[1:] if from_next_repli else chain.profiles
+    else:
         try:
-            spec = load_profile_chain(db, media, settings).principal
+            specs = (load_profile_chain(db, media, settings).principal,)
         except ProfileResolveError:
             return False
+    if not specs:
+        return False
     if not begin_remote_search(media, now, db, settings):
         logger.info(
             "Repli de version ignoré pour le média %s (%s).",
@@ -412,8 +478,6 @@ def _ingest_other_versions(
         for link in db.scalars(select(Link).where(Link.media_item_id == item.id, Link.dead.is_(True))).all()
     }
     seasons = {item.season} if item.season is not None else set()
-    crit = attempt_selection_criteria(spec)
-    preferences = preferences_for(spec)
     preference = _hosters(db, settings)
     order = _usable_download_sources(db, media, settings)
     item_id = item.id
@@ -421,86 +485,87 @@ def _ingest_other_versions(
     from mediatracker.db.session import apply_with_retry, bind_session_factory
 
     factory = bind_session_factory(db)
-    for type_name in order:
-        entry = for_type(type_name)
-        if entry is None or "links" not in getattr(entry, "capabilities", frozenset()):
-            continue
-        opened = remote_links_source(db, settings, type_name)
-        if opened is None:
-            continue
-        provider_id, source = opened
-        cache = getattr(source, "cache", None)
-        if cache is not None and hasattr(cache, "begin_bypass"):
-            cache.begin_bypass()
-        payload: dict | None = None
-        try:
-            results = _search(
-                source,
-                media,
-                seasons,
-                crit.quality,
-                crit.language,
-                crit.allow_fallback,
-                None,
-                settings,
-                preferences,
-                quality_fallback=list(crit.quality_fallback),
-                language_fallback=list(crit.language_fallback),
-            )
-            pages = reingest_select_pages(
-                list(results),
-                media=media,
-                seasons=seasons or {0},
-                profile=spec,
-                exclude=dead,
-            )
-            if not pages:
+    for spec in specs:
+        crit = attempt_selection_criteria(spec)
+        preferences = preferences_for(spec)
+        for type_name in order:
+            entry = for_type(type_name)
+            if entry is None or "links" not in getattr(entry, "capabilities", frozenset()):
                 continue
-            page = pages[0]
-            if not page.url:
+            opened = remote_links_source(db, settings, type_name)
+            if opened is None:
                 continue
-            from mediatracker.core.source_poll import _page_links
+            provider_id, source = opened
+            cache = getattr(source, "cache", None)
+            if cache is not None and hasattr(cache, "begin_bypass"):
+                cache.begin_bypass()
+            payload: dict | None = None
+            try:
+                results = _search(
+                    source,
+                    media,
+                    seasons,
+                    crit.quality,
+                    crit.language,
+                    crit.allow_fallback,
+                    None,
+                    settings,
+                    preferences,
+                )
+                pages = reingest_select_pages(
+                    list(results),
+                    media=media,
+                    seasons=seasons or {0},
+                    profile=spec,
+                    exclude=dead,
+                )
+                if not pages:
+                    continue
+                page = pages[0]
+                if not page.url:
+                    continue
+                from mediatracker.core.source_poll import _page_links
 
-            found = list(_page_links(source, page, spec))
-            kept = [link for link in found if hoster_allowed(link.hoster, preference)]
-            if item.season is not None:
-                kept = [link for link in kept if link.season == item.season and link.episode == item.episode]
-            if not kept:
+                found = list(_page_links(source, page, spec))
+                kept = [link for link in found if hoster_allowed(link.hoster, preference)]
+                if item.season is not None:
+                    kept = [link for link in kept if link.season == item.season and link.episode == item.episode]
+                if not kept:
+                    continue
+                payload = {
+                    "kept": kept,
+                    "provider_id": provider_id,
+                    "preference": preference,
+                    "now": now,
+                }
+            except Exception:
+                logger.info("Repli de version ignoré sur %s pour le média %s.", type_name, media.id)
+            finally:
+                if cache is not None and hasattr(cache, "end_bypass"):
+                    cache.end_bypass()
+                close_source(source)
+            if payload is None:
                 continue
-            payload = {
-                "kept": kept,
-                "provider_id": provider_id,
-                "preference": preference,
-                "now": now,
-            }
-        except Exception:
-            logger.info("Repli de version ignoré sur %s pour le média %s.", type_name, media.id)
-        finally:
-            if cache is not None and hasattr(cache, "end_bypass"):
-                cache.end_bypass()
-            close_source(source)
-        if payload is None:
-            continue
 
-        def _apply(db: Session, body: dict = payload):
-            row_item = db.get(MediaItem, item_id)
-            if row_item is None:
-                return False
-            before = db.scalar(select(Link.id).where(Link.media_item_id == item_id, Link.dead.is_(False)))
-            _store_links(
-                db,
-                row_item,
-                body["kept"],
-                body["provider_id"],
-                body["preference"],
-                body["now"],
-            )
-            db.flush()
-            after = db.scalar(select(Link.id).where(Link.media_item_id == item_id, Link.dead.is_(False)))
-            return before is None and after is not None
+            def _apply(db: Session, body: dict = payload):
+                row_item = db.get(MediaItem, item_id)
+                if row_item is None:
+                    return False
+                before = db.scalar(select(Link.id).where(Link.media_item_id == item_id, Link.dead.is_(False)))
+                _store_links(
+                    db,
+                    row_item,
+                    body["kept"],
+                    body["provider_id"],
+                    body["preference"],
+                    body["now"],
+                )
+                db.flush()
+                after = db.scalar(select(Link.id).where(Link.media_item_id == item_id, Link.dead.is_(False)))
+                return before is None and after is not None
 
-        if apply_with_retry(factory, f"Réingest {type_name}", _apply):
-            return True
+            if apply_with_retry(factory, f"Réingest {type_name}", _apply):
+                return True
     return False
 
 
@@ -515,6 +580,7 @@ def _fast_source_poll(db: Session, media: Media, settings: Settings, now: dateti
     from mediatracker.core.worker_wake import REASON_API_QUEUE, wake_worker
 
     wake_worker(db, settings, REASON_API_QUEUE, commit=False)
+
 
 def _schedule_retry(
     db: Session, row: Download, code: str, message: str, now: datetime, *, defer_final: bool = False
@@ -703,4 +769,3 @@ def _aware(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
-

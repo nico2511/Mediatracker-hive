@@ -14,9 +14,12 @@ const props = defineProps<{
   mediaId: number;
   /** inline : bandeau compact ; card : carte fiche série (maquettes A/B). */
   layout?: "inline" | "card";
+  hiveRequestAnnounced?: boolean;
 }>();
 
 const emit = defineEmits<{ changed: []; openEmpreintes: [] }>();
+
+defineOptions({ inheritAttrs: false });
 
 const legendOpen = ref(false);
 const ruches = ref<HiveRucheListRow[]>([]);
@@ -71,13 +74,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <template v-if="hiveEnabled">
-    <article
-      v-if="cardLayout"
-      class="panel fiche-hive-card"
-      aria-label="Hive, partage"
-      data-testid="hive-series-summary"
-    >
+  <article
+    v-if="hiveEnabled && cardLayout"
+    v-bind="$attrs"
+    class="panel fiche-hive-card"
+    aria-label="Hive, partage"
+    data-testid="hive-series-summary"
+  >
       <svg class="fiche-hive-card-ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path
           d="M12 2 18 6v6l-6 10-6-10V6Z"
@@ -98,8 +101,9 @@ onMounted(async () => {
       </svg>
       <header class="fiche-hive-card-head">
         <span class="lbl hint">Hive</span>
+        <span v-if="hiveRequestAnnounced" class="pill honey">Demandé à la ruche</span>
         <span v-if="shareActive" class="pill honey">Partage actif</span>
-        <span v-else class="pill muted">Inactif</span>
+        <span v-else-if="!hiveRequestAnnounced" class="pill muted">Inactif</span>
       </header>
       <p class="fiche-hive-card-meta">{{ summaryLine }}</p>
       <p v-if="ruches.length" class="fiche-hive-card-ruches">
@@ -128,9 +132,14 @@ onMounted(async () => {
       >
         <summary>Comprendre les états</summary>
       </details>
-    </article>
+  </article>
 
-    <div v-else class="hive-series-summary" data-testid="hive-series-summary">
+  <div
+    v-else-if="hiveEnabled"
+    v-bind="$attrs"
+    class="hive-series-summary"
+    data-testid="hive-series-summary"
+  >
       <span class="lbl hint">Hive</span>
       <span class="hive-series-chip tone-honey">{{ summaryLine }}</span>
       <ActionMenuPopover
@@ -154,8 +163,7 @@ onMounted(async () => {
       >
         <summary>Comprendre les états</summary>
       </details>
-    </div>
-  </template>
+  </div>
 </template>
 
 <style scoped>

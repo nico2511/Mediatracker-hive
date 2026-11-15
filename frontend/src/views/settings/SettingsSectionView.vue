@@ -1608,7 +1608,7 @@ async function saveProfileFallback() {
           <div
             class="segment-toggle"
             role="group"
-            aria-label="Repli par défaut pour les nouvelles fiches"
+            aria-label="Repli par défaut pour les fiches qui suivent le global"
           >
             <button
               type="button"
@@ -1627,12 +1627,13 @@ async function saveProfileFallback() {
           </div>
         </div>
         <p class="hint">
-          Valeur par défaut pour les fiches. Leur activation spécifique reste conservée.
+          S'applique à toutes les fiches qui suivent le réglage global (pas seulement aux nouvelles).
         </p>
         <div class="profile-fallback-section">
           <h3 class="settings-subsection-title">Ordre global des profils</h3>
           <p class="hint">
-            Après le profil principal, essayer ces profils dans l'ordre choisi, seulement si le repli est activé sur la fiche.
+            Après le profil principal, essayer ces profils dans l'ordre choisi pour les fiches qui suivent le global,
+            si « Repli par défaut » est à Oui.
           </p>
           <div
             v-for="(profile, index) in fallbackOrderedProfiles"

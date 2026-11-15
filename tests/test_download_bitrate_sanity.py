@@ -210,7 +210,10 @@ def test_from_hosters_all_size_filtered_yields_size_sanity(db, monkeypatch):
         "mediatracker.core.profile_attempt_orchestration.resolve_download_poll_profile",
         lambda *_a, **_k: MagicMock(missing_explicit=False, profile=default_profile()),
     )
-    monkeypatch.setattr(unlock_mod, "_fallback_allowed", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        "mediatracker.core.profile_fallback.media_has_profile_repli_chain",
+        lambda *_a, **_k: False,
+    )
     unlock_mod._from_hosters(
         db,
         row,

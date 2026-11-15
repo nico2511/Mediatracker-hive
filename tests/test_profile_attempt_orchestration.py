@@ -132,7 +132,12 @@ def test_allow_fallback_expands_chain(client, db, settings):
         db.add(Setting(key=PROFILE_FALLBACK_ORDER_KEY, value=ordered, is_secret=False))
     else:
         setting.value = ordered
-    media = Media(type="film", title="Repli on", year=2021, allow_fallback=True)
+    media = Media(
+        type="film",
+        title="Repli on",
+        year=2021,
+        fallback_profile_ids=ordered,
+    )
     db.add(media)
     db.commit()
     chain = load_profile_chain(db, media, settings)
@@ -180,7 +185,7 @@ def test_non_wired_inventory_documents_legacy_boundaries_only():
     from mediatracker.core.profile_attempt_adapters import NON_WIRED_PROFILE_ATTEMPT_CALL_SITES
 
     joined = "\n".join(NON_WIRED_PROFILE_ATTEMPT_CALL_SITES)
-    assert "legacy_comet_context" in joined
+    assert "_choose_link" in joined
     assert "unlock._from_named_source" not in joined
     assert "fiche_repair" not in joined
     assert "hive.source_poll" not in joined

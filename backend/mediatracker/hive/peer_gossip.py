@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mediatracker.db.models import HiveEntry, HiveMember, HiveOriginReachability, HiveVersions
+from mediatracker.db.models import HiveEntry, HiveMember, HiveOriginReachability, HiveSignal, HiveVersions
 from mediatracker.hive.access import is_active_member
 from mediatracker.hive.catalog_validity import remote_catalog_offer_plausible
 from mediatracker.hive.crypto_id import public_key_from_pem, verify_document_signature
@@ -277,6 +277,70 @@ def mark_origin_unreachable(db: Session, *, ruche_id: bytes, origin_id: str, now
         )
     else:
         row.last_ok_at = stale
+
+
+def signals_page_for_peer(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    peer_vector: dict[str, int],
+    limit: int = _GOSSIP_PAGE,
+    cursor: dict[str, int | str] | None = None,
+) -> GossipEntryPage:
+    out: list[dict[str, str | dict]] = []
+    start_origin: str | None = None
+    start_after_seq = 0
+    if cursor is not None:
+        o = cursor.get("origin")
+        a = cursor.get("after_seq")
+        if isinstance(o, str) and isinstance(a, int):
+            start_origin = o
+            start_after_seq = a
+    origins = sorted(
+        {
+            str(o)
+            for o in db.scalars(
+                select(HiveSignal.origin_instance_id).where(HiveSignal.ruche_id == ruche_id).distinct()
+            ).all()
+            if o
+        }
+    )
+    if start_origin is not None and start_origin in origins:
+        idx = origins.index(start_origin)
+        origins = origins[idx:]
+    elif start_origin is not None:
+        origins = [o for o in origins if o > start_origin] if start_origin else origins
+    for origin in origins:
+        peer_seq = int(peer_vector.get(origin, 0))
+        min_seq = start_after_seq if origin == start_origin and start_after_seq else peer_seq
+        rows = list(
+            db.scalars(
+                select(HiveSignal)
+                .where(
+                    HiveSignal.ruche_id == ruche_id,
+                    HiveSignal.origin_instance_id == origin,
+                    HiveSignal.seq > min_seq,
+                )
+                .order_by(HiveSignal.seq.asc())
+            ).all()
+        )
+        for row in rows:
+            if not row.payload_json or not row.signature_b64:
+                continue
+            try:
+                payload = json.loads(row.payload_json)
+            except json.JSONDecodeError:
+                continue
+            out.append({"payload": payload, "signature_b64": row.signature_b64})
+            if len(out) >= limit:
+                return GossipEntryPage(
+                    entries=out,
+                    has_more=True,
+                    cursor={"origin": origin, "after_seq": int(row.seq)},
+                )
+        start_origin = None
+        start_after_seq = 0
+    return GossipEntryPage(entries=out, has_more=False, cursor=None)
 
 
 def origin_is_reachable(db: Session, *, ruche_id: bytes, origin_id: str, now: datetime) -> bool:

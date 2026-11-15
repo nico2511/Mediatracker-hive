@@ -30,7 +30,7 @@ from mediatracker.core.profile_attempt_adapters import (
     pick_catalog_match_for_profile_attempt,
     select_pages_for_profile_attempt,
 )
-from mediatracker.core.profile_fallback import ProfileResolveError, resolve_profiles_for_media
+from mediatracker.core.profile_fallback import ProfileResolveError, ResolvedProfile, resolve_profiles_for_media
 from mediatracker.core.quality_profile import Profile, profile_from_row
 from mediatracker.db.models import Download, Media, MediaItem, QualityProfile
 from mediatracker.hive.source_catalog import HiveCatalogMatch
@@ -51,6 +51,8 @@ __all__ = [
     "download_source_order",
     "resolve_download_poll_profile",
     "load_profile_chain",
+    "next_profile_repli_in_chain",
+    "profile_chain_from_anchor",
     "pick_hive_catalog_for_item",
     "pick_remote_pages_for_profiles",
     "orchestrate_profile_first_poll",
@@ -89,6 +91,7 @@ class HiveProfilePick:
 class RemotePagePick:
     pages: list[SourceResult]
     profile: Profile
+    profile_rank: int = 1
 
 
 @dataclass(frozen=True)
@@ -102,6 +105,47 @@ class ProfileWalkTrail:
 def load_profile_chain(db: Session, media: object, settings: Settings | None = None) -> ProfileChain:
     resolved = resolve_profiles_for_media(db, media, settings)
     return ProfileChain(profiles=tuple(item.profile for item in resolved))
+
+
+def profile_chain_from_anchor(
+    db: Session,
+    media: object,
+    settings: Settings | None,
+    anchor: Profile,
+) -> ProfileChain:
+    """Slice resolve_profiles_for_media from anchor through the tail ; hors chaîne → profil seul."""
+    anchor_id = anchor.quality_profile_id
+    if anchor_id is None:
+        return ProfileChain(profiles=(anchor,))
+    try:
+        resolved = resolve_profiles_for_media(db, media, settings)
+    except ProfileResolveError:
+        return ProfileChain(profiles=(anchor,))
+    for index, item in enumerate(resolved):
+        if item.profile_id == anchor_id:
+            return ProfileChain(profiles=tuple(r.profile for r in resolved[index:]))
+    return ProfileChain(profiles=(anchor,))
+
+
+def next_profile_repli_in_chain(
+    db: Session,
+    media: object,
+    settings: Settings | None,
+    current: Profile,
+) -> ResolvedProfile | None:
+    current_id = current.quality_profile_id
+    if current_id is None:
+        return None
+    try:
+        resolved = resolve_profiles_for_media(db, media, settings)
+    except ProfileResolveError:
+        return None
+    if len(resolved) <= 1:
+        return None
+    for index, item in enumerate(resolved):
+        if item.profile_id == current_id and index + 1 < len(resolved):
+            return resolved[index + 1]
+    return None
 
 
 def profiles_for_poll_attempt(
@@ -233,7 +277,7 @@ def pick_remote_pages_for_profiles(
     single_profile: Profile | None = None,
 ) -> RemotePagePick | None:
     profiles: Sequence[Profile] = (single_profile,) if single_profile is not None else chain.profiles
-    for profile in profiles:
+    for index, profile in enumerate(profiles):
         pages = select_pages_for_profile_attempt(
             list(results),
             profile=profile,
@@ -245,7 +289,7 @@ def pick_remote_pages_for_profiles(
             exclude=exclude,
         )
         if pages:
-            return RemotePagePick(pages=pages, profile=profile)
+            return RemotePagePick(pages=pages, profile=profile, profile_rank=index + 1)
     return None
 
 
@@ -289,9 +333,7 @@ def _item_served_by_hoster_profile(
     if profile.quality_profile_id is None:
         return False
     preference = _hosters(db, settings)
-    links = list(
-        db.scalars(select(Link).where(Link.media_item_id == media_item_id, Link.dead.is_(False))).all()
-    )
+    links = list(db.scalars(select(Link).where(Link.media_item_id == media_item_id, Link.dead.is_(False))).all())
     return (
         choose_link_for_profile_attempt(
             preference,
@@ -391,7 +433,7 @@ def orchestrate_profile_first_poll(
         if restrict_single_profile is not None:
             if restrict_single_profile.quality_profile_id is None:
                 return None
-            chain = ProfileChain(profiles=(restrict_single_profile,))
+            chain = profile_chain_from_anchor(read, media, settings, restrict_single_profile)
         else:
             try:
                 chain = load_profile_chain(read, media, settings)
@@ -518,6 +560,10 @@ def orchestrate_profile_first_poll(
         final = chosen or last
         if final is None:
             return None
+        if chosen is None and row.followed and final.result in {"nothing", "found"} and final.queued == 0:
+            from mediatracker.hive.signal_policy import maybe_publish_cherche_on_source_miss
+
+            maybe_publish_cherche_on_source_miss(db, settings, media=row, now=moment)
         return _finish(
             db,
             row,

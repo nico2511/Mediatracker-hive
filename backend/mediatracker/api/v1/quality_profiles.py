@@ -1,5 +1,6 @@
 """CRUD for named quality profiles. One of them is the global default."""
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -15,6 +16,7 @@ from mediatracker.core.quality_profile import (
     LANGUAGE_CODES,
     RESOLUTION_RANK,
     normalize_language,
+    refresh_followed_media_for_profile_change,
 )
 from mediatracker.db.models import Download, Media, QualityProfile
 
@@ -202,7 +204,18 @@ def update_profile(
 ) -> QualityProfileOut:
     del _principal
     row = _get(db, profile_id)
+    was_default = bool(row.is_default)
     data = _apply(body.model_dump(exclude_unset=True))
+    profile_fields = {
+        "name",
+        "languages",
+        "min_resolution",
+        "max_resolution",
+        "min_size_mb",
+        "max_size_mb",
+        "exclude_keywords",
+    }
+    touches_schedule = bool(profile_fields.intersection(data))
     merged = {
         "min_resolution": data.get("min_resolution", row.min_resolution),
         "max_resolution": data.get("max_resolution", row.max_resolution),
@@ -224,6 +237,14 @@ def update_profile(
         raise Problem(422, "Requête invalide", "Ce nom est déjà utilisé.") from exc
     if becoming_default:
         _set_default(db, row)
+    if touches_schedule or becoming_default:
+        moment = datetime.now(timezone.utc)
+        refresh_followed_media_for_profile_change(
+            db,
+            row.id,
+            affects_default=was_default or bool(row.is_default),
+            now=moment,
+        )
     db.commit()
     db.refresh(row)
     return _out(row)
@@ -254,5 +275,8 @@ def delete_profile(
             "Requête invalide",
             "Ce profil est référencé par au moins un téléchargement issu d'un sondage.",
         )
+    from mediatracker.core.profile_fallback import purge_profile_id_from_fallback_references
+
+    purge_profile_id_from_fallback_references(db, row.id)
     db.delete(row)
     db.commit()

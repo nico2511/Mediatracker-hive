@@ -39,6 +39,12 @@ POLICIES = frozenset({"auto", "propose", "off"})
 _DOWNLOAD_BLOCKS_OFFER = ("pending", "resolving", "queued", "downloading", "post_processing", "failed", "done")
 
 
+def _media_fallback_profile_ids_out(row: Media) -> list[int] | None:
+    from mediatracker.core.profile_fallback import fallback_profile_ids_for_api
+
+    return fallback_profile_ids_for_api(row)
+
+
 class MediaCreate(BaseModel):
     type: str | None = Field(default=None, pattern="^(film|series)$")
     title: str | None = Field(default=None, min_length=1, max_length=300)
@@ -81,6 +87,7 @@ class MediaPatch(BaseModel):
     pref_quality: str | None = None
     pref_language: str | None = None
     allow_fallback: bool | None = None
+    fallback_profile_ids: list[int] | None = None
     source_order: str | None = None
     quality_profile_id: int | None = None
     scan_interval_min: int | None = Field(default=None, ge=60, le=10080)
@@ -163,6 +170,7 @@ class MediaOut(BaseModel):
     pref_quality: str
     pref_language: str
     allow_fallback: bool
+    fallback_profile_ids: list[int] | None = None
     source_order: str | None = None
     quality_profile_id: int | None = None
     scan_interval_min: int | None
@@ -532,6 +540,7 @@ def _to_media(
         pref_quality=row.pref_quality,
         pref_language=row.pref_language,
         allow_fallback=row.allow_fallback,
+        fallback_profile_ids=_media_fallback_profile_ids_out(row),
         source_order=row.source_order,
         quality_profile_id=row.quality_profile_id,
         scan_interval_min=row.scan_interval_min,
@@ -1326,6 +1335,8 @@ def update_media(
     previous_tmdb = row.tmdb_id
     previous_title = row.title
     previous_year = row.year
+    previous_quality_profile = row.quality_profile_id
+    previous_fallback_chain = row.fallback_profile_ids
     data = body.model_dump(exclude_unset=True)
     if "tmdb_id" in data and data["tmdb_id"] is not None and data["tmdb_id"] != previous_tmdb:
         if not isinstance(data["tmdb_id"], int) or data["tmdb_id"] < 1:
@@ -1362,6 +1373,23 @@ def update_media(
 
         if db.get(QualityProfile, data["quality_profile_id"]) is None:
             raise Problem(422, "Requête invalide", "Profil de qualité introuvable.")
+    if "fallback_profile_ids" in data:
+        from mediatracker.core.profile_fallback import (
+            encode_media_fallback_profile_ids,
+            validate_profile_fallback_ids,
+        )
+
+        ids = data.pop("fallback_profile_ids")
+        if ids is None:
+            row.fallback_profile_ids = None
+        else:
+            from mediatracker.settings_store import SettingsError
+
+            try:
+                validate_profile_fallback_ids(db, ids)
+            except SettingsError as exc:
+                raise Problem(422, "Requête invalide", str(exc)) from exc
+            row.fallback_profile_ids = encode_media_fallback_profile_ids(list(ids))
     turning_auto = data.get("new_episode_policy") == "auto"
     pausing = data.get("on_hold") is True
     resuming = data.get("on_hold") is False
@@ -1448,6 +1476,17 @@ def update_media(
     elif turning_auto or (resuming and row.new_episode_policy == "auto"):
         row.catch_up_pending = True
         row.next_source_poll_at = moment
+    chain_changed = (
+        "fallback_profile_ids" in body.model_dump(exclude_unset=True)
+        and row.fallback_profile_ids != previous_fallback_chain
+    )
+    if row.followed and (
+        chain_changed
+        or ("quality_profile_id" in data and data.get("quality_profile_id") != previous_quality_profile)
+    ):
+        from mediatracker.core.quality_profile import refresh_media_poll_schedule
+
+        refresh_media_poll_schedule(row, moment)
     if "tmdb_id" in data and row.tmdb_id != previous_tmdb:
         from mediatracker.library.jellyfin_push import note_manual_tmdb
 

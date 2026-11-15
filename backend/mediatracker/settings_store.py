@@ -24,11 +24,9 @@ from mediatracker.core.profile_fallback import (
 )
 from mediatracker.core.selection import (
     DEFAULT_DOWNLOAD_SOURCE_ORDER,
-    LANGUAGE_OPTIONS,
     LANGUAGES,
     LEGACY_DOWNLOAD_SOURCE_ORDER,
     QUALITIES,
-    QUALITY_OPTIONS,
     parse_choice_list,
     parse_download_source_order,
     parse_hoster_preference,
@@ -104,8 +102,6 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "scan_air_window_days": SettingSpec(False, "int", "scan_air_window_days"),
     "film_theatrical_fallback_months": SettingSpec(False, "int", "film_theatrical_fallback_months"),
     "allow_fallback": SettingSpec(False, "bool", "allow_fallback"),
-    "quality_fallback": SettingSpec(False, "str", "quality_fallback", optional=True),
-    "language_fallback": SettingSpec(False, "str", "language_fallback", optional=True),
     "profile_fallback_order": SettingSpec(False, "str", "profile_fallback_order", optional=True),
     "source_cache_seconds": SettingSpec(False, "int", "source_cache_seconds"),
     "catalog_interval_hours": SettingSpec(False, "int", "catalog_interval_hours"),
@@ -171,6 +167,8 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "hive_transfer_window_start": SettingSpec(False, "int", "hive_transfer_window_start"),
     "hive_transfer_window_end": SettingSpec(False, "int", "hive_transfer_window_end"),
     "hive_catalog_auto_share": SettingSpec(False, "bool", "hive_catalog_auto_share", optional=True),
+    "hive_request_on_miss": SettingSpec(False, "str", "hive_request_on_miss", optional=True),
+    "hive_auto_accept_requests": SettingSpec(False, "bool", "hive_auto_accept_requests", optional=True),
 }
 
 
@@ -464,10 +462,6 @@ def _normalize(spec: SettingSpec, key: str, value: Any) -> str:
             return ",".join(parse_download_source_order(text))
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
-    if key == "quality_fallback":
-        return _choices(key, text, QUALITY_OPTIONS)
-    if key == "language_fallback":
-        return _choices(key, text, LANGUAGE_OPTIONS)
     if key == PROFILE_FALLBACK_ORDER_KEY:
         try:
             return format_profile_fallback_order(parse_profile_fallback_order(text))

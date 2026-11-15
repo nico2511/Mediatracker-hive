@@ -9,6 +9,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.config import Settings
 from mediatracker.core.selection import LANGUAGES, QUALITIES
 from mediatracker.core.tmdb import token as tmdb_token
 from mediatracker.db.models import Download, Media, MediaItem, Setting
@@ -304,6 +305,22 @@ def _refollow_jellyfin_import(db: Session, media: Media, *, origin_label: str) -
     return media, []
 
 
+def _publish_hive_cherche_after_follow(
+    db: Session,
+    settings: Settings | None,
+    media: Media,
+    items: list[MediaItem],
+    moment: datetime,
+) -> None:
+    if settings is None:
+        from mediatracker.config import get_settings
+
+        settings = get_settings()
+    from mediatracker.hive.signal_policy import publish_cherche_after_follow
+
+    publish_cherche_after_follow(db, settings, media=media, items=items, now=moment)
+
+
 def follow(
     db: Session,
     secret_key: str | None,
@@ -313,30 +330,34 @@ def follow(
     source: FollowSource = "create",
     origin_label: str | None = None,
     moment: datetime | None = None,
+    settings: Settings | None = None,
 ) -> tuple[Media, list[MediaItem]]:
     """Start following: ``create`` (new fiche), ``existing``, ``folder``, ``jellyfin_import_refollow``, or ``patch``."""
+    when = moment or datetime.now(timezone.utc)
     if source == "create":
         if secret_key is None or body is None:
             raise FollowError(422, "Requête invalide", "Corps ou clé manquant.")
-        return _follow_create(db, secret_key, body)
-    if source == "existing":
+        row, items = _follow_create(db, secret_key, body)
+    elif source == "existing":
         if media is None or body is None:
             raise FollowError(422, "Requête invalide", "Fiche ou corps manquant.")
-        return _follow_existing_fiche(db, media, body)
-    if source == "folder":
+        row, items = _follow_existing_fiche(db, media, body)
+    elif source == "folder":
         if media is None:
             raise FollowError(422, "Requête invalide", "Fiche manquante.")
-        return _follow_folder_existing(db, media)
-    if source == "jellyfin_import_refollow":
+        row, items = _follow_folder_existing(db, media)
+    elif source == "jellyfin_import_refollow":
         if media is None or origin_label is None:
             raise FollowError(422, "Requête invalide", "Fiche ou origine manquante.")
-        return _refollow_jellyfin_import(db, media, origin_label=origin_label)
-    if source == "patch":
+        row, items = _refollow_jellyfin_import(db, media, origin_label=origin_label)
+    elif source == "patch":
         if media is None:
             raise FollowError(422, "Requête invalide", "Fiche manquante.")
-        when = moment or datetime.now(timezone.utc)
-        return _follow_patch(db, media, moment=when)
-    raise FollowError(422, "Requête invalide", "Source de suivi inconnue.")
+        row, items = _follow_patch(db, media, moment=when)
+    else:
+        raise FollowError(422, "Requête invalide", "Source de suivi inconnue.")
+    _publish_hive_cherche_after_follow(db, settings, row, items, when)
+    return row, items
 
 
 def cancel_follow_queue(
@@ -406,6 +427,22 @@ def unfollow(
             payload["reason"] = reason
             payload["keep_files"] = True
         record_event(db, "media.unfollowed", media_id=media.id, payload=payload)
+    if settings is not None:
+        from mediatracker.hive.identity import hive_enabled_in_db
+
+        if hive_enabled_in_db(db):
+            from sqlalchemy import select
+
+            from mediatracker.db.models import MediaItem
+            from mediatracker.hive.signal import retract_cherche_for_media
+            from mediatracker.hive.signal_cherche_retract import clear_cherche_retract
+            from mediatracker.hive.signal_miss_prompt import clear_cherche_miss_prompt
+
+            retract_cherche_for_media(db, settings, media=media, now=when)
+            for iid in db.scalars(select(MediaItem.id).where(MediaItem.media_id == media.id)).all():
+                if iid is not None:
+                    clear_cherche_miss_prompt(db, int(iid))
+                    clear_cherche_retract(db, int(iid))
     return True
 
 

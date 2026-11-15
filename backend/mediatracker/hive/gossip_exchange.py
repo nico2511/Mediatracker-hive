@@ -27,8 +27,10 @@ from mediatracker.hive.peer_client import fetch_member_list, gossip_sync_once
 from mediatracker.hive.peer_gossip import (
     GOSSIP_PAGE_DEFAULT,
     ingest_signed_entries,
+    signals_page_for_peer,
     version_vector_for_ruche,
 )
+from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,11 @@ def _entries_outbound(db: Session, *, ruche_id: bytes, peer_vector: dict[str, in
     return page.entries
 
 
+def _signals_outbound(db: Session, *, ruche_id: bytes, peer_vector: dict[str, int]) -> list[dict[str, Any]]:
+    page = signals_page_for_peer(db, ruche_id=ruche_id, peer_vector=peer_vector, limit=GOSSIP_PAGE_DEFAULT)
+    return page.entries
+
+
 def send_gossip_hint_to_peer(
     db: Session,
     settings: Settings,
@@ -125,9 +132,11 @@ def send_gossip_hint_to_peer(
     if pk is None:
         return False
     vector = version_vector_for_ruche(db, ruche_id)
+    signal_vector = signal_version_vector_for_ruche(db, ruche_id)
     from mediatracker.hive.peer_gossip import entries_page_for_peer
 
     outbound = entries_page_for_peer(db, ruche_id=ruche_id, peer_vector={}, limit=50).entries
+    sig_out = signals_page_for_peer(db, ruche_id=ruche_id, peer_vector={}, limit=50).entries
     release_sqlite_before_network(db)
     resp = gossip_sync_once(
         base_url=peer_base_url,
@@ -136,6 +145,8 @@ def send_gossip_hint_to_peer(
         vector=vector,
         entries=outbound,
         hint=True,
+        signal_vector=signal_vector,
+        signals=sig_out,
     )
     return resp.status_code == 200
 
@@ -154,9 +165,12 @@ def pull_gossip_from_peer(
         return 0
     total = 0
     vector = version_vector_for_ruche(db, ruche_id)
+    signal_vector = signal_version_vector_for_ruche(db, ruche_id)
     cursor: GossipCursor | None = None
+    signal_cursor: GossipCursor | None = None
     for _ in range(max_rounds):
         outbound = _entries_outbound(db, ruche_id=ruche_id, peer_vector=vector)
+        sig_out = _signals_outbound(db, ruche_id=ruche_id, peer_vector=signal_vector)
         release_sqlite_before_network(db)
         resp = gossip_sync_once(
             base_url=peer_base_url,
@@ -165,6 +179,9 @@ def pull_gossip_from_peer(
             vector=vector,
             entries=outbound,
             cursor=cursor.as_dict() if cursor else None,
+            signal_vector=signal_vector,
+            signals=sig_out,
+            signal_cursor=signal_cursor.as_dict() if signal_cursor else None,
         )
         if resp.status_code != 200:
             break
@@ -175,6 +192,15 @@ def pull_gossip_from_peer(
             total += added
             if added > 0:
                 release_sqlite_before_network(db)
+        sig_items = body.get("signals")
+        if isinstance(sig_items, list):
+            sig_added = ingest_signed_signals(db, ruche_id=ruche_id, items=sig_items, now=now)
+            total += sig_added
+            if sig_added > 0:
+                from mediatracker.hive.signal_requests import try_auto_accept_incoming
+
+                try_auto_accept_incoming(db, settings, ruche_id=ruche_id, now=now)
+                release_sqlite_before_network(db)
         peer_vector = body.get("vector")
         if isinstance(peer_vector, dict):
             merged = dict(vector)
@@ -182,11 +208,29 @@ def pull_gossip_from_peer(
                 if isinstance(k, str) and isinstance(v, int):
                     merged[k] = max(merged.get(k, 0), v)
             vector = merged
-        if body.get("has_more") is True:
+        peer_sig_vector = body.get("signal_vector")
+        if isinstance(peer_sig_vector, dict):
+            merged_sig = dict(signal_vector)
+            for k, v in peer_sig_vector.items():
+                if isinstance(k, str) and isinstance(v, int):
+                    merged_sig[k] = max(merged_sig.get(k, 0), v)
+            signal_vector = merged_sig
+        has_more = body.get("has_more") is True
+        sig_has_more = body.get("signal_has_more") is True
+        if has_more:
             cursor = GossipCursor.from_dict(body.get("cursor"))
             if cursor is None:
                 logger.warning("Gossip Hive : has_more sans curseur valide.")
                 break
-            continue
-        break
+        else:
+            cursor = None
+        if sig_has_more:
+            signal_cursor = GossipCursor.from_dict(body.get("signal_cursor"))
+            if signal_cursor is None:
+                logger.warning("Gossip Hive signaux : signal_has_more sans curseur valide.")
+                break
+        else:
+            signal_cursor = None
+        if not has_more and not sig_has_more:
+            break
     return total

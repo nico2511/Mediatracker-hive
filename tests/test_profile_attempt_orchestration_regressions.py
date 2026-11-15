@@ -718,7 +718,10 @@ def test_unlock_reingest_reloads_links_before_rechoose(monkeypatch):
         "mediatracker.core.profile_attempt_adapters.choose_link_for_profile_attempt",
         fake_choose,
     )
-    monkeypatch.setattr(unlock_mod, "_fallback_allowed", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        "mediatracker.core.profile_fallback.media_has_profile_repli_chain",
+        lambda *_a, **_k: True,
+    )
     monkeypatch.setattr(unlock_mod, "_ingest_other_versions", lambda *_a, **_k: True)
     monkeypatch.setattr(unlock_mod, "_hoster_supported", lambda *_a, **_k: True)
     monkeypatch.setattr(unlock_mod, "_unlock", lambda *_a, **_k: ("http://u", "f", 1, "http://u"))

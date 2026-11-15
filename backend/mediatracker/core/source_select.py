@@ -9,10 +9,8 @@ from collections.abc import Sequence
 
 from mediatracker.core.quality_profile import (
     Profile,
-    ReleaseCandidate,
     acceptance_rank,
-    normalize_language,
-    normalize_resolution,
+    release_candidate_from_fields,
 )
 from mediatracker.core.release_title import split_release_title
 from mediatracker.providers.base import SourceResult
@@ -93,9 +91,13 @@ def canonical_language(value: str | None) -> str | None:
     folded = re.sub(r"[\s_\-]+", "", value).lower()
     if "vostfr" in folded:
         return "VOSTFR"
-    if "truefrench" in folded or "vff" in folded:
+    if "truefrench" in folded or "vff" in folded or "vf2" in folded:
         return "VFF"
     if "vfq" in folded:
+        return "VFQ"
+    from mediatracker.core.quality_profile import _has_contextual_ca
+
+    if _has_contextual_ca(value):
         return "VFQ"
     if "multi" in folded:
         return "MULTI"
@@ -229,12 +231,17 @@ def explain_misses(
             year=year,
             media_type=media_type,
         ):
-            if year is not None and result.year not in {None, year} and any(
-                titles_match(result.title, name) for name in (title, original_title or "") if name.strip()
+            if (
+                year is not None
+                and result.year not in {None, year}
+                and any(titles_match(result.title, name) for name in (title, original_title or "") if name.strip())
             ):
                 notes.append(f"« {label} » est de {result.year}, pas {year}.")
-            elif media_type == "film" and year is not None and result.year is None and any(
-                titles_match(result.title, name) for name in (title, original_title or "") if name.strip()
+            elif (
+                media_type == "film"
+                and year is not None
+                and result.year is None
+                and any(titles_match(result.title, name) for name in (title, original_title or "") if name.strip())
             ):
                 notes.append(f"« {label} » n'a pas l'année {year}.")
             else:
@@ -261,8 +268,7 @@ def explain_misses(
                 )
             else:
                 notes.append(
-                    f"« {label} » est en {result.quality or '?'} {result.language or '?'}, "
-                    f"pas {quality} {language}."
+                    f"« {label} » est en {result.quality or '?'} {result.language or '?'}, pas {quality} {language}."
                 )
     unique = list(dict.fromkeys(notes))
     return " ".join(unique[:3])
@@ -290,10 +296,11 @@ def _page_rank(
     if result.rejection:
         return None
     return acceptance_rank(
-        ReleaseCandidate(
-            language=normalize_language(result.language),
-            resolution=normalize_resolution(result.quality),
-            text=result.title or "",
+        release_candidate_from_fields(
+            language=result.language,
+            quality=result.quality,
+            hint=result.profile_hint,
+            title=result.title,
         ),
         profile,
     )

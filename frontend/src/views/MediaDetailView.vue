@@ -15,11 +15,14 @@ import TmdbIdChangeDialog from "../components/TmdbIdChangeDialog.vue";
 import type { TmdbIdChangePreview } from "../tmdbIdChange";
 import { readTmdbIdChangePreview } from "../tmdbIdChange";
 import {
-  buildEffectiveProfileChain,
   describeEffectiveChain,
+  GLOBAL_ALLOW_FALLBACK_KEY,
+  moveCustomFallback,
   parseProfileFallbackOrder,
   PROFILE_FALLBACK_ORDER_KEY,
   qualityProfileSummary,
+  resolveEffectiveChainIds,
+  toggleCustomFallbackSelection,
   type QualityProfileLike,
 } from "../profileFallback";
 import { fetchSettings } from "../settings";
@@ -41,6 +44,8 @@ import { formatParis } from "../time";
 import { useHiveEnabled } from "../composables/useHive";
 import HiveContextMenuItems from "../components/HiveContextMenuItems.vue";
 import HiveMediaShareRow from "../components/HiveMediaShareRow.vue";
+import HiveMediaRequestCard from "../components/hive/HiveMediaRequestCard.vue";
+import type { HiveMyRequestItem } from "../hive/hiveRequests";
 import HiveBulkShareMenuItems from "../components/HiveBulkShareMenuItems.vue";
 import HiveEmpreintesPanel from "../components/HiveEmpreintesPanel.vue";
 import HiveSeriesShareSummary from "../components/HiveSeriesShareSummary.vue";
@@ -69,6 +74,7 @@ interface MediaRow {
   pref_quality: string;
   pref_language: string;
   allow_fallback: boolean;
+  fallback_profile_ids: number[] | null;
   source_order: string | null;
   quality_profile_id: number | null;
   scan_interval_min: number | null;
@@ -159,7 +165,8 @@ const checking = ref(false);
 const prefs = ref({
   quality: "HD",
   language: "VFF",
-  fallback: false,
+  fallbackMode: "global" as "global" | "custom",
+  customFallbackIds: [] as number[],
   interval: "",
   sourceOrder: "",
   profileId: "",
@@ -176,6 +183,7 @@ interface QualityProfileOption extends QualityProfileLike {
 
 const qualityProfiles = ref<QualityProfileOption[]>([]);
 const globalFallbackOrderIds = ref<number[]>([]);
+const globalAllowFallback = ref(false);
 const prefsContextStatus = ref<"loading" | "ready" | "error">("loading");
 const prefsContextError = ref("");
 const keepMedia = ref(false);
@@ -184,6 +192,7 @@ const globalAutoDeleteDays = ref(14);
 const filmItem = ref<Episode | null>(null);
 const { hiveEnabled } = useHiveEnabled();
 const hiveShare = ref<HiveShareUiState | null>(null);
+const hiveItemRequest = ref<{ announced: boolean; promptAvailable: boolean; retracted: boolean } | null>(null);
 const hiveEpisodeShares = ref<Record<number, HiveShareUiState>>({});
 const hiveEmpreintesSignal = ref(0);
 
@@ -267,9 +276,41 @@ const hiveSharePolling = useHiveSharePolling({
   visible: () => ficheVisible.value,
 });
 
+async function refreshHiveItemRequest() {
+  hiveItemRequest.value = null;
+  if (!hiveEnabled.value || !media.value?.followed || primaryItemId.value == null) {
+    return;
+  }
+  const itemRow =
+    media.value.type === "film"
+      ? filmItem.value
+      : seasons.value.flatMap((g) => g.episodes).find((ep) => ep.id === primaryItemId.value);
+  if (itemRow?.downloaded || itemRow?.watched) {
+    return;
+  }
+  try {
+    const resp = await api<{ items: HiveMyRequestItem[] }>("/api/v1/hive/requests/mine");
+    const row = resp.items?.find((entry) => entry.media_item_id === primaryItemId.value);
+    if (!row) {
+      return;
+    }
+    hiveItemRequest.value = {
+      announced: row.status === "pending" || row.status === "transfer",
+      promptAvailable: row.status === "prompt" && Boolean(row.hive_request_available),
+      retracted: row.status === "retracted",
+    };
+  } catch {
+    hiveItemRequest.value = null;
+  }
+}
+
 async function refreshHiveShareState() {
   await hiveSharePolling.reloadFromNavigation();
 }
+
+watch(primaryItemId, () => {
+  void refreshHiveItemRequest();
+});
 
 watch(primaryItemId, (itemId, prev) => {
   if (prev == null || itemId === prev) {
@@ -340,6 +381,8 @@ async function loadPrefsContext() {
     globalFallbackOrderIds.value = parseProfileFallbackOrder(
       orderRow && typeof orderRow.value === "string" ? orderRow.value : "",
     );
+    const allowRow = settingsBody.settings.find((row) => row.key === GLOBAL_ALLOW_FALLBACK_KEY);
+    globalAllowFallback.value = allowRow?.value === true;
     qualityProfiles.value = profilesBody.profiles;
     prefsContextStatus.value = "ready";
   } catch (err) {
@@ -414,10 +457,12 @@ async function reload() {
       globalDownloadSourceOrder.value = "";
     }
   }
+  const chainRaw = media.value.fallback_profile_ids;
   prefs.value = {
     quality: media.value.pref_quality,
     language: media.value.pref_language,
-    fallback: media.value.allow_fallback,
+    fallbackMode: chainRaw == null ? "global" : "custom",
+    customFallbackIds: chainRaw == null ? [] : [...chainRaw],
     interval: media.value.scan_interval_min == null ? "" : String(media.value.scan_interval_min),
     sourceOrder: media.value.source_order || "",
     profileId: media.value.quality_profile_id == null ? "" : String(media.value.quality_profile_id),
@@ -431,6 +476,7 @@ async function reload() {
   await loadLibraryFolders();
   await loadJellyfin();
   await refreshHiveShareState();
+  await refreshHiveItemRequest();
   await refreshHiveEpisodeShares();
   try {
     const status = await api<{
@@ -495,10 +541,12 @@ async function savePrefs() {
   message.value = "";
   const interval = prefs.value.interval.trim();
   try {
+    const fallbackPayload =
+      prefs.value.fallbackMode === "global" ? null : prefs.value.customFallbackIds;
     await api(`/api/v1/media/${media.value.id}`, {
       method: "PATCH",
       body: JSON.stringify({
-        allow_fallback: prefs.value.fallback,
+        fallback_profile_ids: fallbackPayload,
         source_order: sourceOrderForApi(),
         quality_profile_id: prefs.value.profileId ? Number(prefs.value.profileId) : null,
         scan_interval_min: interval === "" ? null : Number(interval),
@@ -1308,18 +1356,64 @@ const principalProfileId = computed((): number | null => {
 
 const profileById = computed(() => new Map(qualityProfiles.value.map((row) => [row.id, row])));
 
+const usesGlobalFallbackChain = computed(() => prefs.value.fallbackMode === "global");
+
+const mediaFallbackIdsForPreview = computed((): number[] | null =>
+  usesGlobalFallbackChain.value ? null : prefs.value.customFallbackIds,
+);
+
 const effectiveChainIds = computed(() =>
-  buildEffectiveProfileChain(principalProfileId.value, globalFallbackOrderIds.value, prefs.value.fallback),
+  resolveEffectiveChainIds(
+    principalProfileId.value,
+    globalFallbackOrderIds.value,
+    globalAllowFallback.value,
+    mediaFallbackIdsForPreview.value,
+  ),
 );
 
 const effectiveChain = computed(() =>
-  describeEffectiveChain(
-    effectiveChainIds.value,
-    profileById.value,
-    principalProfileId.value,
-    globalFallbackOrderIds.value,
-  ),
+  describeEffectiveChain(effectiveChainIds.value, profileById.value, {
+    usesGlobal: usesGlobalFallbackChain.value,
+    globalAllowFallback: globalAllowFallback.value,
+    globalOrder: globalFallbackOrderIds.value,
+    principalId: principalProfileId.value,
+  }),
 );
+
+const globalFallbackLabel = computed(() => (globalAllowFallback.value ? "Oui" : "Non"));
+
+const selectableFallbackProfiles = computed(() =>
+  qualityProfiles.value.filter((row) => row.id !== principalProfileId.value),
+);
+
+const orderedCustomFallbackProfiles = computed(() =>
+  prefs.value.customFallbackIds
+    .map((id) => profileById.value.get(id))
+    .filter((row): row is QualityProfileOption => row != null),
+);
+
+function isCustomFallbackChecked(profileId: number): boolean {
+  return prefs.value.customFallbackIds.includes(profileId);
+}
+
+function onCustomFallbackToggle(profileId: number, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  prefs.value.customFallbackIds = toggleCustomFallbackSelection(
+    prefs.value.customFallbackIds,
+    profileId,
+    principalProfileId.value,
+    checked,
+  );
+}
+
+function shiftCustomFallback(profileId: number, delta: number) {
+  prefs.value.customFallbackIds = moveCustomFallback(prefs.value.customFallbackIds, profileId, delta);
+}
+
+function revertFallbackToGlobal() {
+  prefs.value.fallbackMode = "global";
+  prefs.value.customFallbackIds = [];
+}
 
 function profileOptionLabel(profile: QualityProfileOption): string {
   return `${profile.name} — ${qualityProfileSummary(profile)}`;
@@ -1629,16 +1723,17 @@ function episodeStatusIconName(episodeRow: Episode): string {
         </details>
       </article>
 
-      <HiveSeriesShareSummary
-        v-if="hiveEnabled"
-        class="fiche-layout-b"
-        layout="card"
-        :hive-enabled="hiveEnabled"
-        :episode-states="hiveEpisodeShares"
-        :media-id="media.id"
-        @changed="onHiveShareMenuChanged"
-        @open-empreintes="hiveEmpreintesSignal += 1"
-      />
+      <div v-if="hiveEnabled" class="fiche-layout-b">
+        <HiveSeriesShareSummary
+          layout="card"
+          :hive-enabled="hiveEnabled"
+          :episode-states="hiveEpisodeShares"
+          :media-id="media.id"
+          :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+          @changed="onHiveShareMenuChanged"
+          @open-empreintes="hiveEmpreintesSignal += 1"
+        />
+      </div>
 
       <div class="fiche-series-desktop stack fiche-layout-a">
         <div class="panel fiche-action-bar">
@@ -1696,6 +1791,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
           :hive-enabled="hiveEnabled"
           :episode-states="hiveEpisodeShares"
           :media-id="media.id"
+          :hive-request-announced="Boolean(hiveItemRequest?.announced)"
           @changed="onHiveShareMenuChanged"
           @open-empreintes="hiveEmpreintesSignal += 1"
         />
@@ -1785,6 +1881,22 @@ function episodeStatusIconName(episodeRow: Episode): string {
       :poll-busy="hiveSharePolling.pollBusy.value"
       @refresh="hiveSharePolling.manualRefresh"
       @changed="onHiveShareMenuChanged"
+    />
+    <HiveMediaRequestCard
+      v-if="
+        hiveEnabled &&
+        media.followed &&
+        primaryItemId &&
+        hiveItemRequest &&
+        (hiveItemRequest.announced || hiveItemRequest.promptAvailable || hiveItemRequest.retracted) &&
+        !(media.type === 'film' && filmItem?.downloaded)
+      "
+      class="fiche-fold fiche-fold--hive"
+      :media-item-id="primaryItemId"
+      :announced="hiveItemRequest.announced"
+      :prompt-available="hiveItemRequest.promptAvailable"
+      :retracted="hiveItemRequest.retracted"
+      @changed="refreshHiveItemRequest"
     />
     </div>
 
@@ -2128,15 +2240,78 @@ function episodeStatusIconName(episodeRow: Episode): string {
             <span class="hint">Choisir un profil existant, ou utiliser le profil par défaut.</span>
           </label>
           <div class="profile-fallback-switchline fiche-profile-switch">
-            <span class="field-label">Autoriser le repli</span>
-            <div class="segment-toggle" role="group" aria-label="Autoriser le repli sur cette fiche">
-              <button type="button" :aria-pressed="prefs.fallback" @click="prefs.fallback = true">Oui</button>
-              <button type="button" :aria-pressed="!prefs.fallback" @click="prefs.fallback = false">Non</button>
+            <span class="field-label">Repli sur cette fiche</span>
+            <div class="segment-toggle" role="group" aria-label="Mode de repli sur cette fiche">
+              <button
+                type="button"
+                :aria-pressed="prefs.fallbackMode === 'global'"
+                @click="prefs.fallbackMode = 'global'"
+              >
+                Suivre le réglage global ({{ globalFallbackLabel }})
+              </button>
+              <button
+                type="button"
+                :aria-pressed="prefs.fallbackMode === 'custom'"
+                @click="prefs.fallbackMode = 'custom'"
+              >
+                Personnaliser
+              </button>
             </div>
           </div>
-          <p class="hint">
-            Activation propre à cette fiche, conservée indépendamment de la valeur globale par défaut.
+          <p v-if="prefs.fallbackMode === 'global'" class="hint">
+            Les fiches qui suivent le global utilisent « Repli par défaut » et l'ordre global des profils.
           </p>
+          <template v-else>
+          <div class="profile-fallback-section">
+            <p class="hint">Profil principal fixé en tête ; cochez et ordonnez les profils de repli pour cette fiche.</p>
+            <ul class="fiche-fallback-pick" aria-label="Profils de repli disponibles">
+              <li v-for="profile in selectableFallbackProfiles" :key="profile.id">
+                <label>
+                  <input
+                    type="checkbox"
+                    :checked="isCustomFallbackChecked(profile.id)"
+                    @change="onCustomFallbackToggle(profile.id, $event)"
+                  />
+                  {{ profileOptionLabel(profile) }}
+                </label>
+              </li>
+            </ul>
+            <div v-if="orderedCustomFallbackProfiles.length" class="profile-fallback-section" aria-label="Ordre de repli">
+              <div
+                v-for="(profile, index) in orderedCustomFallbackProfiles"
+                :key="profile.id"
+                class="profile-fallback-row"
+              >
+                <span class="profile-fallback-rank">{{ index + 2 }}</span>
+                <div class="profile-fallback-profile">
+                  <strong>{{ profile.name }}</strong>
+                  <small class="hint">{{ qualityProfileSummary(profile) }}</small>
+                </div>
+                <div class="profile-fallback-actions">
+                  <button
+                    type="button"
+                    :disabled="index === 0"
+                    :aria-label="`Monter ${profile.name}`"
+                    @click="shiftCustomFallback(profile.id, -1)"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="index === orderedCustomFallbackProfiles.length - 1"
+                    :aria-label="`Descendre ${profile.name}`"
+                    @click="shiftCustomFallback(profile.id, 1)"
+                  >
+                    ↓
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p class="actions">
+              <button type="button" class="ghost" @click="revertFallbackToGlobal">Revenir au réglage global</button>
+            </p>
+          </div>
+          </template>
           <div class="fiche-chain-block">
             <h4 class="fiche-chain-title">Chaîne pour cette fiche</h4>
             <p v-if="prefsContextStatus === 'loading'" class="hint" role="status">Chargement de la chaîne…</p>
@@ -2157,11 +2332,13 @@ function episodeStatusIconName(episodeRow: Episode): string {
               <RouterLink class="fiche-chain-link" to="/reglages/qualite">
                 Modifier les profils de repli globaux
               </RouterLink>
-              <p class="hint">Cette liste est partagée. Aucun ordre de repli propre à cette fiche.</p>
+              <p v-if="prefs.fallbackMode === 'global'" class="hint">
+                Chaîne effective pour cette fiche tant qu'elle suit le réglage global.
+              </p>
             </template>
           </div>
-          <p v-if="!prefs.fallback" class="profile-fallback-notice" role="status">
-            Repli désactivé : seul le profil principal est essayé. Aucun candidat compatible : aucun téléchargement hors profil.
+          <p v-if="effectiveChainIds.length <= 1" class="profile-fallback-notice" role="status">
+            Repli désactivé pour cette fiche : seul le profil principal est essayé.
           </p>
           <p
             v-if="!downloadSourcesReady && downloadSourcesBlockedMessage"

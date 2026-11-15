@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 LANGUAGE_CODES = ("VFF", "VFQ", "VF", "MULTI", "VOSTFR", "VO", "EN")
 LANGUAGE_ALIASES = {
     "TRUEFRENCH": "VFF",
+    "VF2": "VFF",
     "FRENCH": "VF",
     "FR": "VF",
     "ENGLISH": "EN",
@@ -27,6 +29,10 @@ HDLIGHT1080_RESOLUTION = "HDLight1080"
 DEFAULT_NAME = "VF/Multi 1080p"
 
 _TOKEN = r"(?:^|[^a-z0-9])({name})(?:[^a-z0-9]|$)"
+_LANG_BEFORE_CA = re.compile(r"(?i)(?:multi|vff|vfq|vf2|truefrench|french|vostfr|vf)[.\s_\-()]*ca(?:[^a-z0-9]|$)")
+_CA_BEFORE_LANG = re.compile(
+    r"(?i)(?:^|[^a-z0-9])ca[.\s_\-()]*(?:multi|vff|vfq|vf2|truefrench|french|vostfr|vf)(?:[^a-z0-9]|$)"
+)
 
 
 @dataclass(frozen=True)
@@ -119,7 +125,7 @@ def builtin_profiles() -> tuple[Profile, ...]:
 def normalize_language(value: str | None) -> str | None:
     if not value:
         return None
-    token = re.sub(r"[^A-Za-z]+", "", value).upper()
+    token = re.sub(r"[^A-Za-z0-9]+", "", value).upper()
     if token in LANGUAGE_ALIASES:
         return LANGUAGE_ALIASES[token]
     if token in LANGUAGE_CODES:
@@ -160,9 +166,10 @@ def detect_language(text: str) -> str | None:
     has_vostfr = _has(lowered, "vostfr")
     has_truefrench = _has(lowered, "truefrench")
     has_vff = _has(lowered, "vff")
-    has_vfq = _has(lowered, "vfq")
+    has_vf2 = _has(lowered, "vf2")
+    has_vfq = _has(lowered, "vfq") or _has_contextual_ca(text)
     has_multi = _has(lowered, "multi")
-    has_vf = _has(lowered, "vf")
+    has_vf = _has(lowered, "vf") and not has_vf2
     has_french = _has(lowered, "french") and not has_truefrench
     has_vo = _has(lowered, "vo") and not has_vostfr
     french_flag = "🇫🇷" in text
@@ -171,7 +178,7 @@ def detect_language(text: str) -> str | None:
         return "MULTI"
     if has_vostfr and not (has_truefrench or has_vff or has_vfq or has_vf):
         return "VOSTFR"
-    if has_truefrench or has_vff:
+    if has_truefrench or has_vff or has_vf2:
         return "VFF"
     if has_vfq:
         return "VFQ"
@@ -228,19 +235,76 @@ def passes(candidate: ReleaseCandidate, profile: Profile, *, enforce_size: bool)
     return not enforce_size or size_allowed(candidate.size, profile)
 
 
-def sort_key(candidate: ReleaseCandidate, profile: Profile) -> tuple[int, int, int, int]:
-    """Lower is better: language order, then higher resolution, seeders, and size."""
+def multi_french_variant(text: str) -> str | None:
+    """French audio track inside a MULTI release name (VFF before VFQ before VF)."""
+    if not text:
+        return None
+    lowered = text.lower()
+    if _has(lowered, "truefrench") or _has(lowered, "vff") or _has(lowered, "vf2"):
+        return "VFF"
+    if _has(lowered, "vfq") or _has_contextual_ca(text):
+        return "VFQ"
+    has_vf = _has(lowered, "vf") and not _has(lowered, "vf2")
+    has_french = _has(lowered, "french") and not _has(lowered, "truefrench")
+    if has_vf or has_french or "🇫🇷" in text:
+        return "VF"
+    return None
+
+
+def _multi_french_rank(candidate: ReleaseCandidate, profile: Profile) -> int:
+    if candidate.language != "MULTI":
+        return 0
+    variant = multi_french_variant(candidate.text)
+    if variant is None:
+        return len(profile.languages)
+    try:
+        return profile.languages.index(variant)
+    except ValueError:
+        return len(profile.languages)
+
+
+def sort_key(candidate: ReleaseCandidate, profile: Profile) -> tuple[int, int, int, int, int]:
+    """Lower is better: language, MULTI French track, resolution, seeders, size."""
     language_index = profile.languages.index(candidate.language or "")
+    french_rank = _multi_french_rank(candidate, profile)
     resolution = -RESOLUTION_RANK.get(candidate.resolution or "", 0)
-    return (language_index, resolution, -(candidate.seeders or 0), -(candidate.size or 0))
+    return (language_index, french_rank, resolution, -(candidate.seeders or 0), -(candidate.size or 0))
+
+
+def profile_rank_text(
+    *,
+    hint: str = "",
+    title: str | None = None,
+    quality: str | None = None,
+    language: str | None = None,
+) -> str:
+    """Text fed to ``acceptance_rank`` so MULTi variants (VFF/VF2/VFQ/CA) stay visible."""
+    stripped = (hint or "").strip()
+    if stripped:
+        return stripped
+    return " ".join(part for part in (title, quality, language) if part and str(part).strip())
+
+
+def release_candidate_from_fields(
+    *,
+    language: str | None,
+    quality: str | None,
+    hint: str = "",
+    title: str | None = None,
+) -> ReleaseCandidate:
+    return ReleaseCandidate(
+        language=normalize_language(language),
+        resolution=normalize_resolution(quality),
+        text=profile_rank_text(hint=hint, title=title, quality=quality, language=language),
+    )
 
 
 def acceptance_rank(candidate: ReleaseCandidate, profile: Profile, *, enforce_size: bool = False) -> int | None:
     """Single penalty for a page or a hoster link. ``None`` means refused."""
     if not passes(candidate, profile, enforce_size=enforce_size):
         return None
-    language_index, resolution, _seeders, _size = sort_key(candidate, profile)
-    return language_index * 100 + resolution
+    language_index, french_rank, resolution, _seeders, _size = sort_key(candidate, profile)
+    return language_index * 100 + french_rank * 10 + resolution
 
 
 def filter_candidates(
@@ -250,7 +314,7 @@ def filter_candidates(
     enforce_size: bool = True,
 ) -> tuple[list[int], int]:
     """Kept indexes, best first, and how many candidates the profile removed."""
-    ranked: list[tuple[tuple[int, int, int, int], int]] = []
+    ranked: list[tuple[tuple[int, int, int, int, int], int]] = []
     dropped = 0
     for index, candidate in enumerate(candidates):
         if not passes(candidate, profile, enforce_size=enforce_size):
@@ -354,6 +418,37 @@ def comet_config_token(profile: Profile) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+def refresh_media_poll_schedule(media: object, now: datetime) -> None:
+    """Force le prochain sondage sans attendre le cooldown recherche distante."""
+    from datetime import timezone
+
+    moment = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    media.last_remote_search_at = None  # type: ignore[attr-defined]
+    media.next_source_poll_at = moment  # type: ignore[attr-defined]
+
+
+def refresh_followed_media_for_profile_change(
+    db: Session,
+    profile_id: int,
+    *,
+    affects_default: bool,
+    now: datetime,
+) -> None:
+    from datetime import timezone
+
+    from sqlalchemy import or_, select
+
+    from mediatracker.db.models import Media
+
+    moment = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    clause = Media.quality_profile_id == profile_id
+    if affects_default:
+        clause = or_(clause, Media.quality_profile_id.is_(None))
+    for media in db.scalars(select(Media).where(Media.followed.is_(True), clause)).all():
+        media.last_remote_search_at = None
+        media.next_source_poll_at = moment
+
+
 def ensure_default_profile(db: Session) -> None:
     """Insert any built-in profile that is missing. An existing default stays default."""
     from mediatracker.db.models import QualityProfile
@@ -383,6 +478,13 @@ def ensure_default_profile(db: Session) -> None:
         added = True
     if added:
         db.commit()
+
+
+def _has_contextual_ca(text: str) -> bool:
+    """Canadian-french CA only beside MULTI or another language tag (not a lone title/group token)."""
+    if not text:
+        return False
+    return _LANG_BEFORE_CA.search(text) is not None or _CA_BEFORE_LANG.search(text) is not None
 
 
 def _has(lowered: str, name: str) -> bool:

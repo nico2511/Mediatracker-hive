@@ -84,6 +84,7 @@ class RemoteCollectPlan:
     binding_error_message: str = ""
     schedule_finish: bool = True
     single_profile: object | None = None
+    profile_rank: int = 1
 
 
 @dataclass
@@ -187,6 +188,7 @@ def plan_remote_poll(
     plan.profile_id = report.profile_id
     plan.profile = report.profile
     plan.from_bindings = report.from_bindings
+    plan.profile_rank = report.profile_rank
     return plan
 
 
@@ -223,8 +225,6 @@ def _run_search_phase(plan: RemoteCollectPlan, source: object, settings: Setting
             None,
             settings,
             preferences=preferences,
-            quality_fallback=list(crit.quality_fallback),
-            language_fallback=list(crit.language_fallback),
         )
     except SourceFetchError as exc:
         plan.fetch_error = exc
@@ -401,7 +401,16 @@ def apply_remote_collect(
         )
     _store_report(media, plan.report_rows, plan.pages)
     for page in plan.pages:
-        _remember_page(db, media.id, plan.provider_id, page, moment)
+        _remember_page(
+            db,
+            media.id,
+            plan.provider_id,
+            page,
+            moment,
+            media=media,
+            items=items,
+            profile_rank=plan.profile_rank,
+        )
     queued, proposed, episodes = _apply(
         db,
         media,

@@ -78,6 +78,7 @@ class Heading:
     quality: str | None
     language: str | None
     media_type: str | None
+    profile_hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ class SearchHit:
     episode: int | None = None
     rejection: str | None = None
     poster_url: str | None = None
+    profile_hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,7 @@ class AlternateQuality:
     language: str | None
     url: str
     rejection: str | None = None
+    label: str = ""
 
 
 class Node:
@@ -259,6 +262,10 @@ def canon_language(token: str) -> str | None:
     for alias, name in _LANGUAGE:
         if _scoped_has(meta, alias):
             return name
+    from mediatracker.core.quality_profile import _has_contextual_ca
+
+    if _has_contextual_ca(token or ""):
+        return "VFQ"
     return None
 
 
@@ -336,12 +343,12 @@ def parse_heading(raw: str) -> Heading:
     title = re.sub(r"\s+", " ", text).strip(" -–—:|")
     title = re.sub(r"(?i)\s*[-–—|]\s*french\s*$", "", title)
     title = re.sub(
-        r"(?i)(?:\s*[-–—|]\s*)?\b(?:truefrench|vostfr|vff|vfq|multi|french|vf|webrrip|webrip|web-dl|webdl)\b",
+        r"(?i)(?:\s*[-–—|]\s*)?\b(?:truefrench|vostfr|vff|vf2|vfq|multi|french|vf|webrrip|webrip|web-dl|webdl)\b",
         " ",
         title,
     )
     title = re.sub(
-        r"(?i)\s*\(\s*(?:french|truefrench|vostfr|vff|vfq|multi|vf)\s*\)\s*",
+        r"(?i)\s*\(\s*(?:french|truefrench|vostfr|vff|vf2|vfq|multi|vf|ca)\s*\)\s*",
         " ",
         title,
     )
@@ -443,6 +450,7 @@ def parse_search(html: str, base_url: str) -> list[SearchHit]:
                 url=url,
                 rejection=_cam_reason(raw),
                 poster_url=_block_poster(block, base_url),
+                profile_hint=raw,
             )
         )
     return hits
@@ -499,6 +507,7 @@ def parse_listing(html: str, base_url: str, media_type: str) -> list[SearchHit]:
                 episode=episode,
                 rejection=_cam_reason(raw),
                 poster_url=poster,
+                profile_hint=raw,
             )
         )
 
@@ -519,13 +528,22 @@ def _episode_bits(text: str) -> tuple[int | None, int | None]:
 def parse_links(html: str, page_url: str) -> tuple[Heading, list[PageLink]]:
     root = parse_html(html)
     h1 = root.find("h1")
-    heading = parse_heading(h1.text() if h1 is not None else "")
+    h1_text = h1.text() if h1 is not None else ""
+    heading = parse_heading(h1_text)
     year = heading.year if heading.year is not None else _page_year(root)
     meta_quality, meta_language = _page_meta(root)
     quality = meta_quality or heading.quality
     language = meta_language or heading.language
     season = heading.season if heading.season is not None else season_from_url(page_url)
-    heading = Heading(heading.title, year, season, quality, language, heading.media_type)
+    heading = Heading(
+        heading.title,
+        year,
+        season,
+        quality,
+        language,
+        heading.media_type,
+        profile_hint=h1_text,
+    )
     links = _rows(root, page_url, season, quality, language)
     return heading, links
 
@@ -591,6 +609,7 @@ def _alternate_quality_from_label(
         language=language,
         url=url,
         rejection=_cam_reason(label),
+        label=label,
     )
 
 

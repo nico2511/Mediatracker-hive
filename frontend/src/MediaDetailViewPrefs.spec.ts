@@ -43,7 +43,12 @@ const profiles = [
 ];
 
 function stubApi() {
-  const media = { ...filmFixture.media, allow_fallback: true, quality_profile_id: 1 };
+  const media = {
+    ...filmFixture.media,
+    allow_fallback: true,
+    fallback_profile_ids: null,
+    quality_profile_id: 1,
+  };
   apiMock.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url === `/api/v1/media/${media.id}` && init?.method === "PATCH") {
       return media;
@@ -96,7 +101,7 @@ describe("Fiche — savePrefs", () => {
     const body = JSON.parse(patchCall![1]!.body as string) as Record<string, unknown>;
     expect(body).not.toHaveProperty("pref_quality");
     expect(body).not.toHaveProperty("pref_language");
-    expect(body.allow_fallback).toBe(true);
+    expect(body.fallback_profile_ids).toBeNull();
   });
 
   it("laisse source_order à null si l’ordre de la fiche n’est pas surchargé", async () => {

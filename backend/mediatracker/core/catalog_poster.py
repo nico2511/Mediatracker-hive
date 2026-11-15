@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _TMDB_TITLE_TAIL = re.compile(
     r"(?i)(?:\s*[-–—|]\s*(?:"
-    r"french|truefrench|vostfr|vff|vfq|multi|vf|vo"
+    r"french|truefrench|vostfr|vff|vf2|vfq|multi|vf|vo"
     r"))+\s*$"
 )
 _SEASON_TAIL = re.compile(r"(?i)\s*[-–—|]\s*saison\s+\d+\s*")

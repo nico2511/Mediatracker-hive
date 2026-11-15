@@ -8,7 +8,7 @@ later, inside the existing pipeline, and only when a download actually starts.
 import logging
 import random
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import and_, exists, func, or_, select
@@ -22,16 +22,16 @@ from mediatracker.core.pipeline.download_guard import (
 )
 from mediatracker.core.polling import EpisodeAir, PollSubject, should_poll_source
 from mediatracker.core.selection import (
-    LANGUAGE_FALLBACK,
-    LANGUAGE_OPTIONS,
-    QUALITY_FALLBACK,
-    QUALITY_OPTIONS,
     hoster_allowed,
     hoster_rank,
-    parse_choice_list,
     parse_hoster_preference,
 )
-from mediatracker.core.source_binding import pick_bound_pages, remember_binding_fields
+from mediatracker.core.source_binding import (
+    clear_auto_binding_path,
+    pick_bound_pages,
+    remember_binding_fields,
+    should_persist_auto_binding,
+)
 from mediatracker.db.models import Download, LibraryFile, Link, Media, MediaItem, Setting, SourceBinding
 from mediatracker.db.session import commit_retry, release_sqlite_before_network
 from mediatracker.events import record_event
@@ -78,6 +78,7 @@ class CollectPages:
     profile_id: int | None = None
     profile: object | None = None
     from_bindings: bool = False
+    profile_rank: int = 1
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,8 @@ def next_due(db: Session, settings: Settings, now: datetime, *, commit: bool = T
                     media.last_poll_message = "Obtenu."
                     dirty = True
                 continue
+            if reason == "before_air_date" and _defer_poll_to_release(db, settings, media):
+                dirty = True
             if allowed:
                 if dirty and commit:
                     _persist(db, commit=True)
@@ -306,12 +309,7 @@ def _poll_candidate_batch(db: Session, now: datetime, cursor: Media | None) -> l
     filters: list = list(_poll_candidate_filters(now))
     if cursor is not None:
         filters.append(_poll_candidate_after(cursor))
-    stmt = (
-        select(Media)
-        .where(*filters)
-        .order_by(*_poll_candidate_order())
-        .limit(_POLL_CANDIDATE_BATCH)
-    )
+    stmt = select(Media).where(*filters).order_by(*_poll_candidate_order()).limit(_POLL_CANDIDATE_BATCH)
     return list(db.scalars(stmt).all())
 
 
@@ -334,9 +332,7 @@ def run_poll(
     moment = now or datetime.now(timezone.utc)
     draw = rng or random.Random()
     items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media.id)).all())
-    reconciled = (
-        _reconcile_absent_files(db, media, items, settings, moment) if absence_updates_allowed(db) else False
-    )
+    reconciled = _reconcile_absent_files(db, media, items, settings, moment) if absence_updates_allowed(db) else False
     if _film_is_obtained(db, media, items):
         media.next_source_poll_at = None
         media.last_poll_result = "obtained"
@@ -352,9 +348,10 @@ def run_poll(
             next_check_at=None,
         )
     if not force:
-        allowed, _reason = _gate(db, settings, media, items, moment)
+        allowed, reason = _gate(db, settings, media, items, moment)
         if not allowed:
-            if reconciled:
+            deferred = reason == "before_air_date" and _defer_poll_to_release(db, settings, media)
+            if reconciled or deferred:
                 _persist(db, commit=commit)
             return PollReport(
                 result="skipped",
@@ -527,6 +524,7 @@ def _collect(
     language_fallback = list(crit.language_fallback)
     results: list = []
     pages: list = []
+    pick_profile_rank = 1
     bound = pick_bound_pages(
         db,
         settings,
@@ -549,6 +547,7 @@ def _collect(
         if pick is not None:
             pages = pick.pages
             spec = pick.profile
+            pick_profile_rank = pick.profile_rank
             crit = attempt_selection_criteria(spec)
             quality = crit.quality
             language = crit.language
@@ -579,6 +578,7 @@ def _collect(
                 profile_id=getattr(spec, "quality_profile_id", None),
                 profile=spec,
                 from_bindings=False,
+                profile_rank=pick_profile_rank,
             )
         profiles_to_try = chain.profiles
         report_rows = []
@@ -610,6 +610,7 @@ def _collect(
                 continue
             pages = pick.pages
             spec = pick.profile
+            pick_profile_rank = pick.profile_rank
             crit = attempt_selection_criteria(spec)
             quality = crit.quality
             language = crit.language
@@ -688,6 +689,7 @@ def _collect(
             profile_id=getattr(spec, "quality_profile_id", None),
             profile=spec,
             from_bindings=bound is not None,
+            profile_rank=pick_profile_rank,
         )
     if commit:
         release_sqlite_before_network(db)
@@ -716,7 +718,16 @@ def _collect(
                     schedule_finish=schedule_finish,
                 )
             raise
-        _remember_page(db, media.id, provider_id, page, now)
+        _remember_page(
+            db,
+            media.id,
+            provider_id,
+            page,
+            now,
+            media=media,
+            items=items,
+            profile_rank=pick_profile_rank,
+        )
     preference = _hosters(db, settings)
     kept = [link for link in found if hoster_allowed(link.hoster, preference)]
     kept.sort(key=lambda link: (link.season or 0, link.episode or 0, hoster_rank(link.hoster, preference), link.url))
@@ -733,7 +744,12 @@ def _collect(
         poll_quality_profile_id=poll_qp_id,
     )
     auto = media.new_episode_policy == "auto"
+    from mediatracker.core.profile_fallback import poll_profile_repli_journal_note
+
     message = poll_found_message(media, episodes=episodes, queued=queued, auto=auto)
+    repli_note = poll_profile_repli_journal_note(spec, rank=pick_profile_rank)
+    if repli_note:
+        message = f"{message}{repli_note}"
     result = "nothing" if episodes == 0 else "found"
     return _finish(
         db,
@@ -769,29 +785,16 @@ def _search(
     db,
     settings,
     preferences=None,
-    *,
-    quality_fallback=None,
-    language_fallback=None,
 ):
     """Prefer a source's own ``discover``. Fall back to a plain text search."""
     discover = getattr(source, "discover", None)
     if callable(discover):
         from mediatracker.providers.base import SourcePreferences, SourceQuery
 
-        if quality_fallback is None and db is not None:
-            quality_fallback = _fallback(
-                db, "quality_fallback", settings.quality_fallback, QUALITY_OPTIONS, QUALITY_FALLBACK
-            )
-        if language_fallback is None and db is not None:
-            language_fallback = _fallback(
-                db, "language_fallback", settings.language_fallback, LANGUAGE_OPTIONS, LANGUAGE_FALLBACK
-            )
         chosen = preferences or SourcePreferences(
             quality=quality,
             language=language,
             allow_fallback=allow,
-            quality_fallback=quality_fallback or list(QUALITY_FALLBACK),
-            language_fallback=language_fallback or list(LANGUAGE_FALLBACK),
         )
         return list(
             discover(
@@ -1104,15 +1107,18 @@ def _apply(
             and queues_download(media.new_episode_policy, bool(getattr(media, "download_backlog", False)))
         )
         if queue and not _blocking_download(db, item.id):
-            db.add(
-                Download(
-                    media_item_id=item.id,
-                    state="pending",
-                    created_at=now,
-                    poll_quality_profile_id=poll_quality_profile_id,
+            if _requeue_failed_download(db, item.id, now, poll_quality_profile_id):
+                queued += 1
+            else:
+                db.add(
+                    Download(
+                        media_item_id=item.id,
+                        state="pending",
+                        created_at=now,
+                        poll_quality_profile_id=poll_quality_profile_id,
+                    )
                 )
-            )
-            queued += 1
+                queued += 1
         else:
             proposed += 1
     return queued, proposed, len(grouped)
@@ -1149,8 +1155,52 @@ def _store_links(
         )
 
 
+_POLL_REQUEUE_FAILURE_CODES = frozenset({"NO_LINK", "PROFILE", "POLL_PROFILE_MISSING"})
+
+
+def _failed_is_poll_requeue_eligible(row: Download) -> bool:
+    """Échec « pas de lien » seulement (pas débrid, intégrité, DISCONTINUED, etc.)."""
+    code = (row.error_code or "").strip()
+    if code in _POLL_REQUEUE_FAILURE_CODES:
+        return True
+    bag = getattr(row, "_download_pass_verdicts", None)
+    if isinstance(bag, dict) and bag:
+        return all(getattr(verdict, "issue", None) in {"empty", "refused"} for verdict in bag.values())
+    return False
+
+
+def _requeue_failed_download(
+    db: Session,
+    item_id: int,
+    now: datetime,
+    poll_quality_profile_id: int | None,
+) -> Download | None:
+    """Remet en file le dernier job ``failed`` « pas de lien », si aucun job actif."""
+    if active_download_for_item(db, item_id) is not None:
+        return None
+    row = db.scalar(
+        select(Download)
+        .where(Download.media_item_id == item_id, Download.state == "failed")
+        .order_by(Download.id.desc())
+        .limit(1)
+    )
+    if row is None or not _failed_is_poll_requeue_eligible(row):
+        return None
+    row.state = "pending"
+    row.error_code = None
+    row.error = None
+    row.finished_at = None
+    row.next_retry_at = None
+    row.attempts = 0
+    row.link_id = None
+    row.skipped_link_ids = []
+    row.poll_quality_profile_id = poll_quality_profile_id
+    row.created_at = now
+    return row
+
+
 def _blocking_download(db: Session, item_id: int) -> bool:
-    """Busy and failed jobs block. One ``done`` does not, once the file is gone.
+    """Busy jobs block. One ``done`` does not, once the file is gone.
 
     A second job created for the same disappearance blocks the next one, so a
     missing file is not fetched again on every check. A later ``missing_at``
@@ -1160,7 +1210,8 @@ def _blocking_download(db: Session, item_id: int) -> bool:
     rows = list(db.scalars(select(Download).where(Download.media_item_id == item_id)).all())
     if active_download_for_item(db, item_id) is not None:
         return True
-    if any(row.state == "failed" for row in rows):
+    failed = [row for row in rows if row.state == "failed"]
+    if failed and any(not _failed_is_poll_requeue_eligible(row) for row in failed):
         return True
     dones = [row for row in rows if row.state == "done"]
     if not dones:
@@ -1233,7 +1284,17 @@ def _mark_binding_error(
     row.last_error_at = now
 
 
-def _remember_page(db: Session, media_id: int, provider_id: int, page, now: datetime) -> None:
+def _remember_page(
+    db: Session,
+    media_id: int,
+    provider_id: int,
+    page,
+    now: datetime,
+    *,
+    media: Media | None = None,
+    items: list | None = None,
+    profile_rank: int = 1,
+) -> None:
     ref_key = (page.ref or page.url or "")[:300]
     row = db.scalar(
         select(SourceBinding).where(
@@ -1251,6 +1312,16 @@ def _remember_page(db: Session, media_id: int, provider_id: int, page, now: date
                 SourceBinding.active.is_(True),
             )
         )
+    if row is not None and row.path_manual:
+        row.last_scanned_at = now
+        row.last_error = None
+        row.last_error_at = None
+        return
+    persist = media is None or should_persist_auto_binding(media, items, profile_rank=profile_rank)
+    if not persist:
+        if row is not None:
+            clear_auto_binding_path(row)
+        return
     if row is None:
         row = SourceBinding(
             media_id=media_id,
@@ -1264,6 +1335,8 @@ def _remember_page(db: Session, media_id: int, provider_id: int, page, now: date
         )
         db.add(row)
     remember_binding_fields(row, page.url)
+    row.quality = page.quality
+    row.language = page.language
     row.last_scanned_at = now
     row.last_error = None
     row.last_error_at = None
@@ -1554,6 +1627,34 @@ def _reconcile_absent_files(
     return changed
 
 
+def _release_day_poll_at(db: Session, settings: Settings, air: date) -> datetime:
+    """Start of ``air`` in notify timezone, stored like other poll timestamps (naive UTC)."""
+    from zoneinfo import ZoneInfo
+
+    zone_name = _setting_text(db, "notify_timezone", settings.notify_timezone)
+    try:
+        zone = ZoneInfo(zone_name)
+    except Exception:
+        zone = ZoneInfo("Europe/Paris")
+    local_start = datetime.combine(air, time.min, tzinfo=zone)
+    return _naive_utc(local_start.astimezone(timezone.utc))
+
+
+def _defer_poll_to_release(db: Session, settings: Settings, media: Media) -> bool:
+    """When polling waits for release, align next_source_poll_at to that day if still overdue."""
+    air = media.next_air_date
+    if air is None:
+        return False
+    target = _release_day_poll_at(db, settings, air)
+    current = media.next_source_poll_at
+    if current is not None:
+        cur = _naive_utc(_aware(current))
+        if cur >= target:
+            return False
+    media.next_source_poll_at = target
+    return True
+
+
 def _gate(
     db: Session,
     settings: Settings,
@@ -1616,20 +1717,6 @@ def _hosters(db: Session, settings: Settings) -> list[str]:
         return parse_hoster_preference(raw)
     except ValueError:
         return parse_hoster_preference(settings.hoster_preference)
-
-
-def _fallback(
-    db: Session,
-    key: str,
-    default: str,
-    options: tuple[str, ...],
-    builtin: tuple[str, ...],
-) -> list[str]:
-    raw = _setting_text(db, key, default)
-    try:
-        return parse_choice_list(raw, options)
-    except ValueError:
-        return list(builtin)
 
 
 def _items_for(db: Session, media_ids: list[int]) -> dict[int, list[MediaItem]]:

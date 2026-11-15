@@ -69,6 +69,33 @@ describe("SettingsHiveSection — fenêtre horaire", () => {
     );
   });
 
+  it("conserve 1440 quand la fin s’affiche 00:00 après 22:00", async () => {
+    fetchSettingsMock.mockResolvedValueOnce({
+      settings: [
+        { key: "hive_enabled", value: true },
+        { key: "hive_public_address", value: "" },
+        { key: "hive_transfer_window_start", value: 22 * 60 },
+        { key: "hive_transfer_window_end", value: 24 * 60 },
+      ],
+    });
+    const w = mount(SettingsHiveSection);
+    await flushPromises();
+    const start = w.get('[data-testid="hive-transfer-start"]').element as HTMLInputElement;
+    const end = w.get('[data-testid="hive-transfer-end"]').element as HTMLInputElement;
+    expect(start.value).toBe("22:00");
+    expect(end.value).toBe("00:00");
+    await w.get("button.btn.primary").trigger("click");
+    await flushPromises();
+    expect(patchSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        values: expect.objectContaining({
+          hive_transfer_window_start: 22 * 60,
+          hive_transfer_window_end: 24 * 60,
+        }),
+      }),
+    );
+  });
+
   it("toute la journée force 0–1440", async () => {
     const w = mount(SettingsHiveSection);
     await flushPromises();

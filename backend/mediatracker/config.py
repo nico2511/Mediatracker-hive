@@ -101,8 +101,6 @@ class Settings(BaseSettings):
     # When TMDB has no digital date, availability = theatrical + this many months.
     film_theatrical_fallback_months: int = 4
     allow_fallback: bool = False
-    quality_fallback: str = "HD,1080p,HDLight"
-    language_fallback: str = "VFF,MULTI,VF"
     # Ordered quality-profile ids for global fallback (comma-separated). Empty = no fallbacks.
     profile_fallback_order: str = ""
     source_cache_seconds: int = 900

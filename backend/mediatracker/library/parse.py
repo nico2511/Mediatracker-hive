@@ -54,13 +54,26 @@ _LANGUAGE = (
     (re.compile(r"(?i)(?:^|[^a-z])vff(?:[^a-z]|$)"), "VFF"),
     (re.compile(r"(?i)(?:^|[^a-z])vfq(?:[^a-z]|$)"), "VFQ"),
     (re.compile(r"(?i)(?:^|[^a-z])multi(?:[^a-z]|$)"), "MULTI"),
+    (
+        re.compile(
+            r"(?i)(?:multi|vff|vfq|vf2|truefrench|french|vostfr|vf)[.\s_\-()]*ca(?:[^a-z]|$)"
+            r"|(?:^|[^a-z])ca[.\s_\-()]*(?:multi|vff|vfq|vf2|truefrench|french|vostfr|vf)(?:[^a-z]|$)"
+        ),
+        "VFQ",
+    ),
+    (re.compile(r"(?i)(?:^|[^a-z])vf2(?:[^a-z]|$)"), "VFF"),
     (re.compile(r"(?i)(?:^|[^a-z])vf(?:[^a-z]|$)"), "VF"),
 )
 _NOISE = re.compile(
     r"(?i)\b(?:2160p|1080p|720p|480p|4k|bluray|blu-ray|bdrip|brrip|webrip|web-dl|webdl|web|"
     r"hdtv|hdrip|x264|x265|h\.?264|h\.?265|hevc|aac|ac3|eac3|dts|truehd|atmos|hdr|dv|"
-    r"10bit|8bit|proper|repack|extended|remux|vostfr|vff|vfq|multi|vf|vo|sample)\b"
+    r"10bit|8bit|proper|repack|extended|remux|vostfr|vff|vf2|vfq|multi|vf|vo|sample|"
+    r"5[.\s]1|7[.\s]1|2[.\s]0)\b"
 )
+_CONTEXTUAL_CA_STRIP = re.compile(
+    r"(?i)(?:multi|vff|vfq|vf2|truefrench|french|vostfr|vf)[.\s_\-()]*ca(?:[^a-z0-9]|$)"
+)
+_LANG_MARKER = frozenset({"multi", "vff", "vfq", "vf2", "truefrench", "french", "vostfr", "vf"})
 _SAMPLE = re.compile(r"(?i)(?:^|[._ -])sample(?:[._ -]|$)")
 # Release words glued to an episode. They are not part of the title and must not hide SxxExx.
 _EPISODE_TAG = re.compile(
@@ -401,6 +414,9 @@ def strip_release_junk(text: str) -> str:
         if re.fullmatch(r"\d{1,2}", last) and re.fullmatch(r"(?i)ddp\d*|dd\d*|eac3|ac3", prev):
             tokens.pop()
             continue
+        if last.casefold() == "ca" and prev.casefold() in _LANG_MARKER:
+            tokens.pop()
+            continue
         if _TRAILING_JUNK.match(last) or _scene_group(last):
             tokens.pop()
             continue
@@ -453,6 +469,7 @@ def _clean_stem(stem: str) -> str:
         _SEASON_EPISODE.search(stem) or _X_EPISODE.search(stem) or _FRENCH_EPISODE.search(stem)
     )
     text = _YEAR.sub(" ", text)
+    text = _CONTEXTUAL_CA_STRIP.sub(" ", text)
     text = _NOISE.sub(" ", text)
     if had_episode:
         text = _EPISODE_TAG.sub(" ", text)
