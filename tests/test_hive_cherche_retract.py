@@ -9,7 +9,6 @@ from tests.test_hive_t2 import _enable_hive, _join_fixture_ruche, _origin_id
 
 from mediatracker.db.models import HiveChercheRetract, HiveSignal, Media, MediaItem, Setting
 from mediatracker.hive.catalog import _cle_document
-from mediatracker.hive.signal_requests import local_cherche_active
 from mediatracker.hive.signal_cherche_retract import cherche_retract_active
 from mediatracker.hive.signal_miss_prompt import cherche_miss_prompt_active
 from mediatracker.hive.signal_policy import (
@@ -19,7 +18,7 @@ from mediatracker.hive.signal_policy import (
     maybe_publish_cherche_on_source_miss,
     retract_cherche_follow_item,
 )
-from mediatracker.hive.signal_requests import list_my_requests
+from mediatracker.hive.signal_requests import list_my_requests, local_cherche_active
 
 
 def _utc_now() -> datetime:
