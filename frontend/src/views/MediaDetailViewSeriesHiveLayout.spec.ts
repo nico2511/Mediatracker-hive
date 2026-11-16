@@ -80,7 +80,54 @@ function stubSeriesApi() {
 
 describe("Fiche série — emplacements Hive layout A/B", () => {
   it("place le résumé Hive mobile dans un conteneur .fiche-layout-b et le desktop dans .fiche-layout-a", async () => {
-    stubSeriesApi();
+    const media = { ...serieNonSuivie.media, followed: true };
+    apiMock.mockImplementation(async (url: string) => {
+      const id = media.id;
+      if (url === `/api/v1/media/${id}`) {
+        return media;
+      }
+      if (url === `/api/v1/media/${id}/items`) {
+        return serieNonSuivie.items;
+      }
+      if (url.startsWith("/api/v1/quality-profiles")) {
+        return { profiles: [] };
+      }
+      if (url.startsWith(`/api/v1/media/${id}/identity`)) {
+        return [];
+      }
+      if (url.startsWith(`/api/v1/media/${id}/library-folders`)) {
+        return { items: [] };
+      }
+      if (url.startsWith(`/api/v1/media/${id}/jellyfin`)) {
+        throw new Error("jellyfin off");
+      }
+      if (url.startsWith("/api/v1/hive/items/sharing")) {
+        return [];
+      }
+      if (/^\/api\/v1\/hive\/items\/\d+\/sharing$/.test(url)) {
+        return {
+          shareable: false,
+          shared: false,
+          exclude_all: false,
+          excluded_ruche_ids: [],
+          preparing: false,
+          transfer_active: false,
+          transfer_progress_pct: null,
+          hive_keep: false,
+          keep: false,
+          pull_only: false,
+          has_file: false,
+          catalog_entry_local: false,
+        };
+      }
+      if (url === "/api/v1/hive/requests/mine") {
+        return { items: [] };
+      }
+      if (url === "/api/v1/hive/ruches") {
+        return [];
+      }
+      throw new Error(`non simulé ${url}`);
+    });
     const wrapper = mount(MediaDetailView, {
       global: {
         stubs: { Teleport: true, RouterLink: true, TmdbPosterImg: true, StatusIcon: true, SourceRank: true },
@@ -89,14 +136,14 @@ describe("Fiche série — emplacements Hive layout A/B", () => {
     });
     await flushPromises();
 
-    const summaries = wrapper.findAll("[data-testid='hive-series-summary']");
-    expect(summaries.length).toBe(2);
+    const cards = wrapper.findAll("[data-testid='hive-fiche-card']");
+    expect(cards.length).toBe(2);
 
-    const mobileSummary = summaries[0]!;
-    expect(mobileSummary.classes()).not.toContain("fiche-layout-b");
-    expect(mobileSummary.element.parentElement?.classList.contains("fiche-layout-b")).toBe(true);
+    const mobileCard = cards[0]!;
+    expect(mobileCard.classes()).not.toContain("fiche-layout-b");
+    expect(mobileCard.element.parentElement?.classList.contains("fiche-layout-b")).toBe(true);
 
     const desktopBlock = wrapper.get(".fiche-series-desktop.fiche-layout-a");
-    expect(desktopBlock.find("[data-testid='hive-series-summary']").exists()).toBe(true);
+    expect(desktopBlock.find("[data-testid='hive-fiche-card']").exists()).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 """Provider instances. Config secrets are encrypted and never returned."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -16,6 +17,8 @@ from mediatracker.integrations.alldebrid_key import effective_alldebrid_key
 from mediatracker.providers.base import Health
 from mediatracker.providers.registry import UnknownProvider, secret_fields
 from mediatracker.security.crypto import decrypt_secret, encrypt_secret
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["providers"])
 
@@ -136,8 +139,17 @@ def _validate(model, plain: dict[str, Any]):
         ) from exc
 
 
-def _to_out(row: Provider, registry, secret_key: str) -> ProviderOut:
-    model = _model(registry, row.kind, row.type)
+def _to_out(row: Provider, registry, secret_key: str) -> ProviderOut | None:
+    try:
+        model = registry.get(row.kind, row.type)
+    except UnknownProvider:
+        logger.info(
+            "Fournisseur ignoré (type non enregistré) : kind=%s type=%s id=%s",
+            row.kind,
+            row.type,
+            row.id,
+        )
+        return None
     plain = _decrypt_config(model, row.config, secret_key)
     masked, secrets_set = _mask(model, plain)
     return ProviderOut(
@@ -223,10 +235,13 @@ def list_providers(
         rows = rows[:limit]
         next_cursor = str(rows[-1].id)
     secret_key = request.app.state.settings.secret_key
-    return ProviderPage(
-        items=[_to_out(row, request.app.state.registry, secret_key) for row in rows],
-        next_cursor=next_cursor,
-    )
+    registry = request.app.state.registry
+    items: list[ProviderOut] = []
+    for row in rows:
+        out = _to_out(row, registry, secret_key)
+        if out is not None:
+            items.append(out)
+    return ProviderPage(items=items, next_cursor=next_cursor)
 
 
 @router.post("/providers", response_model=ProviderOut, status_code=201)

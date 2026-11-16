@@ -118,7 +118,7 @@ def test_probe_error_reason_masks_secrets(client, app, monkeypatch):
     db = app.state.session_factory()
     try:
         target = parse_probe_query("Film Démo")
-        rows = probe_download_sources(db, app.state.settings, target, sources=["wawacity"])
+        rows = probe_download_sources(db, app.state.settings, target, sources=["wawacity"]).results
         db.commit()
         assert rows[0].issue == "error"
         assert rows[0].reason == public_source_message(f"RuntimeError : {payload}")
@@ -264,9 +264,11 @@ def test_probe_sources_accepts_source_filter(client, monkeypatch):
     login(client)
     seen: list[str | None] = []
 
+    from mediatracker.core.source_probe import ProbeRunResult
+
     def fake_probe(_db, _settings, target, *, now=None, sources=None):
         seen.append(sources)
-        return []
+        return ProbeRunResult([], None)
 
     monkeypatch.setattr("mediatracker.api.v1.settings.probe_download_sources", fake_probe)
     response = client.post(

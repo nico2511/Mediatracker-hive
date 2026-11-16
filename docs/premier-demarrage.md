@@ -25,6 +25,7 @@ Champs **tous optionnels** ; une valeur vide laisse le réglage actuel ou le dé
 | Free-Télécharger | URL dans la fiche fournisseur `free_telecharger` (pas de clé SQLite dédiée) |
 | Comet (une ligne par instance) | `comet_base_urls` |
 | Torrentio | `torrentio_base_url` |
+| Addons Stremio (optionnel) | `stremio_addons` |
 
 Validation : chaque adresse renseignée doit commencer par `http://` ou `https://`. **Tester Wawacity** appelle le même test que dans l’assistant historique (`POST /api/v1/setup/probe`). Enregistrement groupé : `POST /api/v1/setup/sources`.
 

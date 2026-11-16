@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api";
+import { sourceDisplayLabel } from "../sourceLabels";
 import { settingCommaTokens } from "../settingsCoerce";
 
 const props = defineProps<{
@@ -28,12 +29,13 @@ interface Row {
 }
 
 const fallback = [
-  { id: "wawacity", label: "Wawacity" },
-  { id: "free_telecharger", label: "Free-Telecharger" },
-  { id: "hive", label: "Hive" },
-  { id: "comet", label: "Comet" },
-  { id: "torrentio", label: "Torrentio" },
-];
+  "wawacity",
+  "free_telecharger",
+  "hive",
+  "comet",
+  "torrentio",
+  "stremio_addons",
+].map((id) => ({ id, label: sourceDisplayLabel(id) }));
 
 const catalog = ref(fallback);
 const dragId = ref<string | null>(null);
@@ -55,7 +57,7 @@ onMounted(async () => {
     if (download.length) {
       catalog.value = download.map((item) => ({
         id: item.type,
-        label: item.type.charAt(0).toUpperCase() + item.type.slice(1),
+        label: sourceDisplayLabel(item.type),
       }));
     }
   } catch {
@@ -78,7 +80,7 @@ const rows = computed<Row[]>(() => {
   const labels = new Map(catalogVisible.map((item) => [item.id, item.label]));
   return order.map((id) => ({
     id,
-    label: labels.get(id) || id,
+    label: sourceDisplayLabel(id, labels.get(id)),
     enabled: enabled.includes(id),
   }));
 });
@@ -139,9 +141,20 @@ function move(index: number, delta: number) {
   if (target < 0 || target >= next.length) {
     return;
   }
+  if (!next[index].enabled || !next[target].enabled) {
+    return;
+  }
   const [item] = next.splice(index, 1);
   next.splice(target, 0, item);
   commit(next);
+}
+
+function onDragStart(row: Row, event: DragEvent) {
+  if (!row.enabled) {
+    event.preventDefault();
+    return;
+  }
+  dragId.value = row.id;
 }
 
 function onDrop(targetId: string) {
@@ -153,7 +166,7 @@ function onDrop(targetId: string) {
   const next = [...rows.value];
   const origin = next.findIndex((row) => row.id === from);
   const target = next.findIndex((row) => row.id === targetId);
-  if (origin < 0 || target < 0) {
+  if (origin < 0 || target < 0 || !next[origin].enabled || !next[target].enabled) {
     return;
   }
   const [item] = next.splice(origin, 1);
@@ -167,8 +180,9 @@ function onDrop(targetId: string) {
     <li
       v-for="(row, index) in rows"
       :key="row.id"
-      draggable="true"
-      @dragstart="dragId = row.id"
+      :class="{ 'is-off': !row.enabled }"
+      :draggable="row.enabled"
+      @dragstart="onDragStart(row, $event)"
       @dragover.prevent
       @drop="onDrop(row.id)"
     >
@@ -178,9 +192,26 @@ function onDrop(targetId: string) {
         <input type="checkbox" :checked="row.enabled" @change="toggle(row.id)" />
         <span>{{ row.label }}</span>
       </label>
+      <span v-if="!row.enabled" class="rank-off">désactivée</span>
       <span class="rank-moves">
-        <button type="button" :disabled="index === 0" @click="move(index, -1)">↑</button>
-        <button type="button" :disabled="index === rows.length - 1" @click="move(index, 1)">↓</button>
+        <button
+          type="button"
+          :disabled="index === 0 || !row.enabled || (index > 0 && !rows[index - 1]?.enabled)"
+          @click="move(index, -1)"
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          :disabled="
+            index === rows.length - 1 ||
+            !row.enabled ||
+            (index < rows.length - 1 && !rows[index + 1]?.enabled)
+          "
+          @click="move(index, 1)"
+        >
+          ↓
+        </button>
       </span>
     </li>
   </ol>

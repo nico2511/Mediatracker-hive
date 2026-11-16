@@ -47,6 +47,7 @@ from mediatracker.providers.base import (
     SourceResult,
     SourceTitle,
 )
+from mediatracker.providers.sources.stremio_stream_messages import profile_mismatch_reason, stream_rows_seen
 from mediatracker.providers.sources.throttle import HtmlCache, SourcePacer
 
 logger = logging.getLogger(__name__)
@@ -302,6 +303,7 @@ class CometSource:
         self._token = keyless_config_token()
         self.quality_profile: Profile | None = None
         self.last_empty_reason: str | None = None
+        self.last_json_from_cache: bool = False
         self.cache = cache if cache is not None else shared_comet_cache(self.base_url)
         if hasattr(self.cache, "bind_domain"):
             self.cache.bind_domain(self.base_url)
@@ -321,8 +323,10 @@ class CometSource:
             self._client.close()
 
     def links_for(self, query: EpisodeQuery, preferences: SourcePreferences) -> list[LinkCandidate]:
-        imdb = (query.imdb_id or "").strip()
-        if not imdb.startswith("tt"):
+        from mediatracker.core.tmdb.imdb import imdb_id_for_stremio
+
+        imdb = imdb_id_for_stremio(query.imdb_id)
+        if imdb is None:
             return []
         path = _stream_path(query, imdb)
         if path is None:
@@ -330,9 +334,8 @@ class CometSource:
         payload = self._fetch(path, self.quality_profile)
         chosen = select_streams(payload, query, preferences, profile=self.quality_profile)
         if self.quality_profile is not None and not chosen:
-            self.last_empty_reason = (
-                f"Aucun flux Comet ne correspond au profil « {self.quality_profile.name} »."
-            )
+            seen = stream_rows_seen(payload)
+            self.last_empty_reason = profile_mismatch_reason(self.quality_profile, seen=seen) if seen > 0 else None
         else:
             self.last_empty_reason = None
         return chosen
@@ -343,7 +346,9 @@ class CometSource:
         cache_key = path
         cached = self.cache.get(cache_key)
         if cached is not None:
+            self.last_json_from_cache = True
             return _json_body(cached)
+        self.last_json_from_cache = False
         keyless = f"{self.base_url}/{path}"
         configured = f"{self.base_url}/{self._token}/{path}"
         body, used_path = self._get(keyless)
@@ -360,12 +365,15 @@ class CometSource:
         cache_key = f"{token}/{path}"
         cached = self.cache.get(cache_key)
         if cached is not None:
+            self.last_json_from_cache = True
             return _json_body(cached)
+        self.last_json_from_cache = False
         configured = f"{self.base_url}/{token}/{path}"
         body, used_path = self._get(configured)
         if body is None:
             cached = self.cache.get(path)
             if cached is not None:
+                self.last_json_from_cache = True
                 return _json_body(cached)
             body, used_path = self._get(f"{self.base_url}/{path}")
         if body is None or used_path is None:
@@ -438,6 +446,7 @@ class CometCascadeSource:
         self._opened: list[CometSource] = []
         self.quality_profile: Profile | None = None
         self.last_empty_reason: str | None = None
+        self.last_json_from_cache: bool = False
 
     def close(self) -> None:
         for source in self._opened:
@@ -476,6 +485,7 @@ class CometCascadeSource:
                 used_instance = base
                 break
             last_reason = source.last_empty_reason
+            self.last_json_from_cache = source.last_json_from_cache
         self.last_empty_reason = last_reason
         if used_instance is not None:
             logger.info("Comet : instance utilisée %s (%s lien(s)).", used_instance, len(merged))

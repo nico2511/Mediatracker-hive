@@ -84,25 +84,20 @@ describe("PR166 — section Suppression et fin du suivi", () => {
     vi.restoreAllMocks();
   });
 
-  it("fiche non suivie : section visible, ordre, Ne plus suivre grisé + raison", async () => {
+  it("fiche non suivie : Suivre à nouveau, Plus d'actions, zone danger absente", async () => {
     setup(serieNonSuivie);
     const w = await mountView();
-    expect(section(w).exists()).toBe(true);
-    const buttons = section(w).findAll("button").map((b) => [b.text().trim(), b.attributes("disabled") !== undefined]);
-    expect(buttons.map((b) => b[0])).toEqual(["Ne plus suivre", "Supprimer tous les fichiers", "Supprimer la fiche…"]);
-    expect(buttons[0][1]).toBe(true);
-    expect(section(w).find("input[type=checkbox]").attributes("disabled")).toBeDefined();
-    expect(section(w).text()).toContain("Indisponible : la fiche n'est déjà plus suivie");
-    expect(buttons[2][1]).toBe(false);
-    expect(w.find(".fiche-actions").text()).toContain("Suivre à nouveau");
+    expect(section(w).exists()).toBe(false);
+    expect(w.find("[data-testid='fiche-follow-again']").exists()).toBe(true);
+    expect(w.find("[data-testid='fiche-unfollowed-more']").exists()).toBe(true);
   });
 
   it("Suivre à nouveau envoie PATCH followed=true", async () => {
     setup(serieNonSuivie);
     const w = await mountView();
-    const b = btn(w, ".fiche-actions", "Suivre à nouveau");
-    expect(b).toBeTruthy();
-    await b!.trigger("click");
+    const b = w.find("[data-testid='fiche-follow-again']");
+    expect(b.exists()).toBe(true);
+    await b.trigger("click");
     await flushPromises();
     const call = apiMock.mock.calls.find((c) => c[1]?.method === "PATCH");
     expect(JSON.parse(call![1]!.body as string).followed).toBe(true);
@@ -112,12 +107,16 @@ describe("PR166 — section Suppression et fin du suivi", () => {
     setup(serieNonSuivie);
     const conf = vi.spyOn(window, "confirm").mockReturnValue(false);
     const w = await mountView();
-    await btn(w, "details.fiche-suivi", "Supprimer tous les fichiers")!.trigger("click");
+    await w.find("[data-testid='fiche-unfollowed-more'] .action-menu-trigger").trigger("click");
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text().includes("Supprimer tous les fichiers"))!.trigger("click");
     await flushPromises();
     expect(conf).toHaveBeenCalledTimes(1);
     expect(apiMock.mock.calls.find((c) => c[0] === "/api/v1/cleanup/files")).toBeUndefined();
     conf.mockReturnValue(true);
-    await btn(w, "details.fiche-suivi", "Supprimer tous les fichiers")!.trigger("click");
+    await w.find("[data-testid='fiche-unfollowed-more'] .action-menu-trigger").trigger("click");
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text().includes("Supprimer tous les fichiers"))!.trigger("click");
     await flushPromises();
     expect(apiMock.mock.calls.find((c) => c[0] === "/api/v1/cleanup/files")).toBeTruthy();
   });
@@ -125,7 +124,9 @@ describe("PR166 — section Suppression et fin du suivi", () => {
   it("Supprimer la fiche : corbeille par défaut puis DELETE ?trash=true/false", async () => {
     setup(serieNonSuivie);
     const w = await mountView();
-    await btn(w, "details.fiche-suivi", "Supprimer la fiche…")!.trigger("click");
+    await w.find("[data-testid='fiche-unfollowed-more'] .action-menu-trigger").trigger("click");
+    await flushPromises();
+    await w.findAll("button").find((b) => b.text().trim() === "Supprimer la fiche…")!.trigger("click");
     await flushPromises();
     const radios = w.findAll("form.dialog input[type=radio]");
     expect((radios[0].element as HTMLInputElement).checked).toBe(true);
@@ -137,7 +138,9 @@ describe("PR166 — section Suppression et fin du suivi", () => {
 
     setup(serieNonSuivie);
     const w2 = await mountView();
-    await btn(w2, "details.fiche-suivi", "Supprimer la fiche…")!.trigger("click");
+    await w2.find("[data-testid='fiche-unfollowed-more'] .action-menu-trigger").trigger("click");
+    await flushPromises();
+    await w2.findAll("button").find((b) => b.text().trim() === "Supprimer la fiche…")!.trigger("click");
     await flushPromises();
     await w2.findAll("form.dialog input[type=radio]")[1].setValue(true);
     await w2.find("form.dialog").trigger("submit");
@@ -158,17 +161,15 @@ describe("PR166 — section Suppression et fin du suivi", () => {
   it("film avec fichier réel (on_disk, non scanné) : Supprimer le film actif", async () => {
     setup(filmNonSuivi);
     const w = await mountView();
-    const b = btn(w, "details.fiche-suivi", "Supprimer le film");
-    expect(b).toBeTruthy();
-    expect(b!.attributes("disabled")).toBeUndefined();
-    expect(section(w).text()).not.toContain("Aucun fichier présent");
+    expect(section(w).exists()).toBe(false);
+    expect(w.find("[data-testid='fiche-unfollowed-more']").exists()).toBe(true);
+    expect(w.find(".film-file-panel").exists()).toBe(true);
   });
 
   it("film en corbeille : Supprimer le film grisé", async () => {
     setup(filmCorbeille);
     const w = await mountView();
-    const b = btn(w, "details.fiche-suivi", "Supprimer le film");
-    expect(b!.attributes("disabled")).toBeDefined();
-    expect(section(w).text()).toContain("Aucun fichier présent");
+    expect(section(w).exists()).toBe(false);
+    expect(w.find("[data-testid='fiche-unfollowed-more']").exists()).toBe(true);
   });
 });

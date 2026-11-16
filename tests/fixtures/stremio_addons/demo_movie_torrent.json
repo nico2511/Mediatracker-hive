@@ -1,0 +1,17 @@
+{
+  "streams": [
+    {
+      "name": "[TORRENT] Démo Fiction",
+      "behaviorHints": {
+        "filename": "Fiction.Labo.2026.MULTI.1080p.WEB-DL-GROUP.mkv"
+      },
+      "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fileIdx": 0
+    },
+    {
+      "name": "[WEB]",
+      "url": "https://addon-fictif.example/hls-proxy/demo.m3u8",
+      "title": "lecteur en ligne"
+    }
+  ]
+}

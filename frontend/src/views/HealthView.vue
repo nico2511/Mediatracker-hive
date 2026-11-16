@@ -2,11 +2,14 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import DiskSpaceCard from "../components/DiskSpaceCard.vue";
+import HealthHiveRucheCard from "../components/HealthHiveRucheCard.vue";
 import HealthSeriesChart from "../components/HealthSeriesChart.vue";
 import MetricSparkline from "../components/MetricSparkline.vue";
 import SourceStatesCard from "../components/SourceStatesCard.vue";
 import {api, userFacingApiError} from "../api";
 import { formatBytes } from "../diskFormat";
+import { useHiveEnabled } from "../composables/useHive";
+import type { HivePeerLoadResponse } from "../hive/hivePeerLoad";
 
 interface ComponentRow {
   name: string;
@@ -109,6 +112,10 @@ const failedJobs = ref(0);
 const diskPercent = ref<number | null>(null);
 const history = ref<MetricsHistoryBody | null>(null);
 const historyError = ref("");
+const hivePeerLoad = ref<HivePeerLoadResponse | null>(null);
+const hivePeerLoadError = ref("");
+
+const { hiveEnabled } = useHiveEnabled();
 
 const historySeries = computed((): HistorySeries[] => {
   const body = history.value;
@@ -309,6 +316,21 @@ async function loadHistory() {
   history.value = await api<MetricsHistoryBody>("/api/v1/health/history?hours=168");
 }
 
+async function loadHivePeerLoad() {
+  if (!hiveEnabled.value) {
+    hivePeerLoad.value = null;
+    hivePeerLoadError.value = "";
+    return;
+  }
+  try {
+    hivePeerLoad.value = await api<HivePeerLoadResponse>("/api/v1/hive/peers/load");
+    hivePeerLoadError.value = "";
+  } catch (err) {
+    hivePeerLoad.value = null;
+    hivePeerLoadError.value = userFacingApiError(err, "Charge des pairs indisponible.");
+  }
+}
+
 async function loadStatus() {
   try {
     const board = await api<Dashboard>("/api/v1/dashboard");
@@ -336,7 +358,7 @@ async function refresh() {
   metricsError.value = "";
   historyError.value = "";
   try {
-    await Promise.all([loadComponents(), loadMetrics(), loadStatus(), loadHistory()]);
+    await Promise.all([loadComponents(), loadMetrics(), loadStatus(), loadHistory(), loadHivePeerLoad()]);
   } catch (err) {
     const message = userFacingApiError(err, "Santé indisponible.");
     if (!rows.value.length) {
@@ -518,6 +540,12 @@ onUnmounted(() => {
           </details>
         </article>
       </div>
+
+      <HealthHiveRucheCard
+        v-if="hiveEnabled"
+        :payload="hivePeerLoad"
+        :error="hivePeerLoadError || undefined"
+      />
 
       <article v-if="metrics" class="panel health-aria2">
         <h3>Téléchargements aria2</h3>

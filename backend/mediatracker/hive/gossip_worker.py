@@ -121,6 +121,7 @@ def run_peer_exchange(db: Session, settings: Settings, target: PeerExchangeTarge
         ruche_id=target.ruche_id,
         peer_base_url=target.peer_base_url,
         now=now,
+        peer_instance_id=target.peer_instance_id,
     )
 
 
@@ -160,12 +161,12 @@ def hive_gossip_tick(
         peers = public_peer_targets(db, ruche_id=rid, self_instance_id=instance_id)
         if not peers:
             continue
-        for _, base_url in peers:
+        for member_id, base_url in peers:
             try:
                 run_peer_exchange(
                     db,
                     settings,
-                    PeerExchangeTarget(ruche_id=rid, peer_base_url=base_url),
+                    PeerExchangeTarget(ruche_id=rid, peer_base_url=base_url, peer_instance_id=member_id),
                     now=moment,
                 )
             except Exception:

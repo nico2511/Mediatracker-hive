@@ -45,7 +45,8 @@ Pour **découvrir de nouvelles pages** côté source (retéléchargement sans li
 
 ## Hive
 
-- Pair injoignable : repli vers une autre source ; vérifier **`hive_public_address`** et le reverse proxy.
+- Pair injoignable ou occupé : repli vers un autre pair ou la source suivante ; vérifier **`hive_public_address`**, la fenêtre horaire et les limites de débit dans **Réglages → Hive**.
+- **Santé → Performance → Ruche** : si tous les pairs sont « inconnus », peu d’échanges récents — attendre un échange catalogue ou un transfert pour rafraîchir les instantanés (données périmées après environ dix minutes sans nouvelle).
 - **Identité perdue** : réinitialisation d’identité dans Réglages Hive.
 
 ## Mise à jour Watchtower

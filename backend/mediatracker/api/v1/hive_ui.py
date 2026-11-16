@@ -518,16 +518,10 @@ class MediaShareSummaryOut(BaseModel):
     pull_only: bool
 
 
-@router.get("/media/{media_id}/sharing-summary", response_model=MediaShareSummaryOut)
-def media_sharing_summary(
-    media_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    _principal=Depends(require_scope("read")),
-) -> MediaShareSummaryOut:
-    del _principal
-    _require_hive(db)
-    settings = _settings(request)
+_MEDIA_SHARING_SUMMARY_ID_LIMIT = 80
+
+
+def _media_share_summary_for_id(db: Session, settings: Settings, media_id: int) -> MediaShareSummaryOut:
     items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all())
     shared = False
     transfer_active = False
@@ -545,6 +539,48 @@ def media_sharing_summary(
         preparing=preparing,
         pull_only=pull_only,
     )
+
+
+@router.get("/media/sharing-summary", response_model=list[MediaShareSummaryOut])
+def batch_media_sharing_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+    ids: str = "",
+) -> list[MediaShareSummaryOut]:
+    del _principal
+    _require_hive(db)
+    settings = _settings(request)
+    seen: set[int] = set()
+    media_ids: list[int] = []
+    for part in ids.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            media_id = int(part)
+        except ValueError:
+            continue
+        if media_id in seen:
+            continue
+        seen.add(media_id)
+        media_ids.append(media_id)
+        if len(media_ids) >= _MEDIA_SHARING_SUMMARY_ID_LIMIT:
+            break
+    return [_media_share_summary_for_id(db, settings, media_id) for media_id in media_ids]
+
+
+@router.get("/media/{media_id}/sharing-summary", response_model=MediaShareSummaryOut)
+def media_sharing_summary(
+    media_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> MediaShareSummaryOut:
+    del _principal
+    _require_hive(db)
+    settings = _settings(request)
+    return _media_share_summary_for_id(db, settings, media_id)
 
 
 @router.get("/items/sharing", response_model=list[ShareStateOut])

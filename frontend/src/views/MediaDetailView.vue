@@ -42,12 +42,12 @@ import { useProgressStream, type ProgressPayload } from "../composables/useProgr
 import { fileStatusIcon, fileStatusLabel } from "../fileStatus";
 import { formatParis } from "../time";
 import { useHiveEnabled } from "../composables/useHive";
+import { tmdbBackdropSrc, tmdbPosterSrc } from "../tmdbImages";
 import HiveContextMenuItems from "../components/HiveContextMenuItems.vue";
 import HiveMediaShareRow from "../components/HiveMediaShareRow.vue";
 import HiveMediaRequestCard from "../components/hive/HiveMediaRequestCard.vue";
 import type { HiveMyRequestItem } from "../hive/hiveRequests";
 import HiveBulkShareMenuItems from "../components/HiveBulkShareMenuItems.vue";
-import HiveEmpreintesPanel from "../components/HiveEmpreintesPanel.vue";
 import HiveSeriesShareSummary from "../components/HiveSeriesShareSummary.vue";
 import { useHiveSharePolling } from "../composables/useHiveSharePolling";
 import type { HiveShareUiState } from "../hive/hiveBadges";
@@ -903,6 +903,10 @@ async function followAgain() {
   await reload();
 }
 
+function openExternalTab(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function ensureDraft(id: number, field: "season" | "episode", value: string) {
   const current = slotDraft.value[id] || { season: "", episode: "" };
   slotDraft.value = { ...slotDraft.value, [id]: { ...current, [field]: value } };
@@ -1256,7 +1260,7 @@ const seasonNumbers = computed(() =>
 const filmObtained = computed(() => media.value?.type === "film" && media.value.poll.reason === "film_obtained");
 
 const heroBackdropStyle = computed((): Record<string, string> | null => {
-  const url = media.value?.backdrop_url || media.value?.poster_url;
+  const url = tmdbBackdropSrc(media.value?.backdrop_url) ?? tmdbPosterSrc(media.value?.poster_url);
   if (!url) {
     return null;
   }
@@ -1295,6 +1299,24 @@ const ficheHasFiles = computed(() => {
     }
   }
   return false;
+});
+
+const showHiveFicheBlock = computed(() => {
+  if (!hiveEnabled.value || !media.value) {
+    return false;
+  }
+  if (!media.value.followed && !ficheHasFiles.value) {
+    return false;
+  }
+  if (media.value.type === "film") {
+    return Boolean(primaryItemId.value && filmItem.value?.downloaded);
+  }
+  return true;
+});
+
+const unfollowedMoreSummary = computed(() => {
+  const kind = media.value?.type === "series" ? "la série" : "le film";
+  return `Garder ${kind}, sources, supprimer la fiche`;
 });
 
 const filmTrashEntryId = computed(() => {
@@ -1487,14 +1509,10 @@ const suiviSummaryLine = computed(() => {
     return "";
   }
   if (row.type === "film" && row.film_not_yet_available && row.film_status_line) {
-    const last = formatParis(row.poll.last_check_at);
-    const next = formatParis(row.poll.next_check_at);
-    return `${row.film_status_line} · vérifié ${last || "—"} · prochaine ${next || "—"}`;
+    return row.film_status_line;
   }
   const file = fileStatusLabel(row.file_status || "absent", row.type === "film");
-  const last = formatParis(row.poll.last_check_at);
-  const next = formatParis(row.poll.next_check_at);
-  return `Fichier ${file} · vérifié ${last || "—"} · prochaine ${next || "—"}`;
+  return `Fichier ${file}`;
 });
 
 function episodeStatusText(episodeRow: Episode): string {
@@ -1536,7 +1554,10 @@ function episodeStatusIconName(episodeRow: Episode): string {
   <section
     v-if="media"
     class="stack fiche-page fiche-page--a"
-    :class="{ 'fiche-page--series': media.type === 'series' }"
+    :class="{
+      'fiche-page--series': media.type === 'series',
+      'fiche-page--unfollowed': !media.followed,
+    }"
   >
     <article class="hero panel fiche-hero fiche-hero--a">
       <div
@@ -1564,6 +1585,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
             <template v-if="seasonCount"> · {{ seasonCount }} saison{{ seasonCount > 1 ? "s" : "" }}</template>
           </p>
           <p v-else class="meta hint fiche-hero-meta">{{ typeYearLine }}</p>
+          <p v-if="!media.followed && media.tmdb_url" class="fiche-hero-links hint">
+            <a class="fiche-ext-link" :href="media.tmdb_url" target="_blank" rel="noopener noreferrer">TMDB</a>
+          </p>
           <p class="fiche-hero-badges">
             <span v-if="media.followed" class="pill ok"><StatusIcon name="followed" label="Suivi" /> Suivi</span>
             <span v-if="media.film_not_yet_available" class="pill warn">
@@ -1574,7 +1598,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             </span>
           </p>
           <p
-            v-if="media.type === 'series'"
+            v-if="media.followed && media.type === 'series'"
             class="progress fiche-progress fiche-series-hero-progress"
             aria-label="Progression du visionnage"
           >
@@ -1593,7 +1617,19 @@ function episodeStatusIconName(episodeRow: Episode): string {
       </div>
       <div class="fiche-hero-stream">
         <p v-if="media.type !== 'series' && media.overview" class="overview fiche-overview hint">{{ media.overview }}</p>
-        <template v-if="media.type !== 'series'">
+        <template v-if="!media.followed">
+          <p class="fiche-actions">
+            <button
+              type="button"
+              class="primary fiche-primary-action"
+              data-testid="fiche-follow-again"
+              @click="followAgain"
+            >
+              Suivre à nouveau
+            </button>
+          </p>
+        </template>
+        <template v-else-if="media.type !== 'series'">
           <FicheStateActions
             section="actions"
             compact
@@ -1629,7 +1665,67 @@ function episodeStatusIconName(episodeRow: Episode): string {
       </div>
     </article>
 
-    <div v-if="media.type === 'series'" class="fiche-series-layout stack">
+    <article
+      v-if="!media.followed"
+      class="panel fiche-fold fiche-unfollowed-more"
+      data-testid="fiche-unfollowed-more"
+    >
+      <div class="fiche-unfollowed-more-head">
+        <StatusIcon name="waiting" label="Plus d'actions" />
+        <span class="fold-title">
+          <span class="label">Plus d'actions</span>
+          <span class="summary hint">{{ unfollowedMoreSummary }}</span>
+        </span>
+        <LineMoreActions trigger-variant="fiche" menu-aria-label="Plus d'actions sur la fiche">
+          <button type="button" class="action-menu-item" role="menuitem" @click="setMediaKeep(!media.keep)">
+            {{ media.keep ? "Ne plus garder" : media.type === "series" ? "Garder la série" : "Garder le film" }}
+          </button>
+          <button type="button" class="action-menu-item" role="menuitem" @click="reglagesOpen = true">
+            Réglages et sources
+          </button>
+          <button
+            v-if="media.tmdb_url"
+            type="button"
+            class="action-menu-item"
+            role="menuitem"
+            @click="openExternalTab(media.tmdb_url!)"
+          >
+            Ouvrir TMDB
+          </button>
+          <button type="button" class="action-menu-item" role="menuitem" @click="reglagesOpen = true">
+            Changer l'identifiant TMDB
+          </button>
+          <hr class="action-menu-separator" role="none" />
+          <button
+            v-if="ficheHasFiles"
+            type="button"
+            class="action-menu-item danger"
+            role="menuitem"
+            @click="deleteFiles('media', {})"
+          >
+            <StatusIcon name="trash" label="Supprimer" />
+            {{ media.type === "series" ? "Supprimer tous les fichiers" : "Supprimer le film" }}
+          </button>
+          <button type="button" class="action-menu-item danger" role="menuitem" @click="ficheDelete = true">
+            <StatusIcon name="trash" label="Supprimer la fiche" />
+            Supprimer la fiche…
+          </button>
+        </LineMoreActions>
+      </div>
+    </article>
+
+    <HiveSeriesShareSummary
+      v-if="showHiveFicheBlock && media.type === 'series' && !media.followed"
+      layout="card"
+      :hive-enabled="hiveEnabled"
+      :episode-states="hiveEpisodeShares"
+      :media-id="media.id"
+      :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+      :open-signal="hiveEmpreintesSignal"
+      @changed="onHiveShareMenuChanged"
+    />
+
+    <div v-if="media.followed && media.type === 'series'" class="fiche-series-layout stack">
       <article class="panel fiche-suivi-card fiche-layout-b" aria-label="Suivi">
         <header class="fiche-suivi-card-head">
           <StatusIcon name="clock" label="Suivi" />
@@ -1643,6 +1739,10 @@ function episodeStatusIconName(episodeRow: Episode): string {
             {{ slot(media.next_episode.season, media.next_episode.episode) }}
             <template v-if="media.next_episode.air_date">, le {{ formatDate(media.next_episode.air_date) }}</template>
           </span>
+        </p>
+        <p class="hint fiche-suivi-poll-lines">
+          Vérifié {{ pollVerifLine.last }}<br />
+          Prochaine {{ pollVerifLine.next }}
         </p>
         <FicheStateActions
           section="actions"
@@ -1692,10 +1792,6 @@ function episodeStatusIconName(episodeRow: Episode): string {
           </label>
         </div>
         <div class="fiche-verif-line">
-          <span class="hint">
-            Vérifié {{ pollVerifLine.last }}<br />
-            Prochaine {{ pollVerifLine.next }}
-          </span>
           <button type="button" class="link-button" @click="suiviOpen = !suiviOpen">Détails ▾</button>
         </div>
         <details v-if="suiviOpen" class="fiche-suivi-inline-details" open>
@@ -1723,19 +1819,29 @@ function episodeStatusIconName(episodeRow: Episode): string {
         </details>
       </article>
 
-      <div v-if="hiveEnabled" class="fiche-layout-b">
+      <div v-if="showHiveFicheBlock" class="fiche-layout-b">
         <HiveSeriesShareSummary
           layout="card"
           :hive-enabled="hiveEnabled"
           :episode-states="hiveEpisodeShares"
           :media-id="media.id"
           :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+          :open-signal="hiveEmpreintesSignal"
           @changed="onHiveShareMenuChanged"
-          @open-empreintes="hiveEmpreintesSignal += 1"
         />
       </div>
 
       <div class="fiche-series-desktop stack fiche-layout-a">
+        <article class="panel fiche-suivi-card fiche-desktop-suivi-hint" aria-label="Suivi">
+          <header class="fiche-suivi-card-head">
+            <StatusIcon name="clock" label="Suivi" />
+            <strong>Suivi</strong>
+          </header>
+          <p class="hint fiche-suivi-poll-lines">
+            Vérifié {{ pollVerifLine.last }}<br />
+            Prochaine {{ pollVerifLine.next }}
+          </p>
+        </article>
         <div class="panel fiche-action-bar">
           <FicheStateActions
             section="actions"
@@ -1786,20 +1892,16 @@ function episodeStatusIconName(episodeRow: Episode): string {
           </div>
         </div>
         <HiveSeriesShareSummary
-          v-if="hiveEnabled"
+          v-if="showHiveFicheBlock"
           layout="card"
           :hive-enabled="hiveEnabled"
           :episode-states="hiveEpisodeShares"
           :media-id="media.id"
           :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+          :open-signal="hiveEmpreintesSignal"
           @changed="onHiveShareMenuChanged"
-          @open-empreintes="hiveEmpreintesSignal += 1"
         />
         <div class="fiche-verif-line">
-          <span class="hint">
-            Vérifié {{ pollVerifLine.last }}<br />
-            Prochaine {{ pollVerifLine.next }}
-          </span>
           <button type="button" class="link-button" @click="suiviOpen = !suiviOpen">Détails ▾</button>
         </div>
         <details v-if="suiviOpen" class="panel fiche-fold fiche-fold--suivi fiche-series-etat-panel" open>
@@ -1830,7 +1932,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
       </div>
     </div>
 
-    <div class="fiche-status-row">
+    <div v-if="media.followed" class="fiche-status-row">
     <details
       v-if="media.type !== 'series'"
       class="panel fiche-fold fiche-fold--suivi"
@@ -1840,7 +1942,11 @@ function episodeStatusIconName(episodeRow: Episode): string {
         <StatusIcon name="clock" label="Suivi" />
         <span class="fold-title">
           <span class="label">Suivi</span>
-          <span class="summary hint">{{ suiviSummaryLine }}</span>
+          <span class="summary hint">
+            {{ suiviSummaryLine }}<br />
+            Vérifié {{ pollVerifLine.last }}<br />
+            Prochaine {{ pollVerifLine.next }}
+          </span>
         </span>
         <span class="open-txt">Détails</span>
         <span class="chev" aria-hidden="true">▾</span>
@@ -1869,19 +1975,6 @@ function episodeStatusIconName(episodeRow: Episode): string {
       </div>
     </details>
 
-    <HiveMediaShareRow
-      v-if="hiveEnabled && media.type === 'film' && primaryItemId && filmItem?.downloaded"
-      class="fiche-fold fiche-fold--hive"
-      :state="hiveShare"
-      :hive-enabled="hiveEnabled"
-      :media-item-id="primaryItemId"
-      :media-id="media.id"
-      :request-error="hiveSharePolling.shareRequestError.value"
-      :poll-exhausted="hiveSharePolling.pollExhausted.value"
-      :poll-busy="hiveSharePolling.pollBusy.value"
-      @refresh="hiveSharePolling.manualRefresh"
-      @changed="onHiveShareMenuChanged"
-    />
     <HiveMediaRequestCard
       v-if="
         hiveEnabled &&
@@ -1900,23 +1993,22 @@ function episodeStatusIconName(episodeRow: Episode): string {
     />
     </div>
 
+    <HiveMediaShareRow
+      v-if="showHiveFicheBlock && media.type === 'film' && primaryItemId && filmItem?.downloaded"
+      :state="hiveShare"
+      :hive-enabled="hiveEnabled"
+      :media-item-id="primaryItemId"
+      :media-id="media.id"
+      :open-signal="hiveEmpreintesSignal"
+      :request-error="hiveSharePolling.shareRequestError.value"
+      :poll-exhausted="hiveSharePolling.pollExhausted.value"
+      :poll-busy="hiveSharePolling.pollBusy.value"
+      @refresh="hiveSharePolling.manualRefresh"
+      @changed="onHiveShareMenuChanged"
+    />
+
     <p v-if="error" class="error" data-force-status>{{ error }}</p>
     <p v-else-if="message" class="hint" data-force-status>{{ message }}</p>
-
-    <HiveEmpreintesPanel
-      v-if="hiveEnabled && media.type === 'series'"
-      :media-id="media.id"
-      :hive-enabled="hiveEnabled"
-      :open-signal="hiveEmpreintesSignal"
-      @update="refreshHiveEpisodeShares"
-    />
-
-    <HiveEmpreintesPanel
-      v-if="hiveEnabled && media.type === 'film' && filmItem?.downloaded"
-      :media-id="media.id"
-      :hive-enabled="hiveEnabled"
-      :open-signal="hiveEmpreintesSignal"
-    />
 
     <article v-if="media.type === 'film' && filmItem && !media.film_not_yet_available" class="panel film-file-panel">
       <h2>Film</h2>
@@ -1935,7 +2027,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
       />
     </article>
 
-    <section v-if="media.type === 'series'" class="fiche-seasons-stack">
+    <section v-if="media.type === 'series' && (media.followed || ficheHasFiles)" class="fiche-seasons-stack">
       <article class="panel fiche-seasons-intro">
         <h2 class="fiche-seasons-title">
           Saisons et épisodes
@@ -2204,6 +2296,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
     </section>
 
     <details
+      v-if="media.followed || reglagesOpen"
       class="panel fiche-settings-block fiche-fold"
       data-fiche-settings
       :open="reglagesOpen || undefined"
@@ -2528,7 +2621,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
       </div>
     </details>
 
-    <details class="panel fiche-fold fiche-suivi danger-zone">
+    <details v-if="media.followed" class="panel fiche-fold fiche-suivi danger-zone">
       <summary class="fold-head">
         <StatusIcon name="trash" label="Suppression" />
         <span class="fold-title">

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
-from mediatracker.api.v1 import hive_ruches, hive_ui
+from mediatracker.api.v1 import hive_peer_load, hive_ruches, hive_ui
 from mediatracker.hive.identity import (
     hive_enabled_in_db,
     hive_identity_is_lost,
@@ -16,6 +16,7 @@ from mediatracker.hive.identity import (
 
 router = APIRouter(prefix="/hive", tags=["hive"])
 router.include_router(hive_ruches.router)
+router.include_router(hive_peer_load.router)
 router.include_router(hive_ui.router)
 
 

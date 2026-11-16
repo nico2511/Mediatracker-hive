@@ -52,7 +52,7 @@ describe("HiveSeriesShareSummary", () => {
       attrs: { class: "fiche-layout-b" },
     });
     await flushPromises();
-    const root = wrapper.get("[data-testid='hive-series-summary']");
+    const root = wrapper.get("[data-testid='hive-fiche-card']");
     expect(root.classes()).toContain("fiche-layout-b");
     expect(root.classes()).toContain("fiche-hive-card");
   });

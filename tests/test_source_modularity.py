@@ -11,7 +11,14 @@ from mediatracker.providers.sources.loading import source_base_url
 
 
 def test_registry_accepts_the_builtin_pair_and_refuses_an_unknown_name():
-    assert registered_download_sources() == ("wawacity", "free_telecharger", "hive", "comet", "torrentio")
+    assert registered_download_sources() == (
+        "wawacity",
+        "free_telecharger",
+        "hive",
+        "comet",
+        "torrentio",
+        "stremio_addons",
+    )
     assert parse_download_source_order("wawacity, comet") == ["wawacity", "comet"]
     assert parse_download_source_order("comet,wawacity,torrentio") == ["comet", "wawacity", "torrentio"]
     try:
@@ -75,6 +82,9 @@ def test_provider_types_list_download_sources(client):
     assert by_type["torrentio"]["download_rank"] == 21
     assert "episode" in by_type["torrentio"]["capabilities"]
     assert "base_url" in by_type["torrentio"]["config_schema"]["properties"]
+    assert by_type["stremio_addons"]["download_rank"] == 23
+    assert "episode" in by_type["stremio_addons"]["capabilities"]
+    assert "addons" in by_type["stremio_addons"]["config_schema"]["properties"]
     assert by_type["manual"]["download_rank"] is None
 
 

@@ -56,6 +56,21 @@ describe("SourceRank", () => {
     expect(last.split(",").sort()).toEqual(["comet", "wawacity"]);
   });
 
+  it("place les sources désactivées en fin avec la mention désactivée", () => {
+    const wrapper = mount(SourceRank, {
+      props: {
+        modelValue: "wawacity,comet",
+        orderOnly: true,
+        visibleIds: ["wawacity", "comet", "free_telecharger"],
+      },
+    });
+    const items = wrapper.findAll(".rank-list li");
+    expect(items.at(-1)?.classes()).toContain("is-off");
+    expect(wrapper.text()).toContain("désactivée");
+    expect(wrapper.text()).toContain("Free-Télécharger");
+    expect(wrapper.text()).not.toContain("free_telecharger");
+  });
+
   it("orderOnly garde la position des jetons hors visibleIds", async () => {
     const wrapper = mount(SourceRank, {
       props: {

@@ -3,10 +3,13 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { RouterLink } from "vue-router";
 
 import CometInstanceList from "../../components/CometInstanceList.vue";
+import HosterOrderList from "../../components/HosterOrderList.vue";
+import StremioAddonList, { type StremioAddonRow } from "../../components/StremioAddonList.vue";
 import SourceRank from "../../components/SourceRank.vue";
 import { api, userFacingApiError } from "../../api";
 import { fetchSettings, patchSettings } from "../../settings";
 import { settingAsCommaList, settingAsLineList, settingAsString, settingCommaTokens } from "../../settingsCoerce";
+import { sourceDisplayLabel } from "../../sourceLabels";
 import { formatParisClock } from "../../time";
 
 type SourceStatus = {
@@ -26,9 +29,16 @@ type SourceStatus = {
   last_success_at: string | null;
 };
 
-const SOURCE_IDS = ["wawacity", "free_telecharger", "hive", "comet", "torrentio"] as const;
+const SOURCE_IDS = [
+  "wawacity",
+  "free_telecharger",
+  "hive",
+  "comet",
+  "torrentio",
+  "stremio_addons",
+] as const;
 
-const sourceOrder = ref("wawacity,free_telecharger,hive,comet,torrentio");
+const sourceOrder = ref("wawacity,free_telecharger,hive,comet,torrentio,stremio_addons");
 const statuses = ref<SourceStatus[]>([]);
 const availableSourceIds = ref<string[]>([]);
 const downloadReady = ref(true);
@@ -39,7 +49,7 @@ const requestDelay = ref(5);
 const cacheSeconds = ref(900);
 const errorBackoffMin = ref(180);
 const remoteSearchCooldownHours = ref(6);
-const hosterOrder = ref("rapidgator,turbobit,uploady,dailyuploads,1fichier");
+const hosterOrder = ref<string[]>(["rapidgator", "turbobit", "uploady", "dailyuploads", "1fichier"]);
 
 const wawacityUrl = ref("");
 const wawacityAgent = ref("");
@@ -47,6 +57,7 @@ const freeTelechargerUrl = ref("");
 const freeTelechargerAgent = ref("");
 const torrentioUrl = ref("");
 const cometInstanceUrls = ref<string[]>([]);
+const stremioAddonRows = ref<StremioAddonRow[]>([]);
 
 const wawacityDomain = ref<{ current: string | null; candidate: string | null; previous: string | null } | null>(
   null,
@@ -55,13 +66,14 @@ const wawacityDomain = ref<{ current: string | null; candidate: string | null; p
 const sourceProviders = ref<{ id: number; type: string }[]>([]);
 
 const probeQuery = ref("");
-const probeImdb = ref("");
+const probeTmdb = ref("");
 const probeBusy = ref(false);
 const probeError = ref("");
 const probeResults = ref<
   { source: string; label: string; issue: string; link_count: number; reason: string | null; duration_ms: number }[]
 >([]);
 const probeFinishedAt = ref<string | null>(null);
+const probeProfileName = ref<string | null>(null);
 
 const hiveRucheCount = ref<number | null>(null);
 
@@ -76,9 +88,22 @@ const displaySourceIds = computed(() => availableSourceIds.value);
 const orderedSources = computed(() => {
   const visible = new Set(displaySourceIds.value);
   const enabled = settingCommaTokens(sourceOrder.value).filter((id) => visible.has(id));
-  const tail = SOURCE_IDS.filter((id) => !enabled.includes(id) && visible.has(id));
-  return [...enabled, ...tail];
+  const disabledTail = SOURCE_IDS.filter((id) => !enabled.includes(id) && visible.has(id));
+  return [...enabled, ...disabledTail];
 });
+
+function labelForSource(id: string): string {
+  const row = statusBySource.value.get(id);
+  return sourceDisplayLabel(id, row?.label);
+}
+
+function cardRank(id: string): string {
+  if (!isEnabled(id)) {
+    return "—";
+  }
+  const rank = statusBySource.value.get(id)?.rank;
+  return rank != null && rank > 0 ? String(rank) : "—";
+}
 
 function parseEnabled(): string[] {
   return settingCommaTokens(sourceOrder.value);
@@ -112,6 +137,9 @@ function statusDotClass(source: string): string {
 }
 
 function statusLine(source: string): string {
+  if (!isEnabled(source)) {
+    return "Désactivée";
+  }
   const row = statusBySource.value.get(source);
   if (!row) {
     return "";
@@ -258,9 +286,9 @@ async function loadSettings() {
       remoteSearchCooldownHours.value = row.value;
     }
     if (row.key === "hoster_preference") {
-      const next = settingAsCommaList(row.value);
-      if (next) {
-        hosterOrder.value = next;
+      const tokens = settingCommaTokens(settingAsCommaList(row.value));
+      if (tokens.length) {
+        hosterOrder.value = tokens;
       }
     }
     if (row.key === "wawacity_base_url") {
@@ -293,6 +321,33 @@ async function loadSettings() {
         cometInstanceUrls.value = [legacy];
       }
     }
+    if (row.key === "stremio_addons") {
+      const raw = row.value;
+      if (Array.isArray(raw)) {
+        stremioAddonRows.value = raw
+          .filter((item): item is Record<string, unknown> => item && typeof item === "object")
+          .map((item) => ({
+            url: String(item.url ?? "").trim(),
+            enabled: item.enabled !== false && item.enabled !== "false" && item.enabled !== "0",
+          }))
+          .filter((item) => item.url);
+      } else if (typeof raw === "string" && raw.trim()) {
+        try {
+          const parsed = JSON.parse(raw) as unknown;
+          if (Array.isArray(parsed)) {
+            stremioAddonRows.value = parsed
+              .filter((item): item is Record<string, unknown> => item && typeof item === "object")
+              .map((item) => ({
+                url: String(item.url ?? "").trim(),
+                enabled: item.enabled !== false,
+              }))
+              .filter((item) => item.url);
+          }
+        } catch {
+          /* invalid JSON left empty */
+        }
+      }
+    }
   }
 }
 
@@ -322,13 +377,14 @@ async function saveCore() {
         source_cache_seconds: cacheSeconds.value,
         source_error_backoff_min: errorBackoffMin.value,
         remote_search_cooldown_hours: remoteSearchCooldownHours.value,
-        hoster_preference: hosterOrder.value,
+        hoster_preference: hosterOrder.value.join(","),
         wawacity_base_url: wawacityUrl.value,
         wawacity_user_agent: wawacityAgent.value,
         free_telecharger_user_agent: freeTelechargerAgent.value,
         torrentio_base_url: torrentioUrl.value,
         comet_base_urls: cometInstanceUrls.value.join("\n"),
         comet_base_url: cometInstanceUrls.value[0] ?? "",
+        stremio_addons: JSON.stringify(stremioAddonRows.value),
       },
     });
     await saveProviderUrls();
@@ -372,6 +428,20 @@ async function saveProviderUrls() {
         }),
       });
     }
+    if (provider.type === "stremio_addons") {
+      await api(`/api/v1/providers/${provider.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          config: {
+            base_url: stremioAddonRows.value[0]?.url ?? "",
+            addons: stremioAddonRows.value.map((row) => ({
+              url: row.url,
+              enabled: row.enabled,
+            })),
+          },
+        }),
+      });
+    }
   }
 }
 
@@ -395,24 +465,29 @@ type ProbeResultRow = {
   duration_ms: number;
 };
 
-async function probeOneSource(
-  query: string,
-  sourceId: string,
-): Promise<ProbeResultRow | null> {
-  const body = await api<{ results: ProbeResultRow[] }>("/api/v1/settings/sources/probe", {
+async function probeOneSource(query: string, sourceId: string): Promise<ProbeResultRow[]> {
+  const body = await api<{ results: ProbeResultRow[]; profile_name?: string | null }>("/api/v1/settings/sources/probe", {
     method: "POST",
     body: JSON.stringify({
       query,
-      imdb_id: probeImdb.value.trim() || null,
+      tmdb_id: probeTmdb.value.trim() ? Number(probeTmdb.value.trim()) : null,
       sources: [sourceId],
     }),
   });
-  return body.results[0] ?? null;
+  if (body.profile_name) {
+    probeProfileName.value = body.profile_name;
+  }
+  if (sourceId === "stremio_addons") {
+    return body.results ?? [];
+  }
+  const row = body.results[0];
+  return row ? [row] : [];
 }
 
 async function runProbe(sources?: string[]) {
   probeError.value = "";
   probeResults.value = [];
+  probeProfileName.value = null;
   const query = probeQuery.value.trim();
   if (!query) {
     probeError.value = "Indiquez un titre (film ou épisode S01E01).";
@@ -423,12 +498,12 @@ async function runProbe(sources?: string[]) {
   try {
     for (const sourceId of targets) {
       try {
-        const row = await probeOneSource(query, sourceId);
-        if (row) {
-          probeResults.value = [...probeResults.value, row];
+        const rows = await probeOneSource(query, sourceId);
+        if (rows.length) {
+          probeResults.value = [...probeResults.value, ...rows];
         }
       } catch (err) {
-        const label = statusBySource.value.get(sourceId)?.label || sourceId;
+        const label = labelForSource(sourceId);
         probeResults.value = [
           ...probeResults.value,
           {
@@ -453,26 +528,25 @@ function toggleExpanded(id: string) {
   expanded[id] = !expanded[id];
 }
 
-function probeResultLine(source: string): string {
-  const row = probeResults.value.find((item) => item.source === source);
-  if (!row) {
-    return "";
-  }
+function probeRowDetail(row: ProbeResultRow): string {
+  let base = "";
   if (row.reason) {
-    return row.reason;
+    base = row.reason;
+  } else if (row.link_count) {
+    base = `${row.link_count} lien${row.link_count > 1 ? "s" : ""}`;
+  } else if (row.issue === "empty") {
+    base = "aucune source";
+  } else {
+    base = row.issue;
   }
-  if (row.link_count) {
-    return `${row.link_count} lien${row.link_count > 1 ? "s" : ""}`;
+  const profile = probeProfileName.value;
+  if (profile && base && !base.toLowerCase().includes("profil")) {
+    return `${base} — profil « ${profile} »`;
   }
-  return row.issue;
+  return base;
 }
 
-function probeDuration(source: string): string {
-  const row = probeResults.value.find((item) => item.source === source);
-  if (!row) {
-    return "";
-  }
-  const ms = row.duration_ms;
+function formatProbeMs(ms: number): string {
   if (ms >= 1000) {
     return `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
   }
@@ -485,6 +559,8 @@ const SOURCE_BLURBS: Record<string, string> = {
   hive: "Pair à pair entre tes instances",
   comet: "Cache AllDebrid — instances publiques sans clé",
   torrentio: "Addon public sans clé — aimant envoyé à AllDebrid",
+  stremio_addons:
+    "Plusieurs addons Stremio — torrents ou hébergeurs (profil qualité, sans clé vers les addons)",
 };
 </script>
 
@@ -506,7 +582,9 @@ const SOURCE_BLURBS: Record<string, string> = {
 
     <section class="panel stack source-order-panel">
       <h3>Ordre des sources</h3>
-      <p class="hint">Les sources sont essayées dans cet ordre. L’activation se fait dans chaque bloc ci-dessous.</p>
+      <p class="hint">
+        Les sources sont essayées dans cet ordre. Une source désactivée reste visible, en bas de liste.
+      </p>
       <SourceRank v-model="sourceOrder" order-only :visible-ids="displaySourceIds" />
       <button type="button" class="btn" :disabled="saving" @click="saveCore">Enregistrer l’ordre</button>
     </section>
@@ -518,20 +596,21 @@ const SOURCE_BLURBS: Record<string, string> = {
         <input v-model="probeQuery" placeholder="Titre fictif ou Titre fictif S01E02" />
       </label>
       <label>
-        <span>IMDb (optionnel)</span>
-        <input v-model="probeImdb" placeholder="tt9999999" />
+        <span>TMDB (optionnel)</span>
+        <input v-model="probeTmdb" inputmode="numeric" placeholder="900101" />
       </label>
       <button type="button" class="btn primary" :disabled="probeBusy" @click="runProbe()">
         {{ probeBusy ? "Test en cours…" : "Tester toutes" }}
       </button>
       <ul v-if="probeResults.length" class="source-probe-results">
-        <li v-for="id in orderedSources" :key="id">
-          <span :class="statusDotClass(id)" aria-hidden="true"></span>
-          <span class="source-probe-name">{{ statusBySource.get(id)?.label || id }}</span>
-          <span class="source-probe-detail">{{ probeResultLine(id) }}</span>
-          <span class="source-probe-ms">{{ probeDuration(id) }}</span>
+        <li v-for="row in probeResults" :key="row.source + ':' + row.label">
+          <span :class="statusDotClass(row.source.split(':')[0])" aria-hidden="true"></span>
+          <span class="source-probe-name">{{ row.label }}</span>
+          <span class="source-probe-detail">{{ probeRowDetail(row) }}</span>
+          <span class="source-probe-ms">{{ formatProbeMs(row.duration_ms) }}</span>
         </li>
       </ul>
+      <p v-if="probeProfileName" class="hint">Profil utilisé : {{ probeProfileName }}</p>
       <p v-if="probeFinishedAt" class="hint">
         Test fait à {{ formatParisClock(probeFinishedAt) }} — aucun téléchargement lancé.
       </p>
@@ -560,13 +639,7 @@ const SOURCE_BLURBS: Record<string, string> = {
         <span>Délai entre deux recherches distantes d'une même fiche (heures)</span>
         <input v-model.number="remoteSearchCooldownHours" type="number" min="1" max="72" />
       </label>
-      <label>
-        <span>Ordre des hébergeurs</span>
-        <input v-model="hosterOrder" />
-        <span class="hint">
-          Défaut : rapidgator, turbobit, uploady, dailyuploads, 1fichier (toujours en dernier).
-        </span>
-      </label>
+      <HosterOrderList v-model="hosterOrder" />
       <button type="button" class="btn" :disabled="saving" @click="saveCore">Enregistrer le rythme</button>
     </section>
 
@@ -574,28 +647,28 @@ const SOURCE_BLURBS: Record<string, string> = {
       v-for="id in orderedSources"
       :key="id"
       class="panel source-card"
-      :class="{ expanded: expanded[id] }"
+      :class="{ expanded: expanded[id], 'is-off': !isEnabled(id) }"
     >
       <header class="source-card-head">
-        <span class="source-card-rank">{{ statusBySource.get(id)?.rank || "—" }}</span>
+        <span class="source-card-rank">{{ cardRank(id) }}</span>
         <div class="source-card-titles">
-          <strong>{{ statusBySource.get(id)?.label || id }}</strong>
+          <strong>{{ labelForSource(id) }}</strong>
           <span class="hint">{{ SOURCE_BLURBS[id] }}</span>
         </div>
-        <div class="source-card-status">
-          <span :class="statusDotClass(id)" aria-hidden="true"></span>
+        <div class="source-card-status" :class="{ 'is-disabled-status': !isEnabled(id) }">
+          <span v-if="isEnabled(id)" :class="statusDotClass(id)" aria-hidden="true"></span>
           <span>{{ statusLine(id) }}</span>
         </div>
         <label class="source-enabled switch-line">
-          <span>Activée</span>
+          <span>{{ isEnabled(id) ? "Activée" : "Désactivée" }}</span>
           <span class="switch">
             <input type="checkbox" :checked="isEnabled(id)" @change="setEnabled(id, ($event.target as HTMLInputElement).checked); saveCore()" />
             <span class="switch-ui" aria-hidden="true"></span>
           </span>
         </label>
       </header>
-      <p v-if="lastProbeLine(id)" class="hint">{{ lastProbeLine(id) }}</p>
-      <p v-if="lastSuccessLine(id)" class="hint">{{ lastSuccessLine(id) }}</p>
+      <p v-if="lastProbeLine(id)" class="hint source-card-meta">{{ lastProbeLine(id) }}</p>
+      <p v-if="lastSuccessLine(id)" class="hint source-card-meta">{{ lastSuccessLine(id) }}</p>
       <p v-if="statusBySource.get(id)?.state === 'down' && statusBySource.get(id)?.message" class="error">
         {{ statusBySource.get(id)?.message }}
       </p>
@@ -654,6 +727,11 @@ const SOURCE_BLURBS: Record<string, string> = {
             <input v-model="torrentioUrl" placeholder="https://torrentio.strem.fun" />
           </label>
           <p class="hint">Sans clé : MediaTracker envoie lui-même l’aimant à AllDebrid.</p>
+        </template>
+
+        <template v-else-if="id === 'stremio_addons'">
+          <p class="hint">Aucune URL réelle par défaut. Les clés collées dans l’URL sont retirées avant enregistrement.</p>
+          <StremioAddonList v-model="stremioAddonRows" />
         </template>
 
         <button type="button" class="btn" :disabled="saving" @click="saveCore">Enregistrer</button>

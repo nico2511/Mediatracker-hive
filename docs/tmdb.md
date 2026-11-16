@@ -20,9 +20,18 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 | **Derniers films** (`/nouveautes/films`) | Parcourir les films (cinéma, streaming, supports physiques) |
 | **Dernières séries** (`/nouveautes/series`) | Séries et diffusions à l’antenne |
 | **Suivre** | Rechercher un titre et l’ajouter à votre liste de suivi |
-| Fiche média | Métadonnées, saisons, estimation de disponibilité pour les films |
+| **Médias** (`/medias`) | Liste de vos fiches : chargement progressif, affiches et bannières via le cache local TMDB, badges Hive chargés ensuite (sans bloquer la grille) |
+| Fiche média | Métadonnées, saisons, estimation de disponibilité pour les films ; bloc Hive unifié si Hive est actif |
 
 Les anciennes URL d’essai `/tmdb`, `/tmdb/films` et `/tmdb/series` redirigent vers les écrans ci-dessus.
+
+## Fiche non suivie
+
+Lorsque vous avez arrêté le suivi d’un titre mais que la fiche reste en base (fichiers sur le disque, historique, etc.) :
+
+- Le bandeau propose **Suivre à nouveau** pour réactiver le suivi sans repasser par **Suivre**.
+- Les actions avancées (nettoyage, suppression de fichiers, etc.) sont regroupées sous **Plus d’actions** ; la zone de suppression définitive de la fiche n’apparaît pas sur cet écran épuré.
+- Le partage **Hive** reste accessible dans le même bloc que pour une fiche suivie, avec l’état adapté (fichier présent ou non).
 
 ## Profils de qualité
 

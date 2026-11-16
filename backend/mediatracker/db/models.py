@@ -882,6 +882,24 @@ class HiveOriginReachability(Base):
     measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class HivePeerLoad(Base):
+    """Dernier instantané de charge reçu d'un pair (gossip)."""
+
+    __tablename__ = "hive_peer_load"
+
+    ruche_id: Mapped[bytes] = mapped_column(
+        LargeBinary(16), ForeignKey("hive_ruche.ruche_id", ondelete="CASCADE"), primary_key=True
+    )
+    origin_instance_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    out_active: Mapped[int] = mapped_column(Integer, nullable=False)
+    parallel_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    send_cap_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    send_avail_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    busy: Mapped[bool] = mapped_column(nullable=False)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class HivePeerNonce(Base):
     """Nonce vu pour anti-rejeu (fenêtre 10 min par Hive-Id)."""
 

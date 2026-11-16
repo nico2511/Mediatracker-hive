@@ -18,7 +18,9 @@ NOW = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
 
 
 def test_builtin_comet_and_manual_are_registered():
-    assert known_types() >= frozenset({"wawacity", "free_telecharger", "comet", "torrentio", "manual"})
+    assert known_types() >= frozenset(
+        {"wawacity", "free_telecharger", "comet", "torrentio", "stremio_addons", "manual"}
+    )
     assert get("comet").capabilities == frozenset({"episode"})
     assert get("manual").capabilities == frozenset()
     assert get("wawacity").download_rank == 10

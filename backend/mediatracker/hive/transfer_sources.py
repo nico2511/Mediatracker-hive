@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from mediatracker.hive.hive_catalogue import load_hive_catalogue_rows
+from mediatracker.hive.transfer_load import peer_load_row, ranking_tier
 from mediatracker.hive.transfer_throughput import measured_bps_for_origin
 
 
@@ -35,31 +36,49 @@ def _enrich_measured_bps(db: Session, source: dict) -> dict:
     return out
 
 
+def _rank_key(
+    db: Session, source: dict, *, now: datetime, rng: random.Random
+) -> tuple[int, float, float, float]:
+    try:
+        rid = bytes.fromhex(str(source.get("ruche_id_hex") or ""))
+    except (ValueError, TypeError):
+        rid = b""
+    origin = str(source.get("origine") or "")
+    load = peer_load_row(db, ruche_id=rid, origin_instance_id=origin, now=now) if rid and origin else None
+    tier = ranking_tier(load)
+    free_ratio = load.free_capacity_ratio() if load is not None and tier == 0 else 0.0
+    speed = _speed_key(source)
+    return (tier, -free_ratio, -speed, rng.random())
+
+
 def rank_sources(
-    db: Session, sources: list[dict], *, rng: random.Random | None = None
+    db: Session,
+    sources: list[dict],
+    *,
+    now: datetime | None = None,
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
-    """Trie : meilleur débit mesuré, tirage à égalité (y compris débit inconnu = 0)."""
+    """Trie : libre (capacité), neutre, occupé ; puis débit mesuré ; tirage à égalité."""
     if not sources:
         return []
+    moment = now or datetime.now().astimezone()
+    if moment.tzinfo is None:
+        from datetime import timezone
+
+        moment = moment.replace(tzinfo=timezone.utc)
     enriched = [_enrich_measured_bps(db, s) for s in sources if isinstance(s, dict)]
     r = rng or random.Random()
-    by_tier: dict[float, list[dict]] = {}
-    for s in enriched:
-        by_tier.setdefault(_speed_key(s), []).append(s)
-    speeds = sorted(by_tier.keys(), reverse=True)
-    out: list[dict] = []
-    for speed in speeds:
-        bucket = list(by_tier[speed])
-        r.shuffle(bucket)
-        out.extend(bucket)
-    return out
+    decorated: list[tuple[tuple[int, float, float, float], dict]] = [
+        (_rank_key(db, s, now=moment, rng=r), s) for s in enriched
+    ]
+    decorated.sort(key=lambda pair: pair[0])
+    return [s for _, s in decorated]
 
 
 def sources_for_sha256(
     db: Session, *, sha256_hex: str, now: datetime, rng: random.Random | None = None
 ) -> list[dict[str, Any]]:
-    """Sources joignables, toutes ruches confondues, triées par débit mesuré puis tirage."""
-    del now
+    """Sources joignables, toutes ruches confondues, triées par charge puis débit mesuré."""
     out: list[dict] = []
     for row in load_hive_catalogue_rows(db):
         try:
@@ -78,4 +97,4 @@ def sources_for_sha256(
             if not src.get("file_id_hex") or not src.get("ruche_id_hex"):
                 continue
             out.append(dict(src))
-    return rank_sources(db, out, rng=rng)
+    return rank_sources(db, out, now=now, rng=rng)

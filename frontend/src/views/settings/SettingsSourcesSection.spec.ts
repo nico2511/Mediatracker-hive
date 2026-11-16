@@ -1,18 +1,23 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../api";
 import SettingsSourcesSection from "./SettingsSourcesSection.vue";
 
 const apiMock = vi.hoisted(() => vi.fn());
 const fetchSettingsMock = vi.hoisted(() => vi.fn());
+const patchSettingsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../api", () => ({
-  api: apiMock,
-  userFacingApiError: (_e: unknown, f: string) => f,
-}));
+vi.mock("../../api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api")>();
+  return {
+    ...actual,
+    api: apiMock,
+  };
+});
 vi.mock("../../settings", () => ({
   fetchSettings: fetchSettingsMock,
-  patchSettings: vi.fn(),
+  patchSettings: patchSettingsMock,
 }));
 vi.mock("vue-router", () => ({
   RouterLink: { template: "<a><slot /></a>" },
@@ -64,7 +69,10 @@ function mountSources() {
 describe("SettingsSourcesSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchSettingsMock.mockResolvedValue({ settings: [] });
+    patchSettingsMock.mockResolvedValue({});
+    fetchSettingsMock.mockResolvedValue({
+      settings: [{ key: "download_source_order", value: "wawacity,comet", secret: false, set: true }],
+    });
     apiMock.mockImplementation(async (url: string) => {
       if (url === "/api/v1/settings/sources/status") {
         return {
@@ -85,6 +93,9 @@ describe("SettingsSourcesSection", () => {
       }
       if (url.startsWith("/api/v1/providers/types")) {
         return { items: [] };
+      }
+      if (url === "/api/v1/settings/sources/hosters") {
+        return { hosters: ["rapidgator", "1fichier"] };
       }
       return {};
     });
@@ -134,6 +145,9 @@ describe("SettingsSourcesSection", () => {
       }
       if (url.startsWith("/api/v1/providers/types")) {
         return { items: [] };
+      }
+      if (url === "/api/v1/settings/sources/hosters") {
+        return { hosters: ["rapidgator", "1fichier"] };
       }
       return {};
     });
@@ -200,7 +214,135 @@ describe("SettingsSourcesSection", () => {
     await flushPromises();
     expect(probeCalls).toEqual([["wawacity"], ["comet"]]);
     expect(wrapper.text()).toContain("Test impossible.");
-    expect(wrapper.text()).toContain("empty");
+    expect(wrapper.text()).toContain("aucune source");
+  });
+
+  it("affiche Désactivée sur l’interrupteur et le statut quand la source est hors ordre", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/settings/sources/status") {
+        return {
+          sources: [
+            ...defaultSources,
+            {
+              source: "free_telecharger",
+              label: "Free-Télécharger",
+              enabled: false,
+              available: true,
+              rank: 0,
+              state: "ok",
+              message: "",
+              since: "2026-11-09T20:00:00Z",
+              last_probe_at: null,
+              last_probe_link_count: null,
+              last_probe_duration_ms: null,
+              last_probe_issue: null,
+              last_probe_reason: null,
+              last_success_at: null,
+            },
+          ],
+          available_sources: ["wawacity", "comet", "free_telecharger"],
+          download_ready: true,
+          blocked_message: null,
+        };
+      }
+      if (url === "/api/v1/providers?kind=source") {
+        return { items: [] };
+      }
+      if (url === "/api/v1/hive/ruches") {
+        return [];
+      }
+      if (url === "/api/v1/wawacity/domain") {
+        return { current: null, candidate: null, previous: null };
+      }
+      if (url.startsWith("/api/v1/providers/types")) {
+        return { items: [] };
+      }
+      if (url === "/api/v1/settings/sources/hosters") {
+        return { hosters: ["rapidgator", "1fichier"] };
+      }
+      return {};
+    });
+    const wrapper = mountSources();
+    await flushPromises();
+    const card = wrapper.find(".source-card.is-off");
+    expect(card.exists()).toBe(true);
+    expect(card.text()).toContain("Free-Télécharger");
+    expect(card.text()).not.toContain("free_telecharger");
+    expect(card.text()).toContain("Désactivée");
+    expect(card.text()).not.toContain("En ligne depuis");
+  });
+
+  it("expose un libellé lisible pour les addons Stremio", async () => {
+    fetchSettingsMock.mockResolvedValue({
+      settings: [
+        { key: "download_source_order", value: "stremio_addons", secret: false, set: true },
+      ],
+    });
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/settings/sources/status") {
+        return {
+          sources: [
+            {
+              source: "stremio_addons",
+              label: "Addons Stremio",
+              enabled: true,
+              available: true,
+              rank: 1,
+              state: "ok",
+              message: "",
+              since: "2026-11-09T20:00:00Z",
+              last_probe_at: null,
+              last_probe_link_count: null,
+              last_probe_duration_ms: null,
+              last_probe_issue: null,
+              last_probe_reason: null,
+              last_success_at: null,
+            },
+          ],
+          available_sources: ["stremio_addons"],
+          download_ready: true,
+          blocked_message: null,
+        };
+      }
+      if (url === "/api/v1/providers?kind=source") {
+        return { items: [] };
+      }
+      if (url === "/api/v1/hive/ruches") {
+        return [];
+      }
+      if (url === "/api/v1/wawacity/domain") {
+        return { current: null, candidate: null, previous: null };
+      }
+      if (url.startsWith("/api/v1/providers/types")) {
+        return { items: [] };
+      }
+      if (url === "/api/v1/settings/sources/hosters") {
+        return { hosters: ["rapidgator", "1fichier"] };
+      }
+      return {};
+    });
+    const wrapper = mountSources();
+    await flushPromises();
+    expect(wrapper.text()).toContain("Addons Stremio");
+    expect(wrapper.text()).not.toContain("stremio_addons");
+  });
+
+  it("affiche le détail hébergeur renvoyé par l’API à l’enregistrement", async () => {
+    patchSettingsMock.mockRejectedValue(
+      new ApiError(422, "Données invalides.", undefined, undefined, {
+        detail: "Hébergeur inconnu : exempleshare.",
+      }),
+    );
+    const wrapper = mountSources();
+    await flushPromises();
+    const saveRhythm = wrapper
+      .findAll(".source-rhythm-panel button")
+      .find((btn) => btn.text() === "Enregistrer le rythme");
+    expect(saveRhythm).toBeTruthy();
+    await saveRhythm!.trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("Hébergeur inconnu : exempleshare.");
+    expect(wrapper.text()).not.toContain("Enregistrement impossible.");
   });
 
   it("tolère sources null sur l’endpoint statut", async () => {
@@ -219,6 +361,9 @@ describe("SettingsSourcesSection", () => {
       }
       if (url.startsWith("/api/v1/providers/types")) {
         return { items: [] };
+      }
+      if (url === "/api/v1/settings/sources/hosters") {
+        return { hosters: ["rapidgator", "1fichier"] };
       }
       return {};
     });

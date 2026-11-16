@@ -27,6 +27,8 @@ SOURCE_WAWACITY = "wawacity"
 SOURCE_FREE_TELECHARGER = "free_telecharger"
 SOURCE_COMET = "comet"
 SOURCE_TORRENTIO = "torrentio"
+SOURCE_UWUPLUS = "uwuplus"
+SOURCE_STREMIO_ADDONS = "stremio_addons"
 SOURCE_ALLDEBRID = "alldebrid"
 
 PERSIST_MIN_INTERVAL_S = 60.0

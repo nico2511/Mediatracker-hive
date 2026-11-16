@@ -187,6 +187,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.hive_peer_limiter = PeerRateLimiter(limit=_peer_limit, window_seconds=60.0)
     app.state.hive_transfer_parallel = TransferParallelGate()
     app.state.hive_send_bandwidth = TransferBandwidthLimiter(bps=0)
+    from mediatracker.hive.transfer_load import bind_transfer_load_runtime
+
+    bind_transfer_load_runtime(
+        parallel_gate=app.state.hive_transfer_parallel,
+        send_bandwidth=app.state.hive_send_bandwidth,
+    )
     app.state.setup_bootstrap_token = None
     metrics = MetricsCollector()
     app.state.metrics = metrics

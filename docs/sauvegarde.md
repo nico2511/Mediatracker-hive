@@ -12,7 +12,14 @@ Gardez la même **`SECRET_KEY`** si vous restaurez une sauvegarde ou copiez `/co
 
 ## Depuis l’interface
 
-**Réglages → Disque et sauvegardes** : composant **Sauvegarde / restauration** de la base (export et import de fichier SQLite selon les actions exposées dans l’UI).
+**Réglages → Disque et sauvegardes** : composant **Sauvegarde / restauration** de la base.
+
+- **Liste** des copies automatiques et des copies de sécurité (avant réinitialisation ou restauration).
+- **Télécharger** : enregistre le fichier `.db` sur votre appareil (sauvegardes quotidiennes ou copies de sécurité).
+- **Importer** : envoi d’un fichier `.db` ; l’application l’enregistre dans `backups/` puis ouvre le même flux qu’une restauration (aperçu : version, schéma, nombre de fiches, compatibilité).
+- **Restaurer** : confirmation explicite ; une copie de sécurité de la base courante est créée avant remplacement. Après succès, rechargement de l’application.
+
+Les sauvegardes dont le nom commence par `import-` proviennent d’un import manuel. Gardez la **`SECRET_KEY`** de l’instance d’origine si la base contient des secrets chiffrés ; l’identité **Hive** est conservée telle quelle dans le fichier importé.
 
 ## Réinitialiser la base
 

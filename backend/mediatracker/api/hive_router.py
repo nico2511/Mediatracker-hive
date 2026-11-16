@@ -37,7 +37,8 @@ from mediatracker.hive.peer_join import process_peer_join_preview, process_peer_
 from mediatracker.hive.peer_rate_limit import PeerRateLimited
 from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
 from mediatracker.hive.signal_requests import try_auto_accept_incoming
-from mediatracker.hive.transfer_bandwidth import TransferBandwidthDenied
+from mediatracker.hive.transfer_bandwidth import TransferBandwidthDenied, TransferBandwidthLimiter
+from mediatracker.hive.transfer_load import build_local_load_snapshot, ingest_peer_load
 from mediatracker.hive.transfer_parallel import TransferParallelGate
 from mediatracker.hive.transfer_policy import TransferQuotaExceeded, TransferWindowClosed
 from mediatracker.hive.transfer_settings import in_transfer_window, transfer_parallel_limit
@@ -332,26 +333,43 @@ def mount_hive_router(app) -> None:
             )
             _enforce_peer_rate(request, ctx.hive_id)
             record_reachability(session, ruche_id=ruche_id, origin_id=ctx.hive_id, now=now)
+            if doc.get("load") is not None:
+                ingest_peer_load(
+                    session,
+                    ruche_id=ruche_id,
+                    origin_instance_id=ctx.hive_id,
+                    load=doc.get("load"),
+                    now=now,
+                )
             ingest_signed_entries(session, ruche_id=ruche_id, items=entries_in, now=now)
             ingest_signed_signals(session, ruche_id=ruche_id, items=signals_in, now=now)
             settings = request.app.state.settings
             try_auto_accept_incoming(session, settings, ruche_id=ruche_id, now=now)
             our_vector = version_vector_for_ruche(session, ruche_id)
             our_signal_vector = signal_version_vector_for_ruche(session, ruche_id)
+            parallel_gate = getattr(request.app.state, "hive_transfer_parallel", None)
+            send_bandwidth = getattr(request.app.state, "hive_send_bandwidth", None)
+            our_load = build_local_load_snapshot(
+                session,
+                now,
+                parallel_gate=parallel_gate if isinstance(parallel_gate, TransferParallelGate) else None,
+                send_bandwidth=send_bandwidth if isinstance(send_bandwidth, TransferBandwidthLimiter) else None,
+            )
             if is_hint:
                 session.commit()
-                return JSONResponse(
-                    {
-                        "vector": our_vector,
-                        "entries": [],
-                        "has_more": False,
-                        "cursor": None,
-                        "signal_vector": our_signal_vector,
-                        "signals": [],
-                        "signal_has_more": False,
-                        "signal_cursor": None,
-                    }
-                )
+                hint_body: dict[str, object] = {
+                    "vector": our_vector,
+                    "entries": [],
+                    "has_more": False,
+                    "cursor": None,
+                    "signal_vector": our_signal_vector,
+                    "signals": [],
+                    "signal_has_more": False,
+                    "signal_cursor": None,
+                }
+                if our_load is not None:
+                    hint_body["load"] = our_load
+                return JSONResponse(hint_body)
             page = entries_page_for_peer(
                 session, ruche_id=ruche_id, peer_vector=vector, limit=limit, cursor=page_cursor
             )
@@ -363,18 +381,19 @@ def mount_hive_router(app) -> None:
                 cursor=signal_page_cursor,
             )
             session.commit()
-            return JSONResponse(
-                {
-                    "vector": our_vector,
-                    "entries": page.entries,
-                    "has_more": page.has_more,
-                    "cursor": page.cursor,
-                    "signal_vector": our_signal_vector,
-                    "signals": sig_page.entries,
-                    "signal_has_more": sig_page.has_more,
-                    "signal_cursor": sig_page.cursor,
-                }
-            )
+            sync_body: dict[str, object] = {
+                "vector": our_vector,
+                "entries": page.entries,
+                "has_more": page.has_more,
+                "cursor": page.cursor,
+                "signal_vector": our_signal_vector,
+                "signals": sig_page.entries,
+                "signal_has_more": sig_page.has_more,
+                "signal_cursor": sig_page.cursor,
+            }
+            if our_load is not None:
+                sync_body["load"] = our_load
+            return JSONResponse(sync_body)
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()

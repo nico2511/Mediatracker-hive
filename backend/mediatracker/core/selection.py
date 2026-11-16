@@ -8,7 +8,10 @@ DEFAULT_LANGUAGE = "VFF"
 # tuple is only the fallback when that registry has no download source yet.
 DOWNLOAD_SOURCES = ("wawacity", "comet")
 LEGACY_DOWNLOAD_SOURCE_ORDER = "wawacity,comet"
-DEFAULT_DOWNLOAD_SOURCE_ORDER = "wawacity,free_telecharger,hive,comet,torrentio"
+DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS = (
+    "wawacity,free_telecharger,hive,comet,torrentio,uwuplus,stremio_addons"
+)
+DEFAULT_DOWNLOAD_SOURCE_ORDER = "wawacity,free_telecharger,hive,comet,torrentio,stremio_addons"
 DEFAULT_HOSTER_PREFERENCE: tuple[str, ...] = (
     "rapidgator",
     "turbobit",
@@ -75,7 +78,8 @@ def ensure_1fichier_last(items: list[str]) -> list[str]:
     return head + [HOSTER_LAST]
 
 
-def parse_hoster_preference(raw: str) -> list[str]:
+def parse_hoster_preference(raw: str, *, allowed: frozenset[str] | None = None) -> list[str]:
+    known = allowed if allowed is not None else KNOWN_HOSTERS
     items = []
     for part in raw.split(","):
         name = part.strip().lower()
@@ -83,7 +87,7 @@ def parse_hoster_preference(raw: str) -> list[str]:
             continue
         if name in EXCLUDED_HOSTERS or name in BLOCKED_SOURCE_HOSTERS:
             raise ValueError(f"L'hébergeur « {name} » est exclu.")
-        if name not in KNOWN_HOSTERS:
+        if name not in known:
             raise ValueError(f"Hébergeur inconnu : {name}.")
         if name not in items:
             items.append(name)

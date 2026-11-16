@@ -69,7 +69,7 @@ def test_probe_download_sources_allows_concurrent_write_during_network(client, a
         try:
             when = datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc)
             rows_holder.extend(
-                probe_download_sources(db, app.state.settings, target, now=when, sources=["wawacity", "comet"])
+                probe_download_sources(db, app.state.settings, target, now=when, sources=["wawacity", "comet"]).results
             )
             db.commit()
         except Exception as exc:

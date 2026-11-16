@@ -1,0 +1,63 @@
+{
+  "streams": [
+    {
+      "url": "https://uwu-fictif.example/resolve-stream/video.mkv?url=aHR0cHM6Ly9kZWJyaWRldXItZXhlbXBsZS50ZXN0L2YvUlBJRDEx",
+      "externalUrl": "https://debrideur-exemple.test/f/RGRID11",
+      "name": "⚡[AD]\n📦 📺1080p\n🇫🇷 MULTI",
+      "title": "📄 Labo.Demo.2026.VFF.MULTI.WEB.x264\n📦 Hébergeur : Rapidgator  📺 1080p",
+      "description": "📄 Labo.Demo.2026.VFF.MULTI.WEB.x264\n📦 Hébergeur : Rapidgator  📺 1080p",
+      "behaviorHints": {
+        "videoSize": 2000000000,
+        "filename": "Labo.Demo.2026.VFF.MULTI.WEB.x264.1080p",
+        "notWebReady": true
+      }
+    },
+    {
+      "url": "https://uwu-fictif.example/resolve-stream/video.mkv?url=aHR0cHM6Ly9kZWJyaWRldXItZXhlbXBsZS50ZXN0L2YvT0YxRklM",
+      "externalUrl": "https://debrideur-exemple.test/f/OF1FIL",
+      "name": "⚡[AD]\n📦 📺4K",
+      "title": "📄 Labo.Demo.2026.VFF.MULTI.BluRay.x265\n📦 Hébergeur : 1Fichier  📺 4K",
+      "description": "📄 Labo.Demo.2026.VFF.MULTI.BluRay.x265\n📦 Hébergeur : 1Fichier  📺 4K",
+      "behaviorHints": {
+        "videoSize": 3000000000,
+        "filename": "Labo.Demo.2026.VFF.MULTI.BluRay.x265.4K",
+        "notWebReady": true
+      }
+    },
+    {
+      "url": "https://uwu-fictif.example/resolve-stream/video.mkv?url=aHR0cHM6Ly9kZWJyaWRldXItZXhlbXBsZS50ZXN0L2YvVVBUT04",
+      "externalUrl": "https://debrideur-exemple.test/f/UPTOX",
+      "name": "⚡[AD]",
+      "title": "📦 Hébergeur : Uptobox",
+      "description": "📄 Labo.Demo.2026.CAM\n📦 Hébergeur : Uptobox",
+      "behaviorHints": {
+        "filename": "Labo.Demo.2026.CAM.mkv",
+        "notWebReady": true
+      }
+    },
+    {
+      "url": "https://uwu-fictif.example/mp4-proxy/aHR0cHM6Ly9sZWN0ZXVyLmV4YW1wbGUvcGxheWVyL3N0cmVhbS5ta3Y/stream.mkv",
+      "name": "✨[WEB]\n📺1080p",
+      "title": "📄 Labo Démo\n▶️  Lecteur MP4 : Serveur Direct",
+      "behaviorHints": {
+        "videoSize": 1000000000
+      }
+    },
+    {
+      "url": "https://uwu-fictif.example/resolve-stream/stream.m3u8?url=aHR0cHM6Ly9oc3MuZXhlbXBsZS9wbGF5bGlzdC5tM3U4",
+      "name": "✨[WEB]\n📺720p",
+      "title": "▶️  Lecteur HLS : Exemple",
+      "behaviorHints": {
+        "videoSize": 800000000
+      }
+    },
+    {
+      "url": "https://uwu-fictif.example/stream-action/rescrape/movie/tt0000101",
+      "name": "UwU+\n🔄 Rescraper",
+      "title": "Relancer la recherche",
+      "behaviorHints": {
+        "filename": "rescrape.webm"
+      }
+    }
+  ]
+}

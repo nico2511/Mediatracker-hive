@@ -13,6 +13,12 @@ import { mediaKind } from "../labels";
 import { mediaBadge, mediaOnDisk, mediaWaiting } from "../mediaDisplay";
 import { useHiveEnabled } from "../composables/useHive";
 import { hiveBadgesFromMediaSummary, type HiveMediaSummary } from "../hive/hiveBadges";
+import {
+  fetchHiveMediaSummaries,
+  HIVE_MEDIA_SUMMARY_LIMIT,
+  releaseLoadingThenRefreshHive,
+} from "../media/hiveMediaSummaries";
+import { tmdbBackdropSrc, tmdbPosterSrc } from "../tmdbImages";
 import type { QuickTarget } from "../quick";
 
 const DENSITY_STORAGE_KEY = "mediatracker.medias.density.v2";
@@ -77,6 +83,7 @@ const originFilter = ref<OriginFilter>("all");
 const density = ref<Density>("airy");
 const mobileFiltersOpen = ref(false);
 let reloadGeneration = 0;
+let hiveSummaryGeneration = 0;
 
 function formatCount(count: number, singular: string, plural: string): string {
   return `${count} ${count <= 1 ? singular : plural}`;
@@ -244,6 +251,15 @@ const activeFilterChips = computed(() => {
   return chips;
 });
 
+const featuredHeroStyle = computed((): Record<string, string> | undefined => {
+  const item = featured.value;
+  if (!item) {
+    return undefined;
+  }
+  const url = tmdbBackdropSrc(item.backdrop_url) ?? tmdbPosterSrc(item.poster_url);
+  return url ? { "--hero-backdrop": `url(${url})` } : undefined;
+});
+
 const featured = computed(() => {
   if (!visible.value.length) {
     return null;
@@ -334,23 +350,38 @@ watch(density, (value) => {
   persistDensity(value);
 });
 
-async function refreshHiveSummaries() {
+async function refreshHiveSummaries(parentGeneration = reloadGeneration) {
   if (!hiveEnabled.value || !items.value.length) {
     hiveSummaries.value = {};
     return;
   }
-  const next: Record<number, HiveMediaSummary> = {};
-  await Promise.all(
-    items.value.slice(0, 80).map(async (row) => {
-      try {
-        next[row.id] = await api<HiveMediaSummary>(`/api/v1/hive/media/${row.id}/sharing-summary`);
-      } catch {
-        // ignore per-item failures
-      }
-    }),
-  );
-  hiveSummaries.value = next;
+  const generation = ++hiveSummaryGeneration;
+  const mediaIds = visible.value.slice(0, HIVE_MEDIA_SUMMARY_LIMIT).map((row) => row.id);
+  try {
+    const next = await fetchHiveMediaSummaries(api, mediaIds);
+    if (generation !== hiveSummaryGeneration || parentGeneration !== reloadGeneration) {
+      return;
+    }
+    hiveSummaries.value = next;
+  } catch {
+    if (generation !== hiveSummaryGeneration || parentGeneration !== reloadGeneration) {
+      return;
+    }
+  }
 }
+
+const visibleSummaryKey = computed(() =>
+  visible.value
+    .slice(0, HIVE_MEDIA_SUMMARY_LIMIT)
+    .map((row) => row.id)
+    .join(","),
+);
+
+watch(visibleSummaryKey, () => {
+  if (hiveEnabled.value && items.value.length) {
+    void refreshHiveSummaries();
+  }
+});
 
 function hiveListBadges(mediaId: number) {
   return hiveBadgesFromMediaSummary(hiveSummaries.value[mediaId]);
@@ -379,7 +410,13 @@ async function reload() {
     items.value = all;
     saveMediaListSnapshot({ items: all });
     cacheNote.value = "";
-    await refreshHiveSummaries();
+    await releaseLoadingThenRefreshHive(
+      (value) => {
+        loading.value = value;
+      },
+      () => refreshHiveSummaries(generation),
+    );
+    return;
   } catch (err) {
     if (generation !== reloadGeneration) {
       return;
@@ -436,7 +473,7 @@ onMounted(async () => {
     <article
       v-if="featured"
       class="media-library-hero"
-      :style="featured.backdrop_url ? { '--hero-backdrop': `url(${featured.backdrop_url})` } : undefined"
+      :style="featuredHeroStyle"
     >
       <div class="media-library-hero-copy">
         <p class="hint media-library-hero-kicker">À la une</p>

@@ -1,0 +1,23 @@
+{
+  "streams": [
+    {
+      "externalUrl": "https://debrideur-exemple.test/f/DDLONE",
+      "url": "https://addon-fictif.example/resolve-stream/fiction.mkv",
+      "name": "⚡[AD]",
+      "description": "📦 Hébergeur : Rapidgator",
+      "behaviorHints": {
+        "filename": "Fiction.Labo.2026.MULTI.1080p.WEB.mkv",
+        "notWebReady": true
+      }
+    },
+    {
+      "description": "📦 Hébergeur : Uptobox",
+      "behaviorHints": { "filename": "Fiction.Labo.2026.1080p.mkv" },
+      "url": "https://addon-fictif.example/resolve-stream/f.mkv?url=aHR0cHM6Ly9kZWJyaWRldXItZXhlbXBsZS50ZXN0L2YvVVBU"
+    },
+    {
+      "name": "📄 Aucun flux disponible",
+      "title": "Aucune source trouvée"
+    }
+  ]
+}

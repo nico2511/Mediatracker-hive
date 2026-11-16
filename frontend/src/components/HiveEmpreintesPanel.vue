@@ -15,6 +15,10 @@ const props = defineProps<{
   season?: number | null;
   hiveEnabled: boolean;
   openSignal?: number;
+  /** Contenu affiché dans le dépliant « Empreintes et aide » du bloc Hive (sans <details> propre). */
+  embedded?: boolean;
+  /** Charge les données quand le dépliant parent est ouvert (mode embedded). */
+  active?: boolean;
 }>();
 
 const emit = defineEmits<{ update: [] }>();
@@ -43,9 +47,16 @@ function stopPoll() {
   }
 }
 
+function pollAllowed(): boolean {
+  if (props.embedded) {
+    return Boolean(props.active);
+  }
+  return panelOpen.value;
+}
+
 function startPoll() {
   stopPoll();
-  if (!panelOpen.value) {
+  if (!pollAllowed()) {
     return;
   }
   pollTimer = setInterval(() => void load({ quiet: true }), POLL_MS);
@@ -72,9 +83,27 @@ async function load(opts?: { quiet?: boolean }) {
 watch(
   () => props.openSignal,
   () => {
+    if (props.embedded) {
+      return;
+    }
     panelOpen.value = true;
     void load();
     startPoll();
+  },
+);
+
+watch(
+  () => props.active,
+  (isActive) => {
+    if (!props.embedded) {
+      return;
+    }
+    if (isActive) {
+      void load();
+      startPoll();
+    } else {
+      stopPoll();
+    }
   },
 );
 
@@ -152,6 +181,17 @@ const summaryLine = computed(() => {
   return `${ready_count} prêtes · ${pending_count} en attente ou à contrôler`;
 });
 
+const empreintesTeaser = computed(() => {
+  if (!data.value?.total) {
+    return "Aucun fichier à empreindre pour l'instant.";
+  }
+  const ready = data.value.ready_count;
+  if (ready > 0) {
+    return `${ready} fichier${ready > 1 ? "s" : ""} avec empreinte à jour.`;
+  }
+  return summaryLine.value;
+});
+
 function chunkLine(row: EmpreintesPage["rows"][number]): string {
   if (row.chunk_progress_pct != null && row.chunk_state === "calculating") {
     return `${row.chunk_detail} (${row.chunk_progress_pct} %)`;
@@ -161,7 +201,13 @@ function chunkLine(row: EmpreintesPage["rows"][number]): string {
 </script>
 
 <template>
-  <details v-if="hiveEnabled" class="hive-empreintes panel" :open="panelOpen" @toggle="onToggle">
+  <details
+    v-if="hiveEnabled && !embedded"
+    class="hive-empreintes panel"
+    :open="panelOpen"
+    data-testid="hive-empreintes-standalone"
+    @toggle="onToggle"
+  >
     <summary>Détails des empreintes</summary>
     <p class="hint">
       Empreinte fichier (SHA catalogue pour les réceptions Hive). Les morceaux 16&nbsp;Mio ne sont plus
@@ -193,6 +239,44 @@ function chunkLine(row: EmpreintesPage["rows"][number]): string {
     </div>
     <p v-if="!hasReadableFiles && data" class="hint">Aucun fichier local : actions d’empreintes indisponibles.</p>
   </details>
+
+  <div
+    v-else-if="hiveEnabled && embedded"
+    class="hive-empreintes-embedded"
+    data-testid="hive-empreintes-embedded"
+  >
+    <p v-if="active || data" class="hint hive-empreintes-teaser">{{ empreintesTeaser }}</p>
+    <template v-if="active">
+      <p class="hint">
+        Empreinte fichier (SHA catalogue pour les réceptions Hive). Les morceaux 16&nbsp;Mio ne sont plus
+        calculés ni exigés pour les transferts. Vérifier contrôle la cohérence des métadonnées en base
+        — pas une certification du disque.
+      </p>
+      <p v-if="recalcNote" class="hint">{{ recalcNote }}</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <ul v-if="data?.rows.length" class="hive-empreintes-list">
+        <li v-for="row in data.rows" :key="row.media_item_id" class="row sp">
+          <span class="slot">{{ row.slot_label }}</span>
+          <span class="hint file-col">{{ row.file_detail }}</span>
+          <span class="hint chunk-col">{{ chunkLine(row) }}</span>
+          <span class="pill" :class="empreintePhaseClass(row.phase)">{{ empreintePhaseLabel(row.phase) }}</span>
+        </li>
+      </ul>
+      <p class="hint">Le calcul lit le disque. Les fichiers ne sont pas modifiés.</p>
+      <div class="row wrap hive-empreintes-actions">
+        <button type="button" class="btn" :disabled="busy || !hasReadableFiles" @click="verify">Vérifier</button>
+        <button
+          type="button"
+          class="btn outline-honey"
+          :disabled="busy || !hasReadableFiles"
+          @click="confirmRecalc = true"
+        >
+          Recalculer…
+        </button>
+      </div>
+      <p v-if="!hasReadableFiles && data" class="hint">Aucun fichier local : actions d’empreintes indisponibles.</p>
+    </template>
+  </div>
 
   <Teleport to="body">
     <div

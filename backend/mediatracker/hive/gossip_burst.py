@@ -130,11 +130,16 @@ def hive_gossip_burst_tick(
         peers = public_peer_targets(
             db, ruche_id=rid, self_instance_id=instance_id, count=2, rng=rng
         )
-        for _, base_url in peers:
-            target = PeerExchangeTarget(ruche_id=rid, peer_base_url=base_url)
+        for member_id, base_url in peers:
+            target = PeerExchangeTarget(ruche_id=rid, peer_base_url=base_url, peer_instance_id=member_id)
             try:
                 send_gossip_hint_to_peer(
-                    db, settings, ruche_id=rid, peer_base_url=base_url, now=moment
+                    db,
+                    settings,
+                    ruche_id=rid,
+                    peer_base_url=base_url,
+                    now=moment,
+                    peer_instance_id=member_id,
                 )
                 sent += 1
                 if on_hint_sent is not None:

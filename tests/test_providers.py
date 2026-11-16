@@ -16,7 +16,17 @@ def test_builtin_providers_and_masked_key(client):
     login(client)
     listed = client.get("/api/v1/providers").json()
     types = {item["type"] for item in listed["items"]}
-    assert types == {"manual", "wawacity", "free_telecharger", "comet", "torrentio", "alldebrid", "aria2", "hive"}
+    assert types == {
+        "manual",
+        "wawacity",
+        "free_telecharger",
+        "comet",
+        "torrentio",
+        "stremio_addons",
+        "alldebrid",
+        "aria2",
+        "hive",
+    }
     manual = next(item for item in listed["items"] if item["type"] == "manual")
     health = client.get(f"/api/v1/providers/{manual['id']}/health")
     assert health.status_code == 200

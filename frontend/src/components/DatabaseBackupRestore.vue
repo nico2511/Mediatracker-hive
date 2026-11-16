@@ -28,6 +28,7 @@ interface BackupPreview {
   fiches_delta: number;
   restorable: boolean;
   schema_relation: string;
+  imported?: boolean;
 }
 
 interface RestoreReport {
@@ -56,6 +57,9 @@ const confirmChecked = ref(false);
 const restoreError = ref("");
 const successReport = ref<RestoreReport | null>(null);
 const installedVersion = ref("");
+const importBusy = ref(false);
+const importError = ref("");
+const importInput = ref<HTMLInputElement | null>(null);
 
 const visibleBackups = computed(() => (showAll.value ? backups.value : backups.value.slice(0, 3)));
 const visibleSafety = computed(() =>
@@ -126,6 +130,22 @@ const fichesDeltaLine = computed(() => {
 
 const schemaBlocked = computed(() => preview.value && !preview.value.restorable);
 
+const isImportedPreview = computed(() => Boolean(preview.value?.imported));
+
+const importKeyWarning = computed(() => {
+  if (!isImportedPreview.value) {
+    return "";
+  }
+  return "Clés chiffrées par la SECRET_KEY de l'instance.";
+});
+
+const importHiveWarning = computed(() => {
+  if (!isImportedPreview.value) {
+    return "";
+  }
+  return "Identité Hive conservée.";
+});
+
 const canSubmitRestore = computed(
   () => preview.value?.restorable && confirmChecked.value && dialogPhase.value === "preview",
 );
@@ -155,6 +175,81 @@ function backupListTitle(createdAt: string): string {
 
 function isResetBackup(name: string): boolean {
   return name.includes("-reset-");
+}
+
+function isImportedBackup(name: string): boolean {
+  return name.startsWith("import-");
+}
+
+function downloadUrl(row: BackupRow, safety: boolean): string {
+  const encoded = encodeURIComponent(row.name);
+  return safety
+    ? `/api/v1/maintenance/backups/safety/${encoded}/download`
+    : `/api/v1/maintenance/backups/${encoded}/download`;
+}
+
+async function downloadBackup(row: BackupRow, safety: boolean) {
+  listError.value = "";
+  try {
+    const response = await fetch(downloadUrl(row, safety), { credentials: "include" });
+    if (!response.ok) {
+      let message = "Téléchargement impossible.";
+      try {
+        const body = await response.json();
+        if (body && typeof body.detail === "string" && body.detail.trim()) {
+          message = body.detail;
+        }
+      } catch {
+        /* corps vide */
+      }
+      listError.value = message;
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = row.name;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    if (err instanceof ApiError) {
+      listError.value = err.message;
+    } else {
+      listError.value = userFacingApiError(err, "Téléchargement impossible.");
+    }
+  }
+}
+
+function triggerImport() {
+  importError.value = "";
+  importInput.value?.click();
+}
+
+async function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) {
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".db")) {
+    importError.value = "Choisissez un fichier .db.";
+    return;
+  }
+  importBusy.value = true;
+  importError.value = "";
+  try {
+    const body = new FormData();
+    body.append("file", file);
+    const row = await api<BackupRow>("/api/v1/maintenance/backups/import", { method: "POST", body });
+    await loadLists();
+    await openRestore(row, false);
+  } catch (err) {
+    importError.value = userFacingApiError(err, "Import refusé.");
+  } finally {
+    importBusy.value = false;
+  }
 }
 
 function restorePath(safety: boolean): string {
@@ -286,6 +381,20 @@ onBeforeUnmount(() => {
       Restaurer remplace la base actuelle. Celle-ci est d'abord mise de côté dans
       <code>backups/safety/</code>, jamais supprimée.
     </p>
+    <div class="import-row">
+      <button type="button" class="primary" :disabled="importBusy" @click="triggerImport">
+        {{ importBusy ? "Import en cours…" : "Importer une sauvegarde" }}
+      </button>
+      <span class="hint">Fichier <code>.db</code> — l'aperçu s'ouvre avant toute restauration.</span>
+    </div>
+    <input
+      ref="importInput"
+      type="file"
+      accept=".db,application/octet-stream"
+      class="sr-only"
+      @change="onImportFile"
+    />
+    <p v-if="importError" class="error">{{ importError }}</p>
     <p v-if="listError" class="error">{{ listError }}</p>
     <div v-if="backups.length" class="bklist" role="list">
       <div v-for="row in visibleBackups" :key="row.name" class="bk" role="listitem">
@@ -293,17 +402,26 @@ onBeforeUnmount(() => {
           <div class="t">
             {{ backupListTitle(row.created_at) }}
             <span v-if="isResetBackup(row.name)" class="tag">avant réinitialisation</span>
+            <span v-if="isImportedBackup(row.name)" class="tag">importée</span>
           </div>
           <div class="m">{{ formatBytes(row.size_bytes) }}</div>
         </div>
-        <button
-          type="button"
-          class="restore-link"
-          :aria-label="`Restaurer la sauvegarde du ${backupListTitle(row.created_at)}`"
-          @click="openRestore(row, false)"
-        >
-          Restaurer…
-        </button>
+        <div class="bk-acts">
+          <button
+            type="button"
+            :aria-label="`Télécharger la sauvegarde du ${backupListTitle(row.created_at)}`"
+            @click="downloadBackup(row, false)"
+          >
+            Télécharger
+          </button>
+          <button
+            type="button"
+            :aria-label="`Restaurer la sauvegarde du ${backupListTitle(row.created_at)}`"
+            @click="openRestore(row, false)"
+          >
+            Restaurer…
+          </button>
+        </div>
       </div>
     </div>
     <p v-else-if="!listError" class="hint">Aucune sauvegarde pour l'instant.</p>
@@ -327,14 +445,22 @@ onBeforeUnmount(() => {
             <div class="t">{{ backupListTitle(row.created_at) }}</div>
             <div class="m">{{ formatBytes(row.size_bytes) }}</div>
           </div>
-          <button
-            type="button"
-            class="restore-link"
-            :aria-label="`Restaurer la copie de sécurité du ${backupListTitle(row.created_at)}`"
-            @click="openRestore(row, true)"
-          >
-            Restaurer…
-          </button>
+          <div class="bk-acts">
+            <button
+              type="button"
+              :aria-label="`Télécharger la copie de sécurité du ${backupListTitle(row.created_at)}`"
+              @click="downloadBackup(row, true)"
+            >
+              Télécharger
+            </button>
+            <button
+              type="button"
+              :aria-label="`Restaurer la copie de sécurité du ${backupListTitle(row.created_at)}`"
+              @click="openRestore(row, true)"
+            >
+              Restaurer…
+            </button>
+          </div>
         </div>
       </div>
       <p v-else class="hint">Aucune copie de sécurité.</p>
@@ -449,11 +575,23 @@ onBeforeUnmount(() => {
               secondes, 1 min au plus).
             </li>
           </ul>
-          <p class="keyw">
+          <p v-if="isImportedPreview" class="keyw">
+            <span
+              ><b>{{ importKeyWarning }}</b> Si cette sauvegarde vient d'une autre instance, les clés (Jellyfin,
+              AllDebrid, notifications…) seront illisibles : il faudra les ressaisir.</span
+            >
+          </p>
+          <p v-else class="keyw">
             <span
               ><b>Même SECRET_KEY obligatoire.</b> Les clés des services (Jellyfin, AllDebrid, notifications…)
               sont chiffrées avec la <code>SECRET_KEY</code> du serveur. Si elle a changé depuis cette sauvegarde,
               elles seront illisibles et devront être ressaisies.</span
+            >
+          </p>
+          <p v-if="isImportedPreview" class="hive-keep">
+            <span
+              ><b>{{ importHiveWarning }}</b> L'import garde l'identité Hive de l'instance qui reçoit, pour ne pas
+              faire doublon dans la ruche.</span
             >
           </p>
           <p v-if="schemaBlocked" class="blocked">

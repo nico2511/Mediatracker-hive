@@ -21,6 +21,9 @@ _FILENAME = re.compile(
 _SAFETY_FILENAME = re.compile(
     r"^mediatracker-(?P<date>\d{8})-before-restore-(?P<time>\d{6})\.db$",
 )
+_IMPORT_FILENAME = re.compile(
+    r"^import-(?P<date>\d{8})-(?P<time>\d{6})(?:-(?P<suffix>\d+))?\.db$",
+)
 _APP_VERSION_KEY = "system.app_version"
 
 
@@ -47,6 +50,7 @@ class BackupPreview:
     fiches_delta: int
     restorable: bool
     schema_relation: str
+    imported: bool
 
 
 def backups_root(settings: Settings) -> Path:
@@ -76,11 +80,17 @@ def list_backups(settings: Settings) -> list[BackupSummary]:
     root = backups_root(settings)
     root.mkdir(parents=True, exist_ok=True)
     rows: list[BackupSummary] = []
-    for path in sorted(root.glob("mediatracker-*.db"), key=lambda item: item.name, reverse=True):
-        if not path.is_file() or not _filename_allowed(path.name, safety=False):
-            continue
-        created = _created_at(path)
-        rows.append(BackupSummary(name=path.name, created_at=created, size_bytes=path.stat().st_size))
+    names: set[str] = set()
+    for pattern in ("mediatracker-*.db", "import-*.db"):
+        for path in root.glob(pattern):
+            if not path.is_file() or path.name in names:
+                continue
+            if not _filename_allowed(path.name, safety=False):
+                continue
+            names.add(path.name)
+            created = _created_at(path)
+            rows.append(BackupSummary(name=path.name, created_at=created, size_bytes=path.stat().st_size))
+    rows.sort(key=lambda item: item.created_at, reverse=True)
     return rows
 
 
@@ -117,7 +127,26 @@ def preview_backup(
         fiches_delta=fiches - current_fiches,
         restorable=relation != "newer",
         schema_relation=relation,
+        imported=is_import_backup_name(path.name),
     )
+
+
+def is_import_backup_name(name: str) -> bool:
+    return _IMPORT_FILENAME.fullmatch(name) is not None
+
+
+def allocate_import_filename(dest_dir: Path, moment: datetime) -> str:
+    """Nom catalogue unique pour un import (suffixe -2, -3… si collision)."""
+    stamp = moment.strftime("%Y%m%d-%H%M%S")
+    base = f"import-{stamp}.db"
+    if not (dest_dir / base).exists():
+        return base
+    suffix = 2
+    while True:
+        candidate = f"import-{stamp}-{suffix}.db"
+        if not (dest_dir / candidate).exists():
+            return candidate
+        suffix += 1
 
 
 def count_fiches(database_url: str) -> int:
@@ -155,7 +184,7 @@ def schema_relation(backup_revision: str | None) -> str:
 def _filename_allowed(name: str, *, safety: bool) -> bool:
     if safety:
         return _SAFETY_FILENAME.fullmatch(name) is not None
-    return _FILENAME.fullmatch(name) is not None
+    return _FILENAME.fullmatch(name) is not None or _IMPORT_FILENAME.fullmatch(name) is not None
 
 
 def _read_backup_meta(path: Path) -> dict[str, object]:
@@ -198,7 +227,11 @@ def _fiche_count(conn: sqlite3.Connection) -> int:
 
 
 def _created_at(path: Path) -> datetime:
-    match = _FILENAME.fullmatch(path.name) or _SAFETY_FILENAME.fullmatch(path.name)
+    match = (
+        _FILENAME.fullmatch(path.name)
+        or _SAFETY_FILENAME.fullmatch(path.name)
+        or _IMPORT_FILENAME.fullmatch(path.name)
+    )
     if match:
         stamp = f"{match.group('date')}{match.group('time')}"
         try:

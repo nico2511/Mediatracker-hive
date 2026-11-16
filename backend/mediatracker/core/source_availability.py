@@ -14,7 +14,9 @@ from mediatracker.config import Settings
 from mediatracker.hive.identity import hive_enabled_in_db
 from mediatracker.integrations.alldebrid_account import is_connected
 
-ALLDEBRID_GATED_SOURCES = frozenset({"wawacity", "free_telecharger", "comet", "torrentio"})
+ALLDEBRID_GATED_SOURCES = frozenset(
+    {"wawacity", "free_telecharger", "comet", "torrentio", "stremio_addons"}
+)
 DOWNLOAD_BLOCKED_MESSAGE = "Renseigne ta clé AllDebrid ou active Hive pour télécharger"
 DOWNLOAD_BLOCKED_CODE = "DOWNLOAD_SOURCES_UNAVAILABLE"
 _ALLDEBRID_UNCONFIGURED = "AllDebrid non configuré (clé API ou liaison PIN)."

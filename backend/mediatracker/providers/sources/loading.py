@@ -179,14 +179,20 @@ def source_base_url(db: Session, settings: Settings, type_name: str) -> str:
 
         urls = resolve_comet_base_urls(db, settings)
         return urls[0] if urls else ""
+    if type_name == "stremio_addons":
+        from mediatracker.providers.sources.stremio_addons_config import enabled_stremio_addons
+
+        entries = enabled_stremio_addons(db, settings)
+        return entries[0].url if entries else ""
     if type_name == "torrentio":
-        row = db.get(Setting, "torrentio_base_url")
+        key = f"{type_name}_base_url"
+        row = db.get(Setting, key)
         if row is not None:
             return (row.value or "").strip().rstrip("/")
         provider = db.scalar(select(Provider).where(Provider.kind == "source", Provider.type == type_name))
         if provider is not None and isinstance(provider.config, dict) and "base_url" in provider.config:
             return str(provider.config.get("base_url") or "").strip().rstrip("/")
-        fallback = getattr(settings, "torrentio_base_url", None)
+        fallback = getattr(settings, key, None)
         if isinstance(fallback, str) and fallback.strip():
             return fallback.strip().rstrip("/")
         return ""
@@ -290,6 +296,7 @@ def episode_source(
     db: Session,
     base_url: str | None = None,
     base_urls: list[str] | None = None,
+    addons: list | None = None,
     transport=None,
 ):
     """Open a download-only source by capability. The catalog never calls this."""
@@ -301,6 +308,8 @@ def episode_source(
     entry = for_type(name)
     if entry is None or "episode" not in getattr(entry, "capabilities", frozenset()):
         return None
+    if addons is not None:
+        return entry.open_episode(settings, addons=addons, transport=transport)
     if base_urls is not None:
         return entry.open_episode(settings, base_urls=base_urls, transport=transport)
     return entry.open_episode(settings, base_url=base_url, transport=transport)

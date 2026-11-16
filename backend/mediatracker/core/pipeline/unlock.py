@@ -100,7 +100,9 @@ def _source_unavailable_reason(db: Session | None, settings: Settings, name: str
     return None
 
 
-_WAWACITY_OTHER_CATALOG_SOURCES = frozenset({"free_telecharger", "comet", "torrentio"})
+_WAWACITY_OTHER_CATALOG_SOURCES = frozenset(
+    {"free_telecharger", "comet", "torrentio", "stremio_addons"}
+)
 _HOSTER_LINK_KINDS = frozenset({"ddl_hoster", "ddl_protected", "direct"})
 
 
@@ -412,7 +414,18 @@ def _from_named_source(
         return _from_hive(db, row, item, media, settings, now, defer_final=defer_final)
     if "episode" in caps:
         return _from_episode_source(
-            db, row, item, media, now, debrid_row, debrid, settings, source_type=name, defer_final=defer_final
+            db,
+            row,
+            item,
+            media,
+            now,
+            preference,
+            debrid_row,
+            debrid,
+            settings,
+            known,
+            source_type=name,
+            defer_final=defer_final,
         )
     if "links" in caps:
         return _from_hosters(
@@ -498,9 +511,11 @@ def _from_episode_source(
     item: MediaItem,
     media: Media,
     now: datetime,
+    preference: list[str],
     debrid_row,
     debrid,
     settings: Settings,
+    known: list,
     *,
     source_type: str,
     defer_final: bool = False,
@@ -523,11 +538,28 @@ def _from_episode_source(
     from mediatracker.providers.sources.loading import episode_source, source_base_url
 
     comet_urls: list[str] | None = None
+    stremio_addons = None
     if source_type == "comet":
         comet_urls = resolve_comet_base_urls(db, settings)
         if not comet_urls:
             _journal_source_attempt(
                 db, row, media, item, source_type, issue="skipped", reason="Comet non configuré.", now=now
+            )
+            return None
+    elif source_type == "stremio_addons":
+        from mediatracker.providers.sources.stremio_addons_config import enabled_stremio_addons
+
+        stremio_addons = enabled_stremio_addons(db, settings)
+        if not stremio_addons:
+            _journal_source_attempt(
+                db,
+                row,
+                media,
+                item,
+                source_type,
+                issue="skipped",
+                reason="Aucun addon Stremio activé.",
+                now=now,
             )
             return None
     else:
@@ -556,6 +588,8 @@ def _from_episode_source(
 
     if comet_urls is not None:
         source = episode_source(source_type, settings, db=db, base_urls=comet_urls)
+    elif stremio_addons is not None:
+        source = episode_source(source_type, settings, db=db, addons=stremio_addons)
     else:
         source = episode_source(source_type, settings, db=db, base_url=base)
     if source is None:
@@ -746,6 +780,57 @@ def _from_episode_source(
             row.attempt_started_at = now
         _journal_source_attempt(db, row, media, item, source_type, issue="found", link_count=len(candidates), now=now)
         return (link, claimed.direct.url, filename, size, None)
+    for candidate in candidates:
+        if candidate.kind not in _HOSTER_LINK_KINDS:
+            continue
+        if not hoster_allowed(candidate.hoster, preference):
+            continue
+        _commit(db)
+        link = _store_source_link(db, item, candidate, now, source_type)
+        row.link_id = link.id
+        row.state = "resolving"
+        if row.attempt_started_at is None:
+            row.attempt_started_at = now
+        if debrid is None:
+            _schedule_retry(db, row, "NO_DEBRID", "Aucun débrideur actif.", now)
+            return "waiting"
+        if not _hoster_supported(debrid, link):
+            continue
+        try:
+            direct_url, filename, size, hoster_url = _unlock(debrid, link, known, preference)
+            bad = _probed_direct(direct_url, size or link.size)
+            if bad:
+                raise DebridError("LINK_NOT_VIDEO", bad, retryable=False)
+        except DebridError as exc:
+            if exc.code == "AUTH_BLOCKED":
+                _block_queue(db, debrid_row, now)
+                row.state = "pending"
+                row.error_code = "AUTH_BLOCKED"
+                row.error = AUTH_BLOCKED_MESSAGE
+                return "paused"
+            if exc.code == "ALREADY_PRESENT":
+                _cancel_present(db, row, now)
+                return "waiting"
+            if _switch_host(exc):
+                note_hoster_signal(
+                    link.hoster,
+                    up=False,
+                    message=french_error(exc.code, exc.message),
+                )
+                continue
+            if exc.retryable and exc.code not in _DEAD_LINK:
+                action = _schedule_retry(
+                    db, row, exc.code, french_error(exc.code, exc.message), now, defer_final=defer_final
+                )
+                if action == "exhausted":
+                    return None
+                return "waiting"
+            continue
+        if not direct_url:
+            continue
+        note_hoster_signal(link.hoster, up=True, message="Débridage réussi.")
+        _journal_source_attempt(db, row, media, item, source_type, issue="found", link_count=len(candidates), now=now)
+        return (link, direct_url, filename, size, hoster_url)
     if rejected:
         row.error_code = "DISCONTINUED"
         row.error = french_error("DISCONTINUED", row.error)
@@ -778,6 +863,8 @@ def _store_source_link(db: Session, item: MediaItem, candidate, now: datetime, s
         if not (existing.dead and _magnet_stays_dead(existing.last_error)):
             existing.dead = False
             existing.url = candidate.url
+            existing.kind = getattr(candidate, "kind", None) or existing.kind
+            existing.hoster = getattr(candidate, "hoster", None) or existing.hoster
             existing.filename = candidate.filename
             existing.quality = candidate.quality
             existing.language = candidate.language
@@ -785,11 +872,13 @@ def _store_source_link(db: Session, item: MediaItem, candidate, now: datetime, s
             existing.media_item_id = item.id
             existing.last_error = None
         return existing
+    kind = getattr(candidate, "kind", None) or "magnet"
     link = Link(
         media_item_id=item.id,
         provider_id=provider.id,
-        kind="magnet",
+        kind=kind,
         url=candidate.url,
+        hoster=getattr(candidate, "hoster", None),
         quality=candidate.quality,
         language=candidate.language,
         size=candidate.size,

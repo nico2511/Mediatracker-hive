@@ -10,6 +10,7 @@ flowchart LR
     H[Hive]
     C[Comet]
     T[Torrentio]
+    X[Addons Stremio]
   end
   subgraph mt [MediaTracker]
     S[Sélection lien / profil]
@@ -38,8 +39,11 @@ Identifiants dans l’UI (**Réglages → Sources**) :
 | `hive` | Pairs des ruches ; nécessite Hive activé et membre joignable |
 | `comet` | Instance(s) Comet (liste d’URLs, défaut public possible) |
 | `torrentio` | Torrentio / aimants |
+| `stremio_addons` | Une ou plusieurs URLs d’addons Stremio (torrents et liens débridables selon la réponse de l’addon ; sans clé dans l’URL) |
 
-Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio`. Au moins une source doit rester activée.
+Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio,stremio_addons`. Au moins une source doit rester activée.
+
+Une ancienne entrée dédiée aux flux DDL UwU+ est **migrée automatiquement** vers la liste **Addons Stremio** (même URL, une ligne d’addon).
 
 Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](reglages/sources.md)), ordre des **hébergeurs** (`hoster_preference`).
 
@@ -63,7 +67,7 @@ Lorsque plusieurs sources ont été essayées dans le même passage, le message 
 
 ## Hive dans la file Download
 
-Depuis la standardisation LOT4, un téléchargement Hive passe par la **même file** qu’un lien AllDebrid : octroi pair (`fetch-grant`) et téléchargement HTTP via aria2 avec en-têtes dédiés — **pas** d’onglet « transferts » séparé ni de `HiveTransferJob` actif. Détails : [Hive](hive.md).
+Un téléchargement Hive passe par la **même file** qu’un lien AllDebrid : octroi pair (`fetch-grant`) et téléchargement HTTP via aria2 avec en-têtes dédiés — **pas** d’écran de transferts séparé. Lorsque plusieurs pairs proposent le même fichier, le choix tient compte de la **charge** signalée par les pairs et du débit mesuré ; en cas de pair occupé, repli vers un autre pair ou la source suivante. Détails : [Hive](hive.md).
 
 ## AllDebrid
 

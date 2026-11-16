@@ -19,10 +19,13 @@ from mediatracker.maintenance.backup_hive_identity import (
     BackupHiveIdentityError,
     apply_hive_identity_bundle,
     read_hive_identity_bundle,
+    reapply_receiver_hive_after_import_on_disk,
+    snapshot_hive_settings,
     strip_hive_identity_bundle_from_live,
 )
 from mediatracker.maintenance.restore_catalog import (
     BackupCatalogError,
+    is_import_backup_name,
     preview_backup,
     resolve_backup_file,
     safety_root,
@@ -83,6 +86,9 @@ def restore_database(
             "Le schéma de la sauvegarde est plus récent que cette version de l'application.",
         )
 
+    is_import = not safety and is_import_backup_name(name)
+    hive_settings = snapshot_hive_settings(db) if is_import else None
+
     enter_worker_maintenance(db)
     try:
         if not wait_for_worker_maintenance_ack(app.state.session_factory, timeout=ack_timeout):
@@ -95,8 +101,16 @@ def restore_database(
         safety_name = f"mediatracker-{moment.strftime('%Y%m%d')}-before-restore-{moment.strftime('%H%M%S')}.db"
         safety_path = safety_dir / safety_name
         copy_sqlite_file(live, safety_path)
-        hive_bundle = _validated_hive_bundle(backup_path)
-        _replace_live_database(app, settings, backup_path, live, hive_bundle, safety_path)
+        hive_bundle = None if is_import else _validated_hive_bundle(backup_path)
+        _replace_live_database(
+            app,
+            settings,
+            backup_path,
+            live,
+            hive_bundle,
+            safety_path,
+            hive_settings=hive_settings,
+        )
     except RestoreError:
         raise
     except OSError as exc:
@@ -131,6 +145,8 @@ def _replace_live_database(
     live: Path,
     hive_bundle: bytes | None,
     safety_path: Path,
+    *,
+    hive_settings: dict[str, str] | None = None,
 ) -> None:
     app.state.engine.dispose()
     swapped = False
@@ -150,6 +166,16 @@ def _replace_live_database(
         finally:
             session.close()
         run_migrations(settings.database_url)
+        app.state.engine.dispose()
+        if hive_settings is not None:
+            reapply_receiver_hive_after_import_on_disk(
+                live,
+                safety_path,
+                hive_settings,
+            )
+        engine, factory = create_session_factory(settings)
+        app.state.engine = engine
+        app.state.session_factory = factory
         session = factory()
         try:
             ensure_ready(session, settings)
@@ -160,6 +186,10 @@ def _replace_live_database(
         if swapped and safety_path.is_file():
             restore_sqlite_into_live(safety_path, live)
         raise
+    except BackupHiveIdentityError as exc:
+        if swapped and safety_path.is_file():
+            restore_sqlite_into_live(safety_path, live)
+        raise RestoreError(str(exc)) from exc
     except Exception as exc:
         if swapped and safety_path.is_file():
             restore_sqlite_into_live(safety_path, live)

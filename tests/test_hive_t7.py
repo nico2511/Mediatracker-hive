@@ -114,6 +114,33 @@ def test_media_sharing_summary(client):
     assert summary["shared"] is False
 
 
+def test_batch_media_sharing_summary(client):
+    from tests.test_hive_t2 import _enable_hive
+
+    from mediatracker.db.models import Media, MediaItem
+
+    login(client)
+    _enable_hive(client)
+    db = client.app.state.session_factory()
+    try:
+        first = Media(type="film", title="Fiction C", year=2099, tmdb_id=9903)
+        second = Media(type="series", title="Serial D", year=2100, tmdb_id=9904)
+        db.add(first)
+        db.add(second)
+        db.flush()
+        db.add(MediaItem(media_id=first.id, state="missing"))
+        db.add(MediaItem(media_id=second.id, state="missing"))
+        db.commit()
+        id_a, id_b = first.id, second.id
+    finally:
+        db.close()
+    batch = client.get(f"/api/v1/hive/media/sharing-summary?ids={id_a},{id_b}").json()
+    assert len(batch) == 2
+    assert {row["media_id"] for row in batch} == {id_a, id_b}
+    for row in batch:
+        assert row["shared"] is False
+
+
 def test_ruche_detail_quota(client):
     from tests.conftest import csrf
     from tests.test_hive_t2 import _enable_hive

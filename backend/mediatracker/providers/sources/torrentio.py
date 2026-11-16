@@ -158,6 +158,7 @@ class TorrentioSource:
         self.base_url = root
         self.quality_profile = None
         self.last_empty_reason: str | None = None
+        self.last_json_from_cache: bool = False
         self.cache = cache if cache is not None else shared_torrentio_cache(self.base_url)
         self.cache.bind_domain(self.base_url)
         self.pacer = pacer if pacer is not None else shared_comet_pacer(self.base_url, float(delay))
@@ -176,8 +177,10 @@ class TorrentioSource:
             self._client.close()
 
     def links_for(self, query: EpisodeQuery, preferences: SourcePreferences) -> list[LinkCandidate]:
-        imdb = (query.imdb_id or "").strip()
-        if not imdb.startswith("tt"):
+        from mediatracker.core.tmdb.imdb import imdb_id_for_stremio
+
+        imdb = imdb_id_for_stremio(query.imdb_id)
+        if imdb is None:
             return []
         path = _stream_path(query, imdb)
         if path is None:
@@ -186,9 +189,13 @@ class TorrentioSource:
         raw = select_streams(payload, query, preferences, profile=self.quality_profile)
         chosen = _torrentio_candidates(raw)
         if self.quality_profile is not None and not chosen:
-            self.last_empty_reason = (
-                f"Aucun flux Torrentio ne correspond au profil « {self.quality_profile.name} »."
+            from mediatracker.providers.sources.stremio_stream_messages import (
+                profile_mismatch_reason,
+                stream_rows_seen,
             )
+
+            seen = stream_rows_seen(payload)
+            self.last_empty_reason = profile_mismatch_reason(self.quality_profile, seen=seen) if seen > 0 else None
         else:
             self.last_empty_reason = None
         return chosen
@@ -196,7 +203,9 @@ class TorrentioSource:
     def _fetch(self, path: str) -> dict[str, Any]:
         cached = self.cache.get(path)
         if cached is not None:
+            self.last_json_from_cache = True
             return _json_body(cached)
+        self.last_json_from_cache = False
         url = f"{self.base_url}/{path}"
         body, used_path = self._get(url)
         if body is None:

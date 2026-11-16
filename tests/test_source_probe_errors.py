@@ -30,7 +30,7 @@ def test_probe_download_sources_records_probe_on_exception(client, app, monkeypa
         monkeypatch.setattr("mediatracker.core.source_probe._probe_one", boom)
 
         when = datetime(2026, 11, 9, 22, 0, tzinfo=timezone.utc)
-        rows = probe_download_sources(db, app.state.settings, target, now=when)
+        rows = probe_download_sources(db, app.state.settings, target, now=when).results
         db.commit()
         assert len(rows) == 1
         assert rows[0].issue == "error"

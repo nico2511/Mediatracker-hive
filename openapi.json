@@ -5011,6 +5011,22 @@
         "title": "HiveWantedTakeIn",
         "type": "object"
       },
+      "HosterOptionsOut": {
+        "properties": {
+          "hosters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Hosters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosters"
+        ],
+        "title": "HosterOptionsOut",
+        "type": "object"
+      },
       "IdentifyIn": {
         "properties": {
           "path": {
@@ -12207,6 +12223,17 @@
               }
             ],
             "title": "Sources"
+          },
+          "tmdb_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tmdb Id"
           }
         },
         "required": [
@@ -12262,6 +12289,17 @@
       },
       "SourceProbeOut": {
         "properties": {
+          "profile_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Name"
+          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/SourceProbeItemOut"
@@ -17224,6 +17262,54 @@
           }
         },
         "summary": "Post Join Reject",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/media/sharing-summary": {
+      "get": {
+        "operationId": "batch_media_sharing_summary_api_v1_hive_media_sharing_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Ids",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MediaShareSummaryOut"
+                  },
+                  "title": "Response Batch Media Sharing Summary Api V1 Hive Media Sharing Summary Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Media Sharing Summary",
         "tags": [
           "hive",
           "hive"
@@ -23096,6 +23182,27 @@
           }
         },
         "summary": "Patch Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/sources/hosters": {
+      "get": {
+        "operationId": "list_hoster_options_api_v1_settings_sources_hosters_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HosterOptionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Hoster Options",
         "tags": [
           "settings"
         ]

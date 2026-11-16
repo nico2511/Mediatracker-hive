@@ -1,4 +1,4 @@
-> Instantané public de MediaTracker, commit source abc1905. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
+> Instantané public de MediaTracker, commit source a9a3d4a. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
 
 # MediaTracker
 
@@ -20,7 +20,7 @@ Accès habituel sur le réseau local : `http://<ip-du-nas>:8080`. Derrière un p
 
 ## Hive (partage entre instances)
 
-Hive relie plusieurs installations MediaTracker de confiance au sein d’une **ruche** pour partager un catalogue et se transmettre des fichiers. Le partage se fait manuellement, titre par titre (un repartage automatique existe, désactivé par défaut). Avant d’être visible des pairs, chaque fichier reçoit une **empreinte** ; le transfert passe par un accès temporaire au fichier, puis par **aria2** et la file **Téléchargements** habituelle.
+Hive relie plusieurs installations MediaTracker de confiance au sein d’une **ruche** pour partager un catalogue et se transmettre des fichiers. Le partage se fait manuellement, titre par titre (un repartage automatique existe, désactivé par défaut). Les **demandes intra-ruche** sont anonymes : si personne ne possède encore le fichier, le titre peut apparaître dans **Recherché** pour que d’autres membres se le procurent et le partagent. Les pairs échangent des **instantanés de charge** (transferts sortants, plafond, débit disponible, occupé) : un téléchargement Hive privilégie en général le pair le moins chargé et peut basculer vers un autre si le pair est occupé. Avant d’être visible des pairs, chaque fichier reçoit une **empreinte** ; le transfert passe par un accès temporaire au fichier, puis par **aria2** et la file **Téléchargements** habituelle. L’écran **Santé → Performance** affiche un encart **Ruche** avec la charge locale et celle des pairs connus.
 
 Guide : [Hive](docs/hive.md).
 
@@ -34,11 +34,7 @@ Guide : [Hive](docs/hive.md).
 
 Prévu :
 
-- Possession et demandes entre instances d’une même ruche : rien n’est partagé par défaut, le partage se fait à la demande.
-- Une demande intra-ruche est créée chez les membres qui ont déjà le fichier. Les demandes sont anonymes.
-- Si personne ne l’a, le titre apparaît dans une liste **Recherché par la ruche**. Un ou plusieurs **bons samaritains** peuvent alors se le procurer, puis le partager (plusieurs volontaires = plusieurs sources).
-- Des indicateurs de charge synchronisés (transferts en cours, limite, débit sortant disponible, occupé) permettent de choisir la source la moins chargée.
-- Un chat de ruche est prévu plus tard.
+- Un chat de ruche.
 
 ## Installation avec Docker
 
@@ -93,7 +89,7 @@ Détails : [docs/mises-a-jour.md](docs/mises-a-jour.md).
 
 ## Sauvegardes
 
-Copies quotidiennes de la base dans `/config/backups/`. Gardez la même `SECRET_KEY` si vous restaurez une sauvegarde.
+Copies quotidiennes de la base dans `/config/backups/`. Dans **Réglages → Disque et sauvegardes**, vous pouvez **télécharger** une copie, en **importer** un fichier `.db` (aperçu puis restauration confirmée) et restaurer une sauvegarde listée. Gardez la même `SECRET_KEY` si vous restaurez une sauvegarde ou importez une base d’une autre instance.
 
 ## Licence
 
@@ -127,7 +123,7 @@ Voir [`homeassistant/README.md`](homeassistant/README.md). L’URL MediaTracker 
 
 ## Santé et dépannage
 
-- Santé : écran dans l’app ou `GET /api/v1/health` (authentification requise).
+- Santé : écran dans l’app (onglet **Performance** : charge Hive, pairs, débits) ou `GET /api/v1/health` (authentification requise).
 - Conteneur : `GET /healthz` (public).
 - Documentation API : `/api/docs` (session requise).
 

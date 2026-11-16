@@ -2198,10 +2198,14 @@ async function saveProfileFallback() {
     </section>
     <section v-if="section === 'disque'" class="settings-section panel stack">
       <h2 class="settings-section-title">Disque et sauvegardes</h2>
+      <p class="hint settings-lead">
+        La base est copiée chaque jour. Tu peux aussi télécharger une sauvegarde sur cet appareil, ou en importer
+        une (fichier <code>.db</code>).
+      </p>
       <DiskSpaceCard heading />
           <p class="hint">
-            Sous le seuil, les téléchargements passent en pause et une notification part. La base est copiée
-            chaque jour dans <code>/config/backups</code>.
+            Sous le seuil, les téléchargements passent en pause et une notification part. Les copies quotidiennes
+            sont dans <code>/config/backups</code>.
           </p>
           <form @submit.prevent="saveDisk">
             <label>

@@ -82,7 +82,8 @@ class Settings(BaseSettings):
     # Ordered instance list (newline in DB). Seeded at migration, not from env prefill.
     comet_base_urls: str = ""
     torrentio_base_url: str = "https://torrentio.strem.fun"
-    download_source_order: str = "wawacity,free_telecharger,hive,comet,torrentio"
+    uwuplus_base_url: str = ""
+    download_source_order: str = "wawacity,free_telecharger,hive,comet,torrentio,stremio_addons"
     wawacity_user_agent: str | None = None
     free_telecharger_user_agent: str | None = None
     # When true, scan redirects only store a candidate; default is automatic migration.

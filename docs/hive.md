@@ -25,8 +25,17 @@ Le mode **tirage seul** (`pull_only`) : l’instance peut recevoir des fichiers 
 - **Catalogue Hive** : œuvres partagées par les pairs ; bouton **Suivre** côté récepteur.
 - **Repartage automatique** : option **Repartager automatiquement les fichiers reçus** (`hive_catalog_auto_share`, **désactivée** par défaut).
 - **Accueil** : section **Dernières dispos Hive** lorsque des entrées existent.
+- Sur une **fiche média**, un seul bloc **Hive** regroupe partage, exclusions par ruche et état de préparation.
 
 Avant qu’un fichier soit visible des pairs, l’instance calcule une **empreinte** (empreinte SHA par blocs du fichier) via un processus dédié dans le conteneur.
+
+## Demandes et liste Recherché
+
+Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Reçues**, **Recherché**.
+
+- Rien n’est partagé tant que vous ne l’avez pas décidé ; une **demande** prévient les membres qui possèdent déjà le fichier (demandes **anonymes** côté ruche).
+- Si aucun pair ne l’a, le titre peut figurer dans **Recherché** pour qu’un autre membre se le procure puis le partage.
+- **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid).
 
 ## Téléchargements
 
@@ -38,7 +47,9 @@ Hive est une **source** comme les autres dans l’ordre de téléchargement (`hi
 
 Il n’y a **pas** d’écran de transferts Hive séparé : tout passe par la file **Téléchargements** habituelle.
 
-Si le pair est injoignable, l’orchestrateur peut **essayer la source suivante** selon l’ordre configuré dans **Réglages → Sources**.
+Si le pair est injoignable ou **occupé** (limite de transferts, fenêtre horaire, débit saturé), MediaTracker peut **classer** les sources disponibles d’après les instantanés de charge reçus des pairs, choisir un pair moins chargé, puis **basculer** vers un autre pair ou une autre source de l’ordre **Réglages → Sources**.
+
+Les pairs publient périodiquement un instantané : transferts sortants en cours, plafond de parallélisme, plafond de débit d’envoi, débit disponible estimé, indicateur **occupé**. Les données reçues lors des échanges Hive sont conservées un temps limité ; les entrées trop anciennes sont traitées comme inconnues.
 
 ## Limites de débit et fenêtre horaire
 
@@ -66,3 +77,7 @@ Chaque instance doit avoir :
 Exemple de fichier Compose : [exemples/docker-compose-deux-instances-hive.yml](exemples/docker-compose-deux-instances-hive.yml).
 
 Pour des scénarios avancés (proxy multi-domaines, sandboxes), voir aussi [exemples/docker-compose-hive-sandbox.example.yml](exemples/docker-compose-hive-sandbox.example.yml).
+
+## Suivi dans Santé
+
+**Santé → Performance** : encart **Ruche** avec vos envois en cours, débit sortant actuel, décompte de pairs joignables / occupés / inconnus, puis le détail par ruche (barre de charge, état libre / occupé / inconnu).

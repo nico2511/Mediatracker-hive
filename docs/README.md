@@ -50,7 +50,7 @@ Index : [Réglages](reglages/README.md) — URLs du type `http://<hôte>:8080/re
 | Document | Contenu |
 | --- | --- |
 | [Mises à jour](mises-a-jour.md) | Watchtower, bouton « Mettre à jour maintenant » |
-| [Sauvegarde et restauration](sauvegarde.md) | `/config/backups`, export depuis l’UI |
+| [Sauvegarde et restauration](sauvegarde.md) | `/config/backups`, téléchargement, import et restauration depuis l’UI |
 | [Dépannage et FAQ](depannage-faq.md) | Santé, disques, erreurs courantes |
 
 ### Autre

@@ -36,24 +36,25 @@ def test_probe_sources_endpoint_survives_stub_media_without_fiche_prefs(client, 
 def test_probe_sources_endpoint_returns_ordered_rows(client, app, monkeypatch):
     login(client)
 
+    from mediatracker.core.source_probe import ProbeRunResult, SourceProbeRow
+
     def fake_probe(_db, _settings, target, **_kwargs):
         assert target.title == "Film Démo"
         order = ["comet", "wawacity"]
-        return [
-            type(
-                "Row",
-                (),
-                {
-                    "source": name,
-                    "label": name.capitalize(),
-                    "issue": "skipped",
-                    "link_count": 0,
-                    "reason": "test",
-                    "duration_ms": 1,
-                },
-            )()
-            for name in order
-        ]
+        return ProbeRunResult(
+            [
+                SourceProbeRow(
+                    source=name,
+                    label=name.capitalize(),
+                    issue="skipped",
+                    link_count=0,
+                    reason="test",
+                    duration_ms=1,
+                )
+                for name in order
+            ],
+            None,
+        )
 
     monkeypatch.setattr("mediatracker.api.v1.settings.probe_download_sources", fake_probe)
     response = client.post(

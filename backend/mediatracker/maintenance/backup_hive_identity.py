@@ -8,13 +8,29 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from mediatracker.config import Settings
+from mediatracker.db.models import Setting
 from mediatracker.hive.crypto_id import hive_public_id_from_public_key, private_key_from_pem
 from mediatracker.hive.identity import (
+    HIVE_ENABLED_KEY,
+    HIVE_INSTANCE_NAME_KEY,
     HIVE_NAME_DOCUMENT_KEY,
     HIVE_NAME_SIGNATURE_KEY,
+    HIVE_PUBLIC_ADDRESS_KEY,
     load_private_key,
     write_private_key,
+)
+
+HIVE_SETTINGS_PRESERVE_ON_IMPORT = frozenset(
+    {
+        HIVE_ENABLED_KEY,
+        HIVE_PUBLIC_ADDRESS_KEY,
+        HIVE_INSTANCE_NAME_KEY,
+        HIVE_NAME_DOCUMENT_KEY,
+        HIVE_NAME_SIGNATURE_KEY,
+    }
 )
 
 logger = logging.getLogger(__name__)
@@ -108,6 +124,110 @@ def read_hive_identity_bundle(backup_path: Path) -> bytes | None:
 def apply_hive_identity_bundle(pem: bytes, settings: Settings) -> None:
     key = private_key_from_pem(pem)
     write_private_key(settings, key)
+
+
+def snapshot_hive_settings(db: Session) -> dict[str, str]:
+    """Lecture de l'identité Hive en base avant restauration d'un import."""
+    values: dict[str, str] = {}
+    for key in HIVE_SETTINGS_PRESERVE_ON_IMPORT:
+        row = db.get(Setting, key)
+        values[key] = (row.value or "").strip() if row is not None else ""
+    return values
+
+
+def reapply_hive_settings_after_import(db: Session, snapshot: dict[str, str]) -> None:
+    """Réinjecte l'identité Hive de l'instance qui reçoit après restauration d'un import."""
+    from datetime import datetime, timezone
+
+    moment = datetime.now(timezone.utc)
+    for key in HIVE_SETTINGS_PRESERVE_ON_IMPORT:
+        value = snapshot.get(key, "")
+        row = db.get(Setting, key)
+        if row is None:
+            db.add(Setting(key=key, value=value, is_secret=False, updated_at=moment))
+        else:
+            row.value = value
+            row.updated_at = moment
+
+
+def reapply_receiver_hive_after_import_on_disk(
+    live_path: Path,
+    safety_path: Path,
+    snapshot: dict[str, str],
+) -> None:
+    """Réinjecte réglages Hive + tables hive_* du receveur en une seule transaction SQLite."""
+    from datetime import datetime, timezone
+
+    if not live_path.is_file():
+        raise BackupHiveIdentityError("Base active introuvable.")
+    moment = datetime.now(timezone.utc).isoformat()
+    conn = sqlite3.connect(live_path)
+    conn.execute(f"pragma busy_timeout={_BUSY_MS}")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for key in HIVE_SETTINGS_PRESERVE_ON_IMPORT:
+            value = snapshot.get(key, "")
+            conn.execute(
+                """
+                INSERT INTO setting (key, value, is_secret, updated_at)
+                VALUES (?, ?, 0, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, value, moment),
+            )
+        copy_hive_tables_from_safety(conn, safety_path)
+        conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback()
+        raise BackupHiveIdentityError("Impossible de conserver l'identité Hive du récepteur.") from exc
+    finally:
+        conn.close()
+
+
+def copy_hive_tables_from_safety(live_conn: sqlite3.Connection, safety_path: Path) -> None:
+    """Recopie toutes les tables hive_* de la copie before-restore vers la base active."""
+    if not safety_path.is_file():
+        raise BackupHiveIdentityError("Copie de sécurité introuvable pour les tables Hive.")
+    live_conn.execute("PRAGMA foreign_keys=OFF")
+    src = sqlite3.connect(f"file:{safety_path.resolve()}?mode=ro", uri=True)
+    src.execute(f"pragma busy_timeout={_BUSY_MS}")
+    try:
+        live_names = {
+            row[0]
+            for row in live_conn.execute(
+                "SELECT name FROM main.sqlite_master WHERE type='table' AND name GLOB 'hive_*'",
+            ).fetchall()
+        }
+        for name in live_names:
+            quoted = name.replace('"', '""')
+            live_conn.execute(f'DELETE FROM "{quoted}"')
+        safe_tables = [
+            row[0]
+            for row in src.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'hive_*'",
+            ).fetchall()
+        ]
+        for name in safe_tables:
+            if name not in live_names:
+                continue
+            quoted = name.replace('"', '""')
+            cols = [row[1] for row in src.execute(f'PRAGMA table_info("{quoted}")').fetchall()]
+            if not cols:
+                continue
+            col_sql = ", ".join(f'"{col}"' for col in cols)
+            placeholders = ", ".join("?" for _ in cols)
+            rows = src.execute(f'SELECT {col_sql} FROM "{quoted}"').fetchall()
+            if not rows:
+                continue
+            live_conn.executemany(
+                f'INSERT INTO "{quoted}" ({col_sql}) VALUES ({placeholders})',
+                rows,
+            )
+    finally:
+        src.close()
+        live_conn.execute("PRAGMA foreign_keys=ON")
 
 
 def strip_hive_identity_bundle_from_live(live_db: Path) -> None:

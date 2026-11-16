@@ -2,10 +2,30 @@
   margin: 2rem 0 0.25rem;
 }
 
+.backup-restore .import-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.75rem;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.backup-restore .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .backup-restore .bk {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0 1rem;
+  gap: 0.35rem 0.75rem;
   align-items: center;
   min-height: 52px;
   padding: 0.45rem 0;
@@ -27,26 +47,50 @@
   line-height: 1.35;
 }
 
-.backup-restore .bk .restore-link {
+.backup-restore .bk-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.35rem;
+  justify-content: flex-end;
+}
+
+.backup-restore .bk-acts button {
   font-size: 0.875rem;
   font-weight: 400;
   color: var(--muted);
   background: none;
   border: 0;
-  padding: 0.25rem 0.75rem 0.25rem 0;
+  padding: 0.35rem 0.5rem;
   cursor: pointer;
-  text-align: right;
+  min-height: 44px;
 }
 
-.backup-restore .bk:hover .restore-link,
-.backup-restore .bk:focus-within .restore-link {
+.backup-restore .bk:hover .bk-acts button,
+.backup-restore .bk:focus-within .bk-acts button {
   color: var(--accent);
   font-weight: 700;
 }
 
 @media (min-width: 721px) {
-  .backup-restore .bk:not(:hover):not(:focus-within) .restore-link {
+  .backup-restore .bk:not(:hover):not(:focus-within) .bk-acts button {
     opacity: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .backup-restore .bk {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 0.15rem;
+  }
+
+  .backup-restore .bk-acts {
+    justify-content: flex-start;
+    margin-left: -0.35rem;
+  }
+
+  .backup-restore .bk-acts button {
+    opacity: 1;
   }
 }
 
@@ -171,6 +215,20 @@
 
 .backup-restore-dialog .keyw b {
   color: var(--warn);
+}
+
+.backup-restore-dialog .hive-keep {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  color: var(--info, #8eb4cc);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  margin: 0 0 1rem;
+}
+
+.backup-restore-dialog .hive-keep b {
+  color: var(--info, #8eb4cc);
 }
 
 .backup-restore-dialog .chk {

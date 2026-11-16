@@ -24,12 +24,14 @@ from mediatracker.core.profile_fallback import (
 )
 from mediatracker.core.selection import (
     DEFAULT_DOWNLOAD_SOURCE_ORDER,
+    DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS,
     LANGUAGES,
     LEGACY_DOWNLOAD_SOURCE_ORDER,
     QUALITIES,
     parse_choice_list,
     parse_download_source_order,
     parse_hoster_preference,
+    registered_download_sources,
 )
 from mediatracker.db.models import Setting
 from mediatracker.hive.crypto_id import validate_instance_name
@@ -146,6 +148,8 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "comet_base_url": SettingSpec(False, "str", "comet_base_url", optional=True),
     "comet_base_urls": SettingSpec(False, "str", "comet_base_urls", optional=True),
     "torrentio_base_url": SettingSpec(False, "str", "torrentio_base_url", optional=True),
+    "uwuplus_base_url": SettingSpec(False, "str", "uwuplus_base_url", optional=True),
+    "stremio_addons": SettingSpec(False, "str", "stremio_addons", optional=True),
     "download_source_order": SettingSpec(False, "str", "download_source_order"),
     "wawacity_user_agent": SettingSpec(False, "str", "wawacity_user_agent", optional=True),
     "free_telecharger_user_agent": SettingSpec(False, "str", "free_telecharger_user_agent", optional=True),
@@ -186,17 +190,26 @@ def _visible_setting_specs() -> dict[str, SettingSpec]:
 
 
 def migrate_download_source_order_setting(db: Session) -> None:
-    """Replace the historical default order with the registry-wide default. Idempotent."""
+    """Normalize saved order: legacy defaults and retired ``uwuplus`` entries. Idempotent."""
     row = db.get(Setting, "download_source_order")
     if row is None or not (row.value or "").strip():
         return
+    allowed = tuple(registered_download_sources()) + ("uwuplus",)
     try:
-        normalized = ",".join(parse_download_source_order(row.value))
+        items = parse_download_source_order(row.value, allowed=allowed)
     except ValueError:
         return
-    if normalized != LEGACY_DOWNLOAD_SOURCE_ORDER:
+    rewritten = items
+    from mediatracker.providers.sources.stremio_addons_config import replace_uwuplus_in_source_order
+
+    if "uwuplus" in rewritten:
+        rewritten = replace_uwuplus_in_source_order(rewritten)
+    normalized = ",".join(rewritten)
+    if normalized in {LEGACY_DOWNLOAD_SOURCE_ORDER, DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS}:
+        normalized = DEFAULT_DOWNLOAD_SOURCE_ORDER
+    if normalized == (row.value or "").strip():
         return
-    row.value = DEFAULT_DOWNLOAD_SOURCE_ORDER
+    row.value = normalized
     row.updated_at = datetime.now(timezone.utc)
 
 
@@ -205,7 +218,7 @@ def ensure_settings(db: Session, settings: Settings) -> None:
     for key, spec in SETTING_SPECS.items():
         if db.get(Setting, key) is not None:
             continue
-        if key == "comet_base_urls" or key in _OPTIONAL_UNSEEDED:
+        if key in {"comet_base_urls", "uwuplus_base_url", "stremio_addons"} or key in _OPTIONAL_UNSEEDED:
             continue
         raw = _env_value(settings, key, spec)
         if spec.kind == "bool":
@@ -220,6 +233,9 @@ def ensure_settings(db: Session, settings: Settings) -> None:
     from mediatracker.providers.sources.comet_urls import migrate_comet_urls_setting
 
     migrate_comet_urls_setting(db, settings)
+    from mediatracker.providers.sources.stremio_addons_config import migrate_uwuplus_into_stremio_addons
+
+    migrate_uwuplus_into_stremio_addons(db, settings)
     migrate_download_source_order_setting(db)
     db.commit()
     write_aria2_secret_file(db, settings)
@@ -343,6 +359,15 @@ def update_settings(db: Session, settings: Settings, values: dict[str, Any]) -> 
             legacy = db.get(Setting, "comet_base_url")
             if legacy is not None:
                 legacy.value = first[0]
+    if "stremio_addons" in work and work["stremio_addons"] is not None:
+        from mediatracker.providers.sources.stremio_addons_config import (
+            parse_stremio_addons_setting,
+            sync_stremio_addons_provider_config,
+        )
+
+        sync_stremio_addons_provider_config(
+            db, parse_stremio_addons_setting(_setting_row_text(db, "stremio_addons"))
+        )
     db.commit()
     if "aria2_rpc_secret" in values:
         write_aria2_secret_file(db, settings)
@@ -412,6 +437,13 @@ def _normalize(spec: SettingSpec, key: str, value: Any) -> str:
         from mediatracker.providers.sources.comet_urls import loads_comet_urls_from_api
 
         return loads_comet_urls_from_api(value)
+    if key == "stremio_addons":
+        from mediatracker.providers.sources.stremio_addons_config import (
+            dumps_stremio_addons_for_storage,
+            parse_stremio_addons_setting,
+        )
+
+        return dumps_stremio_addons_for_storage(parse_stremio_addons_setting(value))
     if not isinstance(value, str):
         raise SettingsError(f"« {key} » doit être une chaîne.")
     text = value.strip()
@@ -453,8 +485,10 @@ def _normalize(spec: SettingSpec, key: str, value: Any) -> str:
             raise SettingsError("Choisissez Archiver ou Supprimer de la liste.")
         return text
     if key == "hoster_preference":
+        from mediatracker.integrations.alldebrid_public_hosts import allowed_hoster_names
+
         try:
-            return ",".join(parse_hoster_preference(text))
+            return ",".join(parse_hoster_preference(text, allowed=allowed_hoster_names()))
         except ValueError as exc:
             raise SettingsError(str(exc)) from exc
     if key == "download_source_order":
@@ -485,10 +519,11 @@ def _normalize(spec: SettingSpec, key: str, value: Any) -> str:
         "wawacity_base_url",
         "comet_base_url",
         "torrentio_base_url",
+        "uwuplus_base_url",
         "public_base_url",
     } and not (text.startswith("http://") or text.startswith("https://")):
         raise SettingsError(f"« {key} » doit commencer par http:// ou https://.")
-    if key in {"jellyfin_url", "wawacity_base_url", "comet_base_url", "torrentio_base_url"}:
+    if key in {"jellyfin_url", "wawacity_base_url", "comet_base_url", "torrentio_base_url", "uwuplus_base_url"}:
         try:
             validate_outbound_url_static(text)
         except OutboundUrlRejected:

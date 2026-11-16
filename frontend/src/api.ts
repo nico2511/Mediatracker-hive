@@ -237,8 +237,22 @@ export function userFacingApiError(err: unknown, fallback: string): string {
   }
   if (err instanceof ApiError) {
     const msg = err.message.trim();
+    const problemDetail =
+      err.problem && typeof err.problem.detail === "string" ? err.problem.detail.trim() : "";
+    const genericForStatus = STATUS_USER_MESSAGE[err.status];
+    if (
+      problemDetail &&
+      looksUserFrench(problemDetail) &&
+      genericForStatus &&
+      msg === genericForStatus
+    ) {
+      return problemDetail;
+    }
     if (looksUserFrench(msg)) {
       return msg;
+    }
+    if (problemDetail && looksUserFrench(problemDetail)) {
+      return problemDetail;
     }
     if (err.status === 401 && msg && !looksTechnicalApiMessage(msg)) {
       return msg;

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 
 import { cometInstanceUrlKey, normalizeCometInstanceUrl } from "../cometUrl";
+import TruncatedUrlLine from "./TruncatedUrlLine.vue";
 
 const props = defineProps<{
   modelValue: string[];
@@ -66,9 +67,9 @@ function move(index: number, delta: number) {
       Comet est ignoré.
     </p>
     <ol v-if="rows.length" class="comet-instance-rows">
-      <li v-for="(url, index) in rows" :key="url + ':' + index" class="comet-instance-row">
+      <li v-for="(url, index) in rows" :key="url + ':' + index" class="comet-instance-row comet-instance-row--url">
         <span class="comet-instance-rank" aria-hidden="true">{{ index + 1 }}</span>
-        <span class="comet-instance-url">{{ url }}</span>
+        <TruncatedUrlLine :url="url" />
         <span v-if="index === 0" class="comet-instance-badge">utilisée en premier</span>
         <span class="comet-instance-moves">
           <button type="button" :disabled="index === 0" aria-label="Monter" @click="move(index, -1)">↑</button>

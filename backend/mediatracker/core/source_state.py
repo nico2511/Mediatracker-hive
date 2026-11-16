@@ -18,8 +18,10 @@ from mediatracker.security.logging import redact
 logger = logging.getLogger(__name__)
 
 RETENTION_DAYS = 30
-TRACKED_SOURCES = frozenset({"wawacity", "free_telecharger", "comet", "torrentio"})
-DOWNLOAD_SOURCE_TYPES = frozenset({"wawacity", "free_telecharger", "hive", "comet", "torrentio"})
+TRACKED_SOURCES = frozenset({"wawacity", "free_telecharger", "comet", "torrentio", "stremio_addons"})
+DOWNLOAD_SOURCE_TYPES = frozenset(
+    {"wawacity", "free_telecharger", "hive", "comet", "torrentio", "stremio_addons"}
+)
 STATE_OK = "ok"
 STATE_DOWN = "down"
 
@@ -385,6 +387,8 @@ def _source_label(type_name: str) -> str:
         return "Comet"
     if type_name == "torrentio":
         return "Torrentio"
+    if type_name == "stremio_addons":
+        return "Addons Stremio"
     if type_name == "free_telecharger":
         return "Free-télécharger"
     if type_name == "hive":

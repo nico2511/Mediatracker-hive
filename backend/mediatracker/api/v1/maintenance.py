@@ -2,12 +2,14 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.maintenance.backup_import import BackupImportError, import_backup_upload
 from mediatracker.maintenance.reset import ResetError, reset_database
 from mediatracker.maintenance.restore import RestoreConflictError, RestoreError, restore_database
 from mediatracker.maintenance.restore_catalog import (
@@ -16,6 +18,7 @@ from mediatracker.maintenance.restore_catalog import (
     list_backups,
     list_safety_backups,
     preview_backup,
+    resolve_backup_file,
 )
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -50,6 +53,7 @@ class BackupPreviewOut(BaseModel):
     fiches_delta: int
     restorable: bool
     schema_relation: str
+    imported: bool = False
 
 
 class RestoreIn(BaseModel):
@@ -120,6 +124,27 @@ def preview_safety_database_backup(
         fiches_delta=row.fiches_delta,
         restorable=row.restorable,
         schema_relation=row.schema_relation,
+        imported=row.imported,
+    )
+
+
+@router.get("/backups/safety/{name}/download")
+def download_safety_database_backup(
+    name: str,
+    request: Request,
+    _principal=Depends(require_scope("admin")),
+) -> FileResponse:
+    del _principal
+    settings = request.app.state.settings
+    try:
+        path = resolve_backup_file(settings, name, safety=True)
+    except BackupCatalogError as exc:
+        raise Problem(404, "Sauvegarde", exc.message) from exc
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=name,
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -182,7 +207,50 @@ def preview_database_backup(
         fiches_delta=row.fiches_delta,
         restorable=row.restorable,
         schema_relation=row.schema_relation,
+        imported=row.imported,
     )
+
+
+@router.get("/backups/{name}/download")
+def download_database_backup(
+    name: str,
+    request: Request,
+    _principal=Depends(require_scope("admin")),
+) -> FileResponse:
+    del _principal
+    settings = request.app.state.settings
+    try:
+        path = resolve_backup_file(settings, name)
+    except BackupCatalogError as exc:
+        raise Problem(404, "Sauvegarde", exc.message) from exc
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=name,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/backups/import", response_model=BackupItemOut)
+async def import_database_backup(
+    request: Request,
+    file: UploadFile = File(...),
+    _principal=Depends(require_scope("admin")),
+) -> BackupItemOut:
+    del _principal
+    if not file.filename or not file.filename.lower().endswith(".db"):
+        raise Problem(422, "Requête invalide", "Choisissez un fichier .db.")
+    try:
+        row = await import_backup_upload(file, request.app.state.settings)
+    except BackupImportError as exc:
+        if "trop volumineux" in exc.message.lower():
+            raise Problem(
+                413,
+                "Fichier trop volumineux",
+                exc.message,
+            ) from exc
+        raise Problem(422, "Import refusé", exc.message) from exc
+    return BackupItemOut(name=row.name, created_at=row.created_at, size_bytes=row.size_bytes)
 
 
 @router.post("/backups/{name}/restore", response_model=RestoreOut)

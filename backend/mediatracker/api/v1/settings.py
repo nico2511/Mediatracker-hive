@@ -31,8 +31,13 @@ class SettingsPatch(BaseModel):
 
 class SourceProbeIn(BaseModel):
     query: str
+    tmdb_id: int | None = None
     imdb_id: str | None = None
     sources: list[str] | None = None
+
+
+class HosterOptionsOut(BaseModel):
+    hosters: list[str]
 
 
 class SourceProbeItemOut(BaseModel):
@@ -46,6 +51,7 @@ class SourceProbeItemOut(BaseModel):
 
 class SourceProbeOut(BaseModel):
     results: list[SourceProbeItemOut]
+    profile_name: str | None = None
 
 
 class DownloadSourceStatusOut(BaseModel):
@@ -99,6 +105,18 @@ def list_download_sources_status(
     )
 
 
+@router.get("/sources/hosters", response_model=HosterOptionsOut)
+def list_hoster_options(
+    _request: Request,
+    _db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> HosterOptionsOut:
+    del _request, _db, _principal
+    from mediatracker.integrations.alldebrid_public_hosts import list_hoster_picker_options
+
+    return HosterOptionsOut(hosters=list_hoster_picker_options())
+
+
 @router.post("/sources/probe", response_model=SourceProbeOut)
 def probe_sources(
     body: SourceProbeIn,
@@ -108,10 +126,10 @@ def probe_sources(
 ) -> SourceProbeOut:
     del _principal
     try:
-        target = parse_probe_query(body.query, imdb_id=body.imdb_id)
+        target = parse_probe_query(body.query, imdb_id=body.imdb_id, tmdb_id=body.tmdb_id)
     except ValueError as exc:
         raise Problem(422, "Requête invalide", str(exc)) from exc
-    rows = probe_download_sources(
+    run = probe_download_sources(
         db,
         request.app.state.settings,
         target,
@@ -128,8 +146,9 @@ def probe_sources(
                 reason=row.reason,
                 duration_ms=row.duration_ms,
             )
-            for row in rows
-        ]
+            for row in run.results
+        ],
+        profile_name=run.profile_name,
     )
 
 

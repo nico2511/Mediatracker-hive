@@ -15,6 +15,12 @@ export function tmdbPosterSrc(url: string | null | undefined, size = "w342"): st
   return `/api/v1/images/poster/${size}/${encodeURIComponent(file)}`;
 }
 
+export function tmdbBackdropSrc(url: string | null | undefined, size = "w780"): string | null {
+  const file = fileFromTmdb(url);
+  if (!file) return url ?? null;
+  return `/api/v1/images/backdrop/${size}/${encodeURIComponent(file)}`;
+}
+
 export function tmdbPosterSrcSet(url: string | null | undefined, thumb = false): string | undefined {
   const file = fileFromTmdb(url);
   if (!file) return undefined;

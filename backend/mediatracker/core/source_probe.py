@@ -29,6 +29,7 @@ from mediatracker.core.source_state import (
     public_source_message,
     record_source_probe,
 )
+from mediatracker.core.tmdb.imdb import normalize_imdb_id
 from mediatracker.db.models import Media, MediaItem, Provider, QualityProfile
 from mediatracker.db.session import release_sqlite_before_network
 from mediatracker.library.parse import slot_from_name
@@ -37,6 +38,7 @@ from mediatracker.providers.sources.loading import close_source, episode_source,
 from mediatracker.providers.sources.registry import for_type
 
 _SLOT_TAIL = re.compile(r"(?i)(?:\s|\.|_|-)*(?:s\d{1,2}e\d{1,2}|saison\s+\d+\s+ep(?:isode)?\s+\d+)\s*$")
+_YEAR_IN_PARENS = re.compile(r"^(.*)\s*\((\d{4})\)\s*$")
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,9 @@ class SourceProbeTarget:
     season: int | None
     episode: int | None
     imdb_id: str | None
+    tmdb_id: int | None = None
+    year: int | None = None
+    original_title: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,12 @@ class SourceProbeRow:
 
 
 @dataclass(frozen=True)
+class ProbeRunResult:
+    results: list[SourceProbeRow]
+    profile_name: str | None
+
+
+@dataclass(frozen=True)
 class _DeferredProbePersistence:
     type_name: str
     issue: str
@@ -67,21 +78,109 @@ class _DeferredProbePersistence:
     reason: str | None
 
 
-def parse_probe_query(raw: str, *, imdb_id: str | None = None) -> SourceProbeTarget:
+def parse_probe_query(
+    raw: str,
+    *,
+    imdb_id: str | None = None,
+    tmdb_id: int | str | None = None,
+) -> SourceProbeTarget:
     text = (raw or "").strip()
     if not text:
         raise ValueError("Indiquez un titre.")
     season, episode = slot_from_name(text)
     title = _SLOT_TAIL.sub("", text).strip() or text
+    title, year_hint = _title_and_year_from_text(title)
     media_type = "series" if season is not None and episode is not None else "film"
-    clean_imdb = (imdb_id or "").strip() or None
+    clean_imdb: str | None = None
+    if (imdb_id or "").strip():
+        clean_imdb = normalize_imdb_id(imdb_id or "")
+    clean_tmdb: int | None = None
+    if tmdb_id is not None and str(tmdb_id).strip():
+        try:
+            parsed = int(str(tmdb_id).strip())
+        except ValueError as exc:
+            raise ValueError("Identifiant TMDB invalide.") from exc
+        if parsed <= 0:
+            raise ValueError("Identifiant TMDB invalide.")
+        clean_tmdb = parsed
     return SourceProbeTarget(
         title=title,
         media_type=media_type,
         season=season,
         episode=episode,
         imdb_id=clean_imdb,
+        tmdb_id=clean_tmdb,
+        year=year_hint,
+        original_title=None,
     )
+
+
+def _title_and_year_from_text(text: str) -> tuple[str, int | None]:
+    match = _YEAR_IN_PARENS.match(text.strip())
+    if not match:
+        return text.strip(), None
+    head = (match.group(1) or "").strip()
+    try:
+        year = int(match.group(2))
+    except ValueError:
+        return text.strip(), None
+    if year < 1900 or year > 2100:
+        return text.strip(), None
+    return head or text.strip(), year
+
+
+def enrich_probe_target(db: Session, settings: Settings, target: SourceProbeTarget) -> SourceProbeTarget:
+    """Année, titres et IMDb pour la sonde (TMDB puis IMDb), sans écrire en base."""
+    if target.tmdb_id is None:
+        return target
+    from mediatracker.core.tmdb import ensure_imdb
+    from mediatracker.core.tmdb.fetch import fetch_title
+
+    title = target.title
+    year = target.year
+    original = target.original_title
+    fetched = fetch_title(db, settings, target.tmdb_id, target.media_type)
+    if fetched is not None:
+        title = (fetched.title or title).strip() or title
+        if fetched.year is not None:
+            year = fetched.year
+        original = (fetched.original_title or "").strip() or original
+    imdb = target.imdb_id
+    raw_imdb = (fetched.imdb_id or "").strip() if fetched is not None else ""
+    if raw_imdb:
+        if raw_imdb.startswith("tt"):
+            imdb = raw_imdb
+        else:
+            try:
+                imdb = normalize_imdb_id(raw_imdb)
+            except ValueError:
+                pass
+    if not imdb:
+        media = Media(
+            type=target.media_type,
+            title=title,
+            year=year,
+            original_title=original,
+            followed=True,
+            tmdb_id=target.tmdb_id,
+        )
+        imdb = ensure_imdb(db, media, settings)
+    return SourceProbeTarget(
+        title=title,
+        media_type=target.media_type,
+        season=target.season,
+        episode=target.episode,
+        imdb_id=imdb,
+        tmdb_id=target.tmdb_id,
+        year=year,
+        original_title=original,
+    )
+
+
+def _probe_imdb_missing_message(target: SourceProbeTarget) -> str:
+    if target.tmdb_id is not None:
+        return "pas d'ID IMDb pour ce titre"
+    return "identifiant TMDB ou IMDb requis pour cette source"
 
 
 def _effective_probe_order(db: Session, settings: Settings) -> list[str]:
@@ -111,6 +210,11 @@ def _source_disabled(db: Session, name: str, settings: Settings) -> str | None:
 
             if not resolve_comet_base_urls(db, settings):
                 return "Comet non configuré."
+        elif name == "stremio_addons":
+            from mediatracker.providers.sources.stremio_addons_config import enabled_stremio_addons
+
+            if not enabled_stremio_addons(db, settings):
+                return "Aucun addon Stremio activé."
         else:
             if not source_base_url(db, settings, name).strip():
                 return "URL non configurée."
@@ -149,6 +253,15 @@ def _persist_probe_batch(db: Session, batch: list[_DeferredProbePersistence], mo
         )
 
 
+def _finalize_probe_reason(source: object, reason: str | None) -> str | None:
+    text = (reason or "").strip()
+    if not text:
+        return reason
+    if getattr(source, "last_json_from_cache", False):
+        return f"{text} — résultat en cache"
+    return reason
+
+
 def _count_hoster_links(candidates, preference: list[str]) -> tuple[int, str | None]:
     kept = 0
     for item in candidates:
@@ -172,8 +285,9 @@ def probe_download_sources(
     *,
     now: datetime | None = None,
     sources: list[str] | None = None,
-) -> list[SourceProbeRow]:
+) -> ProbeRunResult:
     """Interroge chaque source active de l'ordre global, sans lancer de téléchargement."""
+    target = enrich_probe_target(db, settings, target)
     moment = now or datetime.now(timezone.utc)
     order = _effective_probe_order(db, settings)
     if sources:
@@ -188,6 +302,20 @@ def probe_download_sources(
     pending: list[_DeferredProbePersistence] = []
     release_sqlite_before_network(db)
     for name in order:
+        if name == "stremio_addons":
+            release_sqlite_before_network(db)
+            addon_rows, addon_pending = _probe_stremio_addons(
+                db,
+                settings,
+                target,
+                media,
+                item,
+                spec=spec,
+                comet_prefs=comet_prefs,
+            )
+            rows.extend(addon_rows)
+            pending.extend(addon_pending)
+            continue
         label = _source_label(name)
         disabled = _source_disabled(db, name, settings)
         if disabled:
@@ -200,6 +328,7 @@ def probe_download_sources(
                 db,
                 settings,
                 name,
+                target,
                 media,
                 item,
                 preference=preference,
@@ -229,7 +358,8 @@ def probe_download_sources(
         )
     if pending:
         _persist_probe_batch(db, pending, moment)
-    return rows
+    profile_name = getattr(spec, "name", None) if spec is not None else None
+    return ProbeRunResult(rows, profile_name)
 
 
 @dataclass(frozen=True)
@@ -243,9 +373,11 @@ def _stub_media(target: SourceProbeTarget) -> Media:
     return Media(
         type=target.media_type,
         title=target.title,
-        year=2020,
+        year=target.year,
+        original_title=target.original_title,
         followed=True,
         imdb_id=target.imdb_id,
+        tmdb_id=target.tmdb_id,
     )
 
 
@@ -261,6 +393,7 @@ def _probe_one(
     db: Session,
     settings: Settings,
     name: str,
+    target: SourceProbeTarget,
     media: Media,
     item: MediaItem,
     *,
@@ -276,7 +409,7 @@ def _probe_one(
     if "hive" in caps:
         return _probe_hive(db, settings, media, item, profile=profile)
     if "episode" in caps:
-        return _probe_episode(db, settings, name, media, item, spec=spec, comet_prefs=comet_prefs)
+        return _probe_episode(db, settings, name, target, media, item, spec=spec, comet_prefs=comet_prefs)
     if "links" in caps:
         return _probe_links(db, settings, name, media, item, preference=preference, profile=profile)
     return _ProbeOutcome("skipped", 0, "Capacité non supportée.")
@@ -297,10 +430,105 @@ def _probe_hive(db: Session, settings: Settings, media: Media, item: MediaItem, 
     return _ProbeOutcome("found", 1, None)
 
 
+def _probe_stremio_addons(
+    db: Session,
+    settings: Settings,
+    target: SourceProbeTarget,
+    media: Media,
+    item: MediaItem,
+    *,
+    spec,
+    comet_prefs,
+) -> tuple[list[SourceProbeRow], list[_DeferredProbePersistence]]:
+    from mediatracker.providers.sources.stremio_addons_config import (
+        addon_display_label,
+        addon_probe_source_id,
+        enabled_stremio_addons,
+    )
+
+    rows: list[SourceProbeRow] = []
+    pending: list[_DeferredProbePersistence] = []
+    blocked = _source_disabled(db, "stremio_addons", settings)
+    if blocked:
+        rows.append(SourceProbeRow("stremio_addons", _source_label("stremio_addons"), "skipped", 0, blocked, 0))
+        return rows, pending
+    entries = enabled_stremio_addons(db, settings)
+    if not media.imdb_id:
+        message = _probe_imdb_missing_message(target)
+        for index, entry in enumerate(entries):
+            label = addon_display_label(entry, index)
+            rows.append(
+                SourceProbeRow(addon_probe_source_id(index), label, "skipped", 0, message, 0)
+            )
+        return rows, pending
+    from mediatracker.core.download_bitrate_sanity import filter_link_candidates
+    from mediatracker.providers.base import EpisodeQuery, SourceFetchError
+    from mediatracker.providers.sources.loading import close_source, episode_source
+
+    query = EpisodeQuery(
+        title=media.title,
+        original_title=media.original_title,
+        year=media.year,
+        media_type=media.type if media.type in {"film", "series"} else "film",
+        imdb_id=media.imdb_id,
+        season=item.season,
+        episode=item.episode,
+        release_names=[],
+    )
+    prefs = preferences_for(spec) if spec else comet_prefs
+    for index, entry in enumerate(entries):
+        label = addon_display_label(entry, index)
+        source_id = addon_probe_source_id(index)
+        started = time.perf_counter()
+        source = episode_source("stremio_addons", settings, db=db, addons=[entry])
+        if source is None:
+            duration = int((time.perf_counter() - started) * 1000)
+            rows.append(SourceProbeRow(source_id, label, "skipped", 0, "addon indisponible", duration))
+            continue
+        try:
+            if spec is not None:
+                source.quality_profile = spec
+            candidates = list(source.links_for(query, prefs))
+            before = len(candidates)
+            candidates = filter_link_candidates(media, item, candidates)
+            duration = int((time.perf_counter() - started) * 1000)
+            if before and not candidates:
+                outcome = _ProbeOutcome("refused", 0, "filtre taille ou durée")
+            elif not candidates:
+                reason = _finalize_probe_reason(source, getattr(source, "last_empty_reason", None))
+                if reason:
+                    outcome = _ProbeOutcome("refused", 0, reason)
+                elif getattr(source, "last_json_from_cache", False):
+                    outcome = _ProbeOutcome("empty", 0, "résultat en cache")
+                else:
+                    outcome = _ProbeOutcome("empty", 0, None)
+            else:
+                outcome = _ProbeOutcome("found", len(candidates), None)
+        except SourceFetchError as exc:
+            duration = int((time.perf_counter() - started) * 1000)
+            outcome = _ProbeOutcome("error", 0, public_source_message(exc.message or exc.code or ""))
+        finally:
+            close_source(source)
+        rows.append(
+            SourceProbeRow(source_id, label, outcome.issue, outcome.link_count, outcome.reason, duration)
+        )
+        pending.append(
+            _DeferredProbePersistence(
+                "stremio_addons",
+                outcome.issue,
+                outcome.link_count,
+                duration,
+                outcome.reason,
+            )
+        )
+    return rows, pending
+
+
 def _probe_episode(
     db: Session,
     settings: Settings,
     name: str,
+    target: SourceProbeTarget,
     media: Media,
     item: MediaItem,
     *,
@@ -308,7 +536,7 @@ def _probe_episode(
     comet_prefs,
 ) -> _ProbeOutcome:
     if not media.imdb_id:
-        return _ProbeOutcome("skipped", 0, "identifiant IMDb requis pour cette source")
+        return _ProbeOutcome("skipped", 0, _probe_imdb_missing_message(target))
     from mediatracker.providers.sources.comet_urls import resolve_comet_base_urls
 
     comet_urls: list[str] | None = None
@@ -327,7 +555,7 @@ def _probe_episode(
     try:
         query = EpisodeQuery(
             title=media.title,
-            original_title=None,
+            original_title=media.original_title,
             year=media.year,
             media_type=media.type if media.type in {"film", "series"} else "film",
             imdb_id=media.imdb_id,
@@ -348,9 +576,11 @@ def _probe_episode(
         if before and not candidates:
             return _ProbeOutcome("refused", 0, "filtre taille ou durée")
         if not candidates:
-            reason = getattr(source, "last_empty_reason", None)
+            reason = _finalize_probe_reason(source, getattr(source, "last_empty_reason", None))
             if reason:
                 return _ProbeOutcome("refused", 0, reason)
+            if getattr(source, "last_json_from_cache", False):
+                return _ProbeOutcome("empty", 0, "résultat en cache")
             return _ProbeOutcome("empty", 0, None)
         return _ProbeOutcome("found", len(candidates), None)
     except SourceFetchError as exc:

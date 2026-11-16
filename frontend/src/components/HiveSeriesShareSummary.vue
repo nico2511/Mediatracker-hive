@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import { api } from "../api";
 import ActionMenuPopover from "./ActionMenuPopover.vue";
 import HiveBulkShareMenuItems from "./HiveBulkShareMenuItems.vue";
+import HiveEmpreintesPanel from "./HiveEmpreintesPanel.vue";
 import type { HiveShareUiState } from "../hive/hiveBadges";
 import { hiveShareFicheStatus } from "../hive/hiveShareStatus";
 import { hiveRucheLabel, type HiveRucheListRow } from "../hive/hiveRucheLabel";
@@ -15,6 +16,7 @@ const props = defineProps<{
   /** inline : bandeau compact ; card : carte fiche série (maquettes A/B). */
   layout?: "inline" | "card";
   hiveRequestAnnounced?: boolean;
+  openSignal?: number;
 }>();
 
 const emit = defineEmits<{ changed: []; openEmpreintes: [] }>();
@@ -22,7 +24,26 @@ const emit = defineEmits<{ changed: []; openEmpreintes: [] }>();
 defineOptions({ inheritAttrs: false });
 
 const legendOpen = ref(false);
+const empreintesFoldOpen = ref(false);
 const ruches = ref<HiveRucheListRow[]>([]);
+
+const legend = [
+  { title: "Non partagé", text: "Partage manuel : rien n’est proposé sans action dans le menu." },
+  { title: "Préparation", text: "Empreinte en cours avant annonce locale." },
+  { title: "Partagé", text: "Annonce locale prête pour les ruches autorisées." },
+  { title: "Erreur", text: "Lecture ou publication impossible ; voir le menu." },
+];
+
+function onEmpreintesFoldToggle(event: Event) {
+  empreintesFoldOpen.value = (event.target as HTMLDetailsElement).open;
+}
+
+watch(
+  () => props.openSignal,
+  () => {
+    empreintesFoldOpen.value = true;
+  },
+);
 const cardLayout = computed(() => (props.layout ?? "card") === "card");
 
 const stats = computed(() => {
@@ -77,9 +98,9 @@ onMounted(async () => {
   <article
     v-if="hiveEnabled && cardLayout"
     v-bind="$attrs"
-    class="panel fiche-hive-card"
+    class="panel fiche-hive-card fiche-fold fiche-fold--hive"
     aria-label="Hive, partage"
-    data-testid="hive-series-summary"
+    data-testid="hive-fiche-card"
   >
       <svg class="fiche-hive-card-ico" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
         <path
@@ -126,11 +147,34 @@ onMounted(async () => {
         </ActionMenuPopover>
       </div>
       <details
-        class="fiche-hive-card-legend"
-        :open="legendOpen"
-        @toggle="legendOpen = ($event.target as HTMLDetailsElement).open"
+        class="fiche-hive-fold"
+        data-testid="hive-empreintes-fold"
+        :open="empreintesFoldOpen"
+        @toggle="onEmpreintesFoldToggle"
       >
-        <summary>Comprendre les états</summary>
+        <summary>Empreintes et aide</summary>
+        <div class="fiche-hive-fold-body">
+          <HiveEmpreintesPanel
+            embedded
+            :active="empreintesFoldOpen"
+            :media-id="mediaId"
+            :hive-enabled="hiveEnabled"
+            @update="emit('changed')"
+          />
+          <details
+            class="fiche-hive-legend"
+            :open="legendOpen"
+            @toggle="legendOpen = ($event.target as HTMLDetailsElement).open"
+          >
+            <summary>Comprendre les états</summary>
+            <ul>
+              <li v-for="row in legend" :key="row.title">
+                <strong>{{ row.title }}</strong>
+                <span class="hint"> — {{ row.text }}</span>
+              </li>
+            </ul>
+          </details>
+        </div>
       </details>
   </article>
 
@@ -182,12 +226,44 @@ onMounted(async () => {
 .hive-series-menu {
   margin-left: auto;
 }
-.hive-series-legend summary,
-.fiche-hive-card-legend summary {
+.fiche-hive-fold {
+  grid-column: 1 / -1;
+  margin: 0.35rem 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 0.25rem;
+}
+
+.fiche-hive-fold summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.92rem;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  list-style: none;
+}
+
+.fiche-hive-fold summary::-webkit-details-marker {
+  display: none;
+}
+
+.fiche-hive-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: 0.35rem;
+}
+
+.fiche-hive-legend summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 0.92rem;
   text-decoration: underline;
+}
+
+.fiche-hive-legend ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
 }
 
 .fiche-hive-card {
@@ -246,8 +322,30 @@ onMounted(async () => {
   justify-content: center;
 }
 
-.fiche-hive-card-legend {
-  grid-column: 1 / -1;
-  margin: 0.25rem 0 0;
+@media (min-width: 721px) {
+  .fiche-hive-card {
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+  }
+
+  .fiche-hive-card-ico {
+    grid-row: 1 / span 3;
+  }
+
+  .fiche-hive-card-act {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+    margin-top: 0;
+    align-self: start;
+  }
+
+  .fiche-hive-card-act :deep(.action-menu-trigger) {
+    width: auto;
+    min-width: 11.5rem;
+  }
+
+  .fiche-hive-card-ruches,
+  .fiche-hive-fold {
+    grid-column: 2 / -1;
+  }
 }
 </style>
