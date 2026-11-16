@@ -414,6 +414,11 @@
             "title": "Fiches Delta",
             "type": "integer"
           },
+          "imported": {
+            "default": false,
+            "title": "Imported",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -547,6 +552,20 @@
           }
         },
         "title": "Body_create_jellyfin_db_session_api_v1_library_jellyfin_history_db_session_post",
+        "type": "object"
+      },
+      "Body_import_database_backup_api_v1_maintenance_backups_import_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_database_backup_api_v1_maintenance_backups_import_post",
         "type": "object"
       },
       "Body_import_jellyfin_history_api_v1_library_jellyfin_history_import_post": {
@@ -4960,6 +4979,150 @@
           "enabled"
         ],
         "title": "HiveOverviewOut",
+        "type": "object"
+      },
+      "HivePeerLoadItem": {
+        "properties": {
+          "busy": {
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "origin_instance_id": {
+            "title": "Origin Instance Id",
+            "type": "string"
+          },
+          "out_active": {
+            "title": "Out Active",
+            "type": "integer"
+          },
+          "parallel_limit": {
+            "title": "Parallel Limit",
+            "type": "integer"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "ruche_id_hex": {
+            "title": "Ruche Id Hex",
+            "type": "string"
+          },
+          "send_avail_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Send Avail Bps"
+          },
+          "send_cap_bps": {
+            "title": "Send Cap Bps",
+            "type": "integer"
+          },
+          "snapshot_at": {
+            "format": "date-time",
+            "title": "Snapshot At",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ruche_id_hex",
+          "origin_instance_id",
+          "out_active",
+          "parallel_limit",
+          "send_cap_bps",
+          "send_avail_bps",
+          "busy",
+          "snapshot_at",
+          "received_at",
+          "stale"
+        ],
+        "title": "HivePeerLoadItem",
+        "type": "object"
+      },
+      "HivePeerLoadList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HivePeerLoadItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "self": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HivePeerLoadSelf"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "HivePeerLoadList",
+        "type": "object"
+      },
+      "HivePeerLoadSelf": {
+        "properties": {
+          "busy": {
+            "title": "Busy",
+            "type": "boolean"
+          },
+          "instance_id": {
+            "title": "Instance Id",
+            "type": "string"
+          },
+          "out_active": {
+            "title": "Out Active",
+            "type": "integer"
+          },
+          "parallel_limit": {
+            "title": "Parallel Limit",
+            "type": "integer"
+          },
+          "send_avail_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Send Avail Bps"
+          },
+          "send_cap_bps": {
+            "title": "Send Cap Bps",
+            "type": "integer"
+          },
+          "snapshot_at": {
+            "format": "date-time",
+            "title": "Snapshot At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance_id",
+          "out_active",
+          "parallel_limit",
+          "send_cap_bps",
+          "send_avail_bps",
+          "busy",
+          "snapshot_at"
+        ],
+        "title": "HivePeerLoadSelf",
         "type": "object"
       },
       "HiveRequestActionIn": {
@@ -17755,6 +17918,28 @@
         ]
       }
     },
+    "/api/v1/hive/peers/load": {
+      "get": {
+        "operationId": "list_hive_peer_load_api_v1_hive_peers_load_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HivePeerLoadList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Hive Peer Load",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
     "/api/v1/hive/requests/announce": {
       "post": {
         "description": "Publication explicite du signal cherche (efface un retrait m\u00e9moris\u00e9 si besoin).",
@@ -20562,6 +20747,47 @@
         ]
       }
     },
+    "/api/v1/maintenance/backups/import": {
+      "post": {
+        "operationId": "import_database_backup_api_v1_maintenance_backups_import_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_database_backup_api_v1_maintenance_backups_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Database Backup",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
     "/api/v1/maintenance/backups/safety": {
       "get": {
         "description": "List SQLite safety copies under backups/safety (read-only listing).",
@@ -20579,6 +20805,46 @@
           }
         },
         "summary": "List Safety Database Backups",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/maintenance/backups/safety/{name}/download": {
+      "get": {
+        "operationId": "download_safety_database_backup_api_v1_maintenance_backups_safety__name__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Safety Database Backup",
         "tags": [
           "maintenance"
         ]
@@ -20675,6 +20941,46 @@
           }
         },
         "summary": "Restore Safety Database Backup",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/maintenance/backups/{name}/download": {
+      "get": {
+        "operationId": "download_database_backup_api_v1_maintenance_backups__name__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Database Backup",
         "tags": [
           "maintenance"
         ]

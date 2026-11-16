@@ -107,9 +107,11 @@ def test_from_episode_source_swallows_links_for_exception(monkeypatch):
             item,
             media,
             NOW,
+            [],
             None,
             debrid,
             settings,
+            [],
             source_type="comet",
         )
         is None
@@ -169,9 +171,11 @@ def test_second_episode_source_runs_after_first_links_for_raises(monkeypatch):
         item=item,
         media=media,
         now=NOW,
+        preference=[],
         debrid_row=None,
         debrid=debrid,
         settings=settings,
+        known=[],
     )
 
     monkeypatch.setattr("mediatracker.providers.sources.loading.episode_source", factory)

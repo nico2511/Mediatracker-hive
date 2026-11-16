@@ -204,10 +204,9 @@ def download_attempt_profile(
 
 
 def download_source_order(db: Session, media: Media, settings: Settings) -> tuple[str, ...]:
-    from mediatracker.core.pipeline.jobs import _download_sources
-    from mediatracker.core.source_availability import filter_usable_source_order
+    from mediatracker.core.pipeline.jobs import _usable_download_sources
 
-    return tuple(filter_usable_source_order(db, settings, _download_sources(db, media, settings)))
+    return tuple(_usable_download_sources(db, media, settings))
 
 
 def active_hive_fetch_sha_for_item(db: Session, media: Media, item: MediaItem) -> str | None:

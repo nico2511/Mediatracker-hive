@@ -9,6 +9,7 @@ from mediatracker.core.source_availability import (
     DOWNLOAD_BLOCKED_CODE,
     DOWNLOAD_BLOCKED_MESSAGE,
     any_download_source_available,
+    download_source_enabled_in_settings,
     filter_usable_source_order,
     source_usable,
 )
@@ -123,6 +124,21 @@ def test_env_alldebrid_key_unlocks_gated_sources(client, app, monkeypatch):
         db.close()
     body = client.get("/api/v1/settings/sources/status", headers=csrf(client)).json()
     assert "wawacity" in body["available_sources"]
+
+
+def test_globally_disabled_source_not_enabled_in_settings(client, app):
+    login(client)
+    client.patch(
+        "/api/v1/settings",
+        json={"values": {"download_source_order": "wawacity,comet"}},
+        headers=csrf(client),
+    )
+    db = app.state.session_factory()
+    try:
+        assert download_source_enabled_in_settings(db, app.state.settings, "free_telecharger") is False
+        assert download_source_enabled_in_settings(db, app.state.settings, "wawacity") is True
+    finally:
+        db.close()
 
 
 def test_hive_usable_only_when_enabled(client, app):

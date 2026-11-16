@@ -2,11 +2,68 @@
 
 from datetime import datetime, timezone
 
-from tests.conftest import csrf, login
+from tests.conftest import FICTIVE_ALLDEBRID_API_KEY, csrf, login
 
 from mediatracker.db.models import Download, Media, MediaItem
 
 NOW = datetime(2026, 11, 9, 16, 0, tzinfo=timezone.utc)
+
+
+def test_usable_order_intersects_fiche_override_with_globally_enabled(client, app, monkeypatch):
+    monkeypatch.setenv("ALLDEBRID_API_KEY", FICTIVE_ALLDEBRID_API_KEY)
+    from mediatracker.config import get_settings
+
+    app.state.settings = get_settings()
+    login(client)
+    saved = client.patch(
+        "/api/v1/settings",
+        json={"values": {"download_source_order": "wawacity,comet"}},
+        headers=csrf(client),
+    )
+    assert saved.status_code == 200, saved.text
+
+    from mediatracker.core.pipeline.jobs import _usable_download_sources
+
+    db = app.state.session_factory()
+    try:
+        media = Media(
+            type="series",
+            title="Ordre fictif",
+            year=2020,
+            followed=True,
+            source_order="wawacity,free_telecharger,comet",
+        )
+        assert _usable_download_sources(db, media, app.state.settings) == ["wawacity", "comet"]
+    finally:
+        db.close()
+
+
+def test_usable_order_falls_back_to_global_when_fiche_only_disabled_sources(client, app, monkeypatch):
+    monkeypatch.setenv("ALLDEBRID_API_KEY", FICTIVE_ALLDEBRID_API_KEY)
+    from mediatracker.config import get_settings
+
+    app.state.settings = get_settings()
+    login(client)
+    client.patch(
+        "/api/v1/settings",
+        json={"values": {"download_source_order": "comet,wawacity"}},
+        headers=csrf(client),
+    )
+
+    from mediatracker.core.pipeline.jobs import _usable_download_sources
+
+    db = app.state.session_factory()
+    try:
+        media = Media(
+            type="series",
+            title="Retombe global",
+            year=2021,
+            followed=True,
+            source_order="free_telecharger,stremio_addons",
+        )
+        assert _usable_download_sources(db, media, app.state.settings) == ["comet", "wawacity"]
+    finally:
+        db.close()
 
 
 def test_download_sources_uses_global_order_when_fiche_override_empty(client, app):
@@ -24,6 +81,23 @@ def test_download_sources_uses_global_order_when_fiche_override_empty(client, ap
     try:
         media = Media(type="series", title="Ordre fictif", year=2020, followed=True, source_order=None)
         assert _download_sources(db, media, app.state.settings) == ["comet", "wawacity"]
+    finally:
+        db.close()
+
+
+def test_source_unavailable_reason_respects_global_disable(client, app):
+    login(client)
+    client.patch(
+        "/api/v1/settings",
+        json={"values": {"download_source_order": "wawacity,comet"}},
+        headers=csrf(client),
+    )
+    from mediatracker.core.pipeline import unlock
+
+    db = app.state.session_factory()
+    try:
+        reason = unlock._source_unavailable_reason(db, app.state.settings, "free_telecharger")
+        assert reason == "Source désactivée."
     finally:
         db.close()
 

@@ -94,6 +94,10 @@ def _source_unavailable_reason(db: Session | None, settings: Settings, name: str
         if not hive_enabled_in_db(db):
             return "Hive désactivé."
         return None
+    from mediatracker.core.source_availability import download_source_enabled_in_settings
+
+    if not download_source_enabled_in_settings(db, settings, name):
+        return "Source désactivée."
     row = db.scalar(select(Provider).where(Provider.kind == "source", Provider.type == name))
     if row is not None and not row.enabled:
         return "Source désactivée."

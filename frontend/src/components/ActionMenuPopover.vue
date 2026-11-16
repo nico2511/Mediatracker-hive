@@ -2,6 +2,11 @@
 import { nextTick, onUnmounted, ref, watch } from "vue";
 
 import StatusIcon from "./StatusIcon.vue";
+import {
+  computeHorizontalPosition,
+  computeVerticalPosition,
+  viewportBottomLimit,
+} from "./actionMenuPopoverPosition";
 
 const props = withDefaults(
   defineProps<{
@@ -23,7 +28,15 @@ const props = withDefaults(
 const open = ref(false);
 const triggerRef = ref<HTMLButtonElement | null>(null);
 const menuRef = ref<HTMLElement | null>(null);
-const menuStyle = ref({ top: "0px", left: "0px", minWidth: "250px" });
+type MenuStyle = {
+  top: string;
+  left: string;
+  minWidth: string;
+  maxHeight?: string;
+  overflowY?: string;
+};
+
+const menuStyle = ref<MenuStyle>({ top: "0px", left: "0px", minWidth: "250px" });
 const focusIndex = ref(-1);
 
 function menuItems(): HTMLElement[] {
@@ -37,28 +50,62 @@ function menuItems(): HTMLElement[] {
 
 const VIEWPORT_MARGIN = 8;
 
+const MENU_ITEM_ESTIMATE_PX = 44;
+const MENU_CHROME_PADDING_PX = 12;
+
+function measuredMenuHeight(menu: HTMLElement): number {
+  const measured = Math.max(menu.offsetHeight, menu.scrollHeight);
+  if (measured > 0) {
+    return measured;
+  }
+  const itemCount = menu.querySelectorAll('[role="menuitem"]').length;
+  if (!itemCount) {
+    return 0;
+  }
+  return itemCount * MENU_ITEM_ESTIMATE_PX + MENU_CHROME_PADDING_PX;
+}
+
+function mobileTabbarTop(): number | null {
+  const tabbar = document.querySelector<HTMLElement>(".mobile-tabbar");
+  if (!tabbar) {
+    return null;
+  }
+  const display = window.getComputedStyle(tabbar).display;
+  if (display === "none") {
+    return null;
+  }
+  const rect = tabbar.getBoundingClientRect();
+  if (rect.height <= 0) {
+    return null;
+  }
+  return rect.top;
+}
+
 function updatePosition() {
   const el = triggerRef.value;
   if (!el) {
     return;
   }
   const rect = el.getBoundingClientRect();
-  const viewport = document.documentElement.clientWidth || window.innerWidth;
-  const minWidth = Math.min(
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const cssMinWidth = Math.min(
     props.triggerVariant === "toggle" ? Math.max(rect.width, 250) : Math.max(rect.width, 12 * 16),
-    viewport - VIEWPORT_MARGIN * 2,
+    viewportWidth - VIEWPORT_MARGIN * 2,
   );
-  const menuWidth = Math.max(menuRef.value?.offsetWidth ?? 0, minWidth);
-  // Right-align on the trigger when it sits in the right half or when a left-aligned menu would overflow.
-  const alignRight = rect.left + rect.width / 2 > viewport / 2 || rect.left + menuWidth > viewport - VIEWPORT_MARGIN;
-  let left = alignRight ? rect.right - menuWidth : rect.left;
-  left = Math.min(left, viewport - VIEWPORT_MARGIN - menuWidth);
-  left = Math.max(left, VIEWPORT_MARGIN);
+  const menuWidth = Math.max(menuRef.value?.offsetWidth ?? 0, cssMinWidth);
+  const { left, minWidth } = computeHorizontalPosition(rect, menuWidth, viewportWidth, cssMinWidth);
+  const menuHeight = menuRef.value ? measuredMenuHeight(menuRef.value) : 0;
+  const bottomLimit = viewportBottomLimit(viewportHeight, mobileTabbarTop());
+  const vertical = computeVerticalPosition(rect, menuHeight, bottomLimit);
   menuStyle.value = {
-    top: `${rect.bottom + 6}px`,
+    ...vertical,
     left: `${left}px`,
     minWidth: `${minWidth}px`,
   };
+  if (menuRef.value && menuRef.value.offsetHeight === 0) {
+    requestAnimationFrame(() => updatePosition());
+  }
 }
 
 function closeMenu() {

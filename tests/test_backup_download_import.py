@@ -102,10 +102,27 @@ def test_download_backup_404_and_traversal(client, settings):
     login(client)
     missing = client.get("/api/v1/maintenance/backups/not-a-backup.db/download", headers=csrf(client))
     assert missing.status_code == 404
-    evil = client.get("/api/v1/maintenance/backups/%2e%2e%2fapp.db/download", headers=csrf(client))
-    assert evil.status_code == 404
-    with pytest.raises(BackupCatalogError):
-        resolve_backup_file(settings, "../app.db")
+
+    for bad_name in ("../app.db", "subdir/evil.db", "app.db", ".."):
+        with pytest.raises(BackupCatalogError):
+            resolve_backup_file(settings, bad_name)
+
+    live_db = sqlite_path(settings.database_url)
+    assert live_db is not None
+    live_header = live_db.read_bytes()[:16]
+    sqlite_magic = b"SQLite format 3\x00"
+
+    app_db = client.get("/api/v1/maintenance/backups/app.db/download", headers=csrf(client))
+    assert app_db.status_code == 404
+    assert app_db.content[:16] != live_header
+    assert app_db.content[:16] != sqlite_magic
+
+    # %2e%2e%2f est normalisé côté client HTTP et peut tomber sur le fallback SPA (200 HTML).
+    # Un seul segment avec « .. » atteint la route API ; le resolver doit refuser.
+    dotted = client.get("/api/v1/maintenance/backups/..%2Fapp.db/download", headers=csrf(client))
+    assert dotted.status_code == 404
+    assert dotted.content[:16] != live_header
+    assert dotted.content[:16] != sqlite_magic
 
 
 def test_download_requires_admin_scope(client, settings):

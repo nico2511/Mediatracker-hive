@@ -155,6 +155,7 @@ Champs **tous optionnels** ; une valeur vide laisse le réglage actuel ou le dé
 | Free-Télécharger | URL dans la fiche fournisseur `free_telecharger` (pas de clé SQLite dédiée) |
 | Comet (une ligne par instance) | `comet_base_urls` |
 | Torrentio | `torrentio_base_url` |
+| Addons Stremio (optionnel) | `stremio_addons` |
 
 Validation : chaque adresse renseignée doit commencer par `http://` ou `https://`. **Tester Wawacity** appelle le même test que dans l’assistant historique (`POST /api/v1/setup/probe`). Enregistrement groupé : `POST /api/v1/setup/sources`.
 
@@ -207,6 +208,7 @@ flowchart LR
     H[Hive]
     C[Comet]
     T[Torrentio]
+    X[Addons Stremio]
   end
   subgraph mt [MediaTracker]
     S[Sélection lien / profil]
@@ -235,8 +237,11 @@ Identifiants dans l’UI (**Réglages → Sources**) :
 | `hive` | Pairs des ruches ; nécessite Hive activé et membre joignable |
 | `comet` | Instance(s) Comet (liste d’URLs, défaut public possible) |
 | `torrentio` | Torrentio / aimants |
+| `stremio_addons` | Une ou plusieurs URLs d’addons Stremio (torrents et liens débridables selon la réponse de l’addon ; sans clé dans l’URL) |
 
-Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio`. Au moins une source doit rester activée.
+Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio,stremio_addons`. Au moins une source doit rester activée.
+
+Une ancienne entrée dédiée aux flux DDL UwU+ est **migrée automatiquement** vers la liste **Addons Stremio** (même URL, une ligne d’addon).
 
 Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](#docs-reglages-sources)), ordre des **hébergeurs** (`hoster_preference`).
 
@@ -260,7 +265,7 @@ Lorsque plusieurs sources ont été essayées dans le même passage, le message 
 
 ### Hive dans la file Download
 
-Depuis la standardisation LOT4, un téléchargement Hive passe par la **même file** qu’un lien AllDebrid : octroi pair (`fetch-grant`) et téléchargement HTTP via aria2 avec en-têtes dédiés — **pas** d’onglet « transferts » séparé ni de `HiveTransferJob` actif. Détails : [Hive](#docs-hive).
+Un téléchargement Hive passe par la **même file** qu’un lien AllDebrid : octroi pair (`fetch-grant`) et téléchargement HTTP via aria2 avec en-têtes dédiés — **pas** d’écran de transferts séparé. Lorsque plusieurs pairs proposent le même fichier, le choix tient compte de la **charge** signalée par les pairs et du débit mesuré ; en cas de pair occupé, repli vers un autre pair ou la source suivante. Détails : [Hive](#docs-hive).
 
 ### AllDebrid
 
@@ -383,10 +388,24 @@ URL : `/reglages/sources`
 
 Les mêmes URLs peuvent être préremplies à l’**étape Sources** de l’assistant (`/configuration`) ; voir [Premier démarrage — Sources](#docs-premier-demarrage).
 
+### Présentation de la page
+
+- Chaque source est une **carte** avec un interrupteur **Activée** / **Désactivée**, un libellé lisible (plus d’identifiant technique en titre) et un fil d’Ariane court (rôle de la source).
+- Dans **Ordre des sources**, seules les sources **activées** se réordonnent ; les sources désactivées restent visibles en bas, grisées, avec la mention **désactivée**.
+- Les URL longues (instances Comet, addons Stremio) sont **tronquées** avec boutons **Voir** et **Copier**.
+
 ### Ordre et activation
 
-- **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`. Au moins une source doit rester cochée.
+- **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester cochée.
 - État en ligne / panne : API `GET /api/v1/settings/sources/status` (affiché dans la page).
+
+### Addons Stremio
+
+Source `stremio_addons` : liste ordonnée d’addons `{ url, enabled }`, même ergonomie que les instances Comet (ajout, suppression, ordre).
+
+- Une requête `…/stream/movie|series/…json` par addon activé ; cache et délai par domaine.
+- Les segments d’URL contenant des clés de débrid ou de tracker sont **retirés** à la saisie ; une URL encore garnie d’un secret est refusée à l’appel.
+- Les flux manifestement informatifs ou lecteurs seuls sont ignorés ; la sélection suit les **profils de qualité** (torrents, aimants, liens débridables).
 
 ### Rythme et cache
 
@@ -401,7 +420,9 @@ Les mêmes URLs peuvent être préremplies à l’**étape Sources** de l’assi
 
 ### Hébergeurs (liens débrid)
 
-- **`hoster_preference`** : ordre CSV des hébergeurs acceptés pour les liens HTML. Certains hébergeurs sont **refusés** par le serveur sans réglage utilisateur.
+- **`hoster_preference`** : ordre des hébergeurs acceptés pour les liens HTML, via une liste réordonnable dans l’interface.
+- Les noms proposés combinent une liste **statique** connue de l’application et la liste **publique AllDebrid** (`/v4/hosts`, mise en cache côté serveur).
+- Certains hébergeurs restent **refusés** par le serveur sans réglage utilisateur. Les erreurs de saisie affichent le **détail** renvoyé par l’API (par ex. hébergeur inconnu).
 
 ### URLs par source
 
@@ -410,18 +431,21 @@ Les mêmes URLs peuvent être préremplies à l’**étape Sources** de l’assi
 | `wawacity_base_url` | Wawacity (obligatoire pour scanner) |
 | `wawacity_user_agent` | User-Agent optionnel |
 | `free_telecharger_user_agent` | Free-Télécharger (URL via fiche fournisseur en base) |
-| `torrentio_base_url` | Torrentio (défaut `https://torrentio.strem.fun`) |
+| `torrentio_base_url` | Torrentio (défaut public dans l’image) |
 | `comet_base_urls` | Liste d’instances Comet (une par ligne) ; `comet_base_url` garde la première |
+| `stremio_addons` | JSON ou liste d’addons Stremio |
 
 Migration de domaine Wawacity : bannière et actions **Accepter / Rétablir** si une redirection est proposée (`wawacity_domain_propose_only` en env au premier boot).
 
 ### Test de source
 
-Bloc **Tester une source** : titre optionnel et identifiant IMDb optionnel.
+Bloc **Tester les sources** :
 
-- **Tester** (sur une carte source) ou **Tester toutes** : une requête témoin par source activée ; aucun téléchargement n’est lancé.
-- Chaque carte affiche le **dernier test** : horodatage, issue (`trouvé`, `aucun résultat`, `erreur`, `refusée`, etc.), motif éventuel et durée en ms.
-- Un test manuel qui aboutit à « aucun résultat » remet la source **en ligne** et efface un ancien état de panne lié à ce test.
+- **Titre** obligatoire (film, ou épisode avec suffixe `S01E02`). Année optionnelle entre parenthèses dans le titre.
+- **Identifiant TMDB** optionnel : le serveur récupère titre, année et identifiant IMDb associé pour la sonde (sans modifier la base).
+- **Tester** (sur une carte) ou **Tester toutes** : une requête témoin par source (ou **une ligne par addon Stremio activé**) ; aucun téléchargement.
+- Les résultats reprennent les **messages exacts** du moteur (trouvé, aucun résultat, refus profil, erreur, etc.), la **durée** et le **profil de qualité** utilisé.
+- Chaque carte affiche aussi le **dernier test** enregistré (horodatage, issue, motif, durée). Un test manuel « aucun résultat » remet la source **en ligne** et efface un ancien état de panne lié à ce test.
 
 ### Hive
 
@@ -541,7 +565,7 @@ URL : `/reglages/disque`
 | `disk_min_free_gb` | 5 | 0–1024 | Pause téléchargements si espace libre insuffisant (`0` = off) |
 | `backup_keep` | 7 | 1–90 | Sauvegardes SQLite quotidiennes dans `/config/backups` |
 
-Carte espace disque (données et config). Bloc **Sauvegarde / restauration** de la base.
+Carte espace disque (données et config). Bloc **Sauvegarde / restauration** : liste des copies, téléchargement, import d’un fichier `.db`, restauration avec aperçu et confirmation.
 
 Voir [Sauvegarde](#docs-sauvegarde).
 
@@ -555,7 +579,7 @@ URL : `/reglages/hive`
 
 Page composant dédié (pas dans `SettingsSectionView`).
 
-Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
+Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_request_on_miss`, `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
 
 Guide utilisateur : [Hive](#docs-hive).
 
@@ -646,9 +670,18 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 | **Derniers films** (`/nouveautes/films`) | Parcourir les films (cinéma, streaming, supports physiques) |
 | **Dernières séries** (`/nouveautes/series`) | Séries et diffusions à l’antenne |
 | **Suivre** | Rechercher un titre et l’ajouter à votre liste de suivi |
-| Fiche média | Métadonnées, saisons, estimation de disponibilité pour les films |
+| **Médias** (`/medias`) | Liste de vos fiches : chargement progressif, affiches et bannières via le cache local TMDB, badges Hive chargés ensuite (sans bloquer la grille) |
+| Fiche média | Métadonnées, saisons, estimation de disponibilité pour les films ; bloc Hive unifié si Hive est actif |
 
 Les anciennes URL d’essai `/tmdb`, `/tmdb/films` et `/tmdb/series` redirigent vers les écrans ci-dessus.
+
+### Fiche non suivie
+
+Lorsque vous avez arrêté le suivi d’un titre mais que la fiche reste en base (fichiers sur le disque, historique, etc.) :
+
+- Le bandeau propose **Suivre à nouveau** pour réactiver le suivi sans repasser par **Suivre**.
+- Les actions avancées (nettoyage, suppression de fichiers, etc.) sont regroupées sous **Plus d’actions** ; la zone de suppression définitive de la fiche n’apparaît pas sur cet écran épuré.
+- Le partage **Hive** reste accessible dans le même bloc que pour une fiche suivie, avec l’état adapté (fichier présent ou non).
 
 ### Profils de qualité
 
@@ -810,8 +843,17 @@ Le mode **tirage seul** (`pull_only`) : l’instance peut recevoir des fichiers 
 - **Catalogue Hive** : œuvres partagées par les pairs ; bouton **Suivre** côté récepteur.
 - **Repartage automatique** : option **Repartager automatiquement les fichiers reçus** (`hive_catalog_auto_share`, **désactivée** par défaut).
 - **Accueil** : section **Dernières dispos Hive** lorsque des entrées existent.
+- Sur une **fiche média**, un seul bloc **Hive** regroupe partage, exclusions par ruche et état de préparation.
 
 Avant qu’un fichier soit visible des pairs, l’instance calcule une **empreinte** (empreinte SHA par blocs du fichier) via un processus dédié dans le conteneur.
+
+### Demandes et liste Recherché
+
+Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Reçues**, **Recherché**.
+
+- Rien n’est partagé tant que vous ne l’avez pas décidé ; une **demande** prévient les membres qui possèdent déjà le fichier (demandes **anonymes** côté ruche).
+- Si aucun pair ne l’a, le titre peut figurer dans **Recherché** pour qu’un autre membre se le procure puis le partage.
+- **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid).
 
 ### Téléchargements
 
@@ -823,7 +865,9 @@ Hive est une **source** comme les autres dans l’ordre de téléchargement (`hi
 
 Il n’y a **pas** d’écran de transferts Hive séparé : tout passe par la file **Téléchargements** habituelle.
 
-Si le pair est injoignable, l’orchestrateur peut **essayer la source suivante** selon l’ordre configuré dans **Réglages → Sources**.
+Si le pair est injoignable ou **occupé** (limite de transferts, fenêtre horaire, débit saturé), MediaTracker peut **classer** les sources disponibles d’après les instantanés de charge reçus des pairs, choisir un pair moins chargé, puis **basculer** vers un autre pair ou une autre source de l’ordre **Réglages → Sources**.
+
+Les pairs publient périodiquement un instantané : transferts sortants en cours, plafond de parallélisme, plafond de débit d’envoi, débit disponible estimé, indicateur **occupé**. Les données reçues lors des échanges Hive sont conservées un temps limité ; les entrées trop anciennes sont traitées comme inconnues.
 
 ### Limites de débit et fenêtre horaire
 
@@ -851,6 +895,10 @@ Chaque instance doit avoir :
 Exemple de fichier Compose : [exemples/docker-compose-deux-instances-hive.yml](exemples/docker-compose-deux-instances-hive.yml).
 
 Pour des scénarios avancés (proxy multi-domaines, sandboxes), voir aussi [exemples/docker-compose-hive-sandbox.example.yml](exemples/docker-compose-hive-sandbox.example.yml).
+
+### Suivi dans Santé
+
+**Santé → Performance** : encart **Ruche** avec vos envois en cours, débit sortant actuel, décompte de pairs joignables / occupés / inconnus, puis le détail par ruche (barre de charge, état libre / occupé / inconnu).
 
 ## Home Assistant
 
@@ -956,7 +1004,14 @@ Gardez la même **`SECRET_KEY`** si vous restaurez une sauvegarde ou copiez `/co
 
 ### Depuis l’interface
 
-**Réglages → Disque et sauvegardes** : composant **Sauvegarde / restauration** de la base (export et import de fichier SQLite selon les actions exposées dans l’UI).
+**Réglages → Disque et sauvegardes** : composant **Sauvegarde / restauration** de la base.
+
+- **Liste** des copies automatiques et des copies de sécurité (avant réinitialisation ou restauration).
+- **Télécharger** : enregistre le fichier `.db` sur votre appareil (sauvegardes quotidiennes ou copies de sécurité).
+- **Importer** : envoi d’un fichier `.db` ; l’application l’enregistre dans `backups/` puis ouvre le même flux qu’une restauration (aperçu : version, schéma, nombre de fiches, compatibilité).
+- **Restaurer** : confirmation explicite ; une copie de sécurité de la base courante est créée avant remplacement. Après succès, rechargement de l’application.
+
+Les sauvegardes dont le nom commence par `import-` proviennent d’un import manuel. Gardez la **`SECRET_KEY`** de l’instance d’origine si la base contient des secrets chiffrés ; l’identité **Hive** est conservée telle quelle dans le fichier importé.
 
 ### Réinitialiser la base
 
@@ -1023,7 +1078,8 @@ Pour **découvrir de nouvelles pages** côté source (retéléchargement sans li
 
 ### Hive
 
-- Pair injoignable : repli vers une autre source ; vérifier **`hive_public_address`** et le reverse proxy.
+- Pair injoignable ou occupé : repli vers un autre pair ou la source suivante ; vérifier **`hive_public_address`**, la fenêtre horaire et les limites de débit dans **Réglages → Hive**.
+- **Santé → Performance → Ruche** : si tous les pairs sont « inconnus », peu d’échanges récents — attendre un échange catalogue ou un transfert pour rafraîchir les instantanés (données périmées après environ dix minutes sans nouvelle).
 - **Identité perdue** : réinitialisation d’identité dans Réglages Hive.
 
 ### Mise à jour Watchtower

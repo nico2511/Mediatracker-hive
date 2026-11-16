@@ -18,9 +18,7 @@ from mediatracker.core.profile_attempt_adapters import legacy_comet_context
 from mediatracker.core.quality_profile import ensure_default_profile, preferences_for, profile_from_row
 from mediatracker.core.selection import (
     BLOCKED_SOURCE_HOSTERS,
-    DEFAULT_DOWNLOAD_SOURCE_ORDER,
     hoster_allowed,
-    parse_download_source_order,
     parse_hoster_preference,
 )
 from mediatracker.core.source_state import (
@@ -184,11 +182,9 @@ def _probe_imdb_missing_message(target: SourceProbeTarget) -> str:
 
 
 def _effective_probe_order(db: Session, settings: Settings) -> list[str]:
-    raw = _text_setting(db, "download_source_order", settings.download_source_order or DEFAULT_DOWNLOAD_SOURCE_ORDER)
-    try:
-        return parse_download_source_order(raw)
-    except ValueError:
-        return parse_download_source_order(DEFAULT_DOWNLOAD_SOURCE_ORDER)
+    from mediatracker.core.source_availability import global_enabled_download_sources
+
+    return global_enabled_download_sources(db, settings)
 
 
 def _source_disabled(db: Session, name: str, settings: Settings) -> str | None:

@@ -31,6 +31,36 @@ def source_usable(db: Session, settings: Settings, name: str) -> bool:
     return is_connected(settings, db)
 
 
+def global_enabled_download_sources(db: Session, settings: Settings) -> list[str]:
+    """Sources activées dans Réglages (même critère que l’UI et le probe)."""
+    from mediatracker.core.pipeline.jobs import _text_setting
+    from mediatracker.core.selection import DEFAULT_DOWNLOAD_SOURCE_ORDER, parse_download_source_order
+
+    raw = _text_setting(
+        db, "download_source_order", settings.download_source_order or DEFAULT_DOWNLOAD_SOURCE_ORDER
+    )
+    try:
+        return parse_download_source_order(raw)
+    except ValueError:
+        return parse_download_source_order(DEFAULT_DOWNLOAD_SOURCE_ORDER)
+
+
+def filter_enabled_download_source_order(db: Session, settings: Settings, order: Sequence[str]) -> list[str]:
+    enabled = global_enabled_download_sources(db, settings)
+    enabled_set = set(enabled)
+    kept = [name for name in order if name in enabled_set]
+    if kept:
+        return kept
+    return list(enabled)
+
+
+def download_source_enabled_in_settings(db: Session, settings: Settings, name: str) -> bool:
+    key = (name or "").strip().lower()
+    if not key:
+        return False
+    return key in set(global_enabled_download_sources(db, settings))
+
+
 def filter_usable_source_order(db: Session, settings: Settings, order: Sequence[str]) -> list[str]:
     return [name for name in order if source_usable(db, settings, name)]
 

@@ -38,9 +38,13 @@ def _download_sources(db: Session, media: Media, settings: Settings) -> list[str
 
 
 def _usable_download_sources(db: Session, media: Media, settings: Settings) -> list[str]:
-    from mediatracker.core.source_availability import filter_usable_source_order
+    from mediatracker.core.source_availability import (
+        filter_enabled_download_source_order,
+        filter_usable_source_order,
+    )
 
-    return filter_usable_source_order(db, settings, _download_sources(db, media, settings))
+    order = filter_enabled_download_source_order(db, settings, _download_sources(db, media, settings))
+    return filter_usable_source_order(db, settings, order)
 
 
 def _already_local(db: Session, item: MediaItem, now: datetime, settings: Settings) -> bool:
