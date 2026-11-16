@@ -76,6 +76,7 @@ def _cards(
                 "media_type": hit.media_type,
                 "title": hit.title,
                 "year": hit.year,
+                "release_date": hit.release_date.isoformat() if hit.release_date else None,
                 "overview": hit.overview,
                 "poster_url": hit.poster_url,
                 "vote_average": hit.rating,

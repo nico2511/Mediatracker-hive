@@ -454,6 +454,10 @@ nav a.router-link-active {
   background: rgb(0 0 0 / 55%);
 }
 
+.dialog-backdrop.dialog-backdrop-top {
+  z-index: 60;
+}
+
 .dialog {
   width: min(440px, 100%);
 }

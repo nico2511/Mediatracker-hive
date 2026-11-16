@@ -117,6 +117,24 @@ def test_discover_params_cinema_vod_dvd_and_series_fr(recording_client, client, 
                 assert "first_air_date.gte" in params
 
 
+def test_trial_cards_expose_release_date(recording_client, client, app, monkeypatch):
+    login(client)
+    _, mock = recording_client
+    monkeypatch.setattr("mediatracker.core.tmdb_trial._client", lambda db, settings: mock)
+
+    home = client.get("/api/v1/tmdb-trial/home")
+    assert home.status_code == 200
+    film = home.json()["cinema_films"][0]
+    assert film["release_date"] == "2026-05-01"
+    assert film["year"] == 2026
+
+    browse = client.get("/api/v1/tmdb-trial/browse", params={"type": "series", "release_kind": "new", "page": 1})
+    assert browse.status_code == 200
+    series = browse.json()["items"][0]
+    assert series["release_date"] == "2026-04-10"
+    assert series["year"] == 2026
+
+
 def test_home_on_air_uses_air_date_discover(recording_client, client, app, monkeypatch):
     login(client)
     transport, mock = recording_client

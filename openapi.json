@@ -13190,6 +13190,17 @@
             ],
             "title": "Poster Url"
           },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
           "subtitle": {
             "anyOf": [
               {

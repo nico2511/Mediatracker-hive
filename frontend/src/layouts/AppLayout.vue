@@ -32,6 +32,7 @@ const menuOpen = ref(false);
 const collapsed = ref(false);
 const jellyfinHome = ref<string | null>(null);
 const { hiveEnabled, refreshHive } = useHiveEnabled();
+const hideMobileNav = computed(() => Boolean(route.meta.immersive));
 
 const navItems = computed((): NavItem[] => {
   const items: NavItem[] = [
@@ -190,6 +191,6 @@ async function onNavAction(item: NavItem) {
       <ConnectivityBar />
       <router-view />
     </main>
-    <MobileBottomNav @menu="menuOpen = !menuOpen" />
+    <MobileBottomNav v-if="!hideMobileNav" @menu="menuOpen = !menuOpen" />
   </div>
 </template>

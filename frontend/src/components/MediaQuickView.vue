@@ -7,7 +7,7 @@ import type { QuickTarget } from "../quick";
 import StatusIcon from "./StatusIcon.vue";
 import TmdbPosterImg from "./TmdbPosterImg.vue";
 
-const props = defineProps<{ target: QuickTarget | null; follow?: boolean }>();
+const props = defineProps<{ target: QuickTarget | null; follow?: boolean; stackOnTop?: boolean }>();
 const emit = defineEmits<{ close: []; changed: [] }>();
 const router = useRouter();
 
@@ -268,7 +268,13 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 
 <template>
   <Teleport to="body">
-    <div v-if="view" class="dialog-backdrop" role="presentation" @click.self="emit('close')">
+    <div
+      v-if="view"
+      class="dialog-backdrop"
+      :class="{ 'dialog-backdrop-top': stackOnTop }"
+      role="presentation"
+      @click.self="emit('close')"
+    >
       <div class="panel dialog quick" role="dialog" aria-modal="true" aria-labelledby="quick-title">
         <div class="quick-layout">
           <TmdbPosterImg v-if="view.posterUrl" :url="view.posterUrl" />
@@ -312,7 +318,13 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
         </p>
       </div>
     </div>
-    <div v-if="view && followOpen" class="dialog-backdrop" role="presentation" @click.self="followOpen = false">
+    <div
+      v-if="view && followOpen"
+      class="dialog-backdrop"
+      :class="{ 'dialog-backdrop-top': stackOnTop }"
+      role="presentation"
+      @click.self="followOpen = false"
+    >
       <form class="panel dialog follow" role="dialog" aria-modal="true" aria-labelledby="follow-title" @submit.prevent>
         <h2 id="follow-title">Suivre {{ view.title }}</h2>
         <p>Commencer à télécharger maintenant ?</p>

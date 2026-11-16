@@ -132,8 +132,36 @@ describe("TmdbHomeView", () => {
     expect(apiMock).toHaveBeenCalledWith("/api/v1/dashboard");
   });
 
+  it("propose Découvrir seulement en mobile", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("720px") ? false : false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { value: 400, configurable: true });
+    const wrapper = mount(TmdbHomeView, { global: { stubs: { RouterLink: true } } });
+    await flushPromises();
+    expect(wrapper.find(".discover-entry").exists()).toBe(true);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("720px"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
+    const wide = mount(TmdbHomeView, { global: { stubs: { RouterLink: true } } });
+    await flushPromises();
+    expect(wide.find(".discover-entry").exists()).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
   it("affiche les blocs personnels au-dessus des rangées TMDB", async () => {
-    const wrapper = mount(TmdbHomeView);
+    const wrapper = mount(TmdbHomeView, { global: { stubs: { RouterLink: true } } });
     await flushPromises();
     const text = wrapper.text();
     expect(text).toContain("Progression");

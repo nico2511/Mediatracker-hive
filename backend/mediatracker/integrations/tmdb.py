@@ -62,6 +62,7 @@ class TmdbHit:
     episode_count: int | None = None
     runtime: int | None = None
     seasons: tuple[TmdbSeasonBrief, ...] = ()
+    release_date: date | None = None
 
 
 @dataclass(frozen=True)
@@ -188,11 +189,12 @@ def _hit(
     original: object = None,
 ) -> TmdbHit:
     localized = row.get("name") if media_type == "series" else row.get("title")
+    released = _day(aired if isinstance(aired, str) else None)
     return TmdbHit(
         tmdb_id=int(row["id"]),
         media_type=media_type,
         title=title,
-        year=_year(aired),
+        year=_year(aired if isinstance(aired, str) else None),
         overview=row.get("overview") or None,
         poster_url=poster_url(row.get("poster_path")),
         backdrop_url=backdrop_url(row.get("backdrop_path")),
@@ -205,6 +207,7 @@ def _hit(
         season_count=_count(row.get("number_of_seasons")),
         episode_count=_count(row.get("number_of_episodes")),
         runtime=_count(row.get("runtime")),
+        release_date=released,
     )
 
 

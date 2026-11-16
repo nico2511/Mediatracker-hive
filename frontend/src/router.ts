@@ -17,6 +17,7 @@ import SettingsSectionView from "./views/settings/SettingsSectionView.vue";
 import JournalView from "./views/JournalView.vue";
 import TmdbHomeView from "./views/TmdbHomeView.vue";
 import TmdbCatalogView from "./views/TmdbCatalogView.vue";
+import DiscoverView from "./views/DiscoverView.vue";
 import HiveShell from "./views/hive/HiveShell.vue";
 import HiveCatalogueView from "./views/hive/HiveCatalogueView.vue";
 import HiveWorkView from "./views/hive/HiveWorkView.vue";
@@ -28,6 +29,7 @@ import HiveWantedRequestsView from "./views/hive/HiveWantedRequestsView.vue";
 import SettingsHiveSection from "./views/settings/SettingsHiveSection.vue";
 import SettingsSourcesSection from "./views/settings/SettingsSourcesSection.vue";
 import { useHiveEnabled } from "./composables/useHive";
+import { discoverBlockedOnDesktop } from "./discoverRoute";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -39,6 +41,7 @@ const router = createRouter({
       component: AppLayout,
       children: [
         { path: "", component: TmdbHomeView },
+        { path: "decouvrir", component: DiscoverView, meta: { immersive: true, mobileOnly: true } },
         { path: "suivre", component: FollowView },
         { path: "medias", component: MediaListView },
         { path: "nouveautes/series", component: TmdbCatalogView, props: { mediaType: "series" } },
@@ -109,6 +112,9 @@ router.beforeEach(async (to) => {
   await refreshHive();
   if (to.meta.hive && !hiveEnabled.value) {
     return "/reglages/hive";
+  }
+  if (to.meta.mobileOnly && discoverBlockedOnDesktop()) {
+    return "/";
   }
   return true;
 });

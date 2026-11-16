@@ -19,6 +19,7 @@ class TmdbTrialCard(BaseModel):
     media_type: str
     title: str
     year: int | None = None
+    release_date: str | None = None
     overview: str | None = None
     poster_url: str | None = None
     vote_average: float | None = None

@@ -166,8 +166,9 @@ onUnmounted(() => {
 
 <template>
   <section class="stack home-page">
-    <div class="row">
+    <div class="row home-title-row">
       <h1>Accueil</h1>
+      <router-link v-if="!wide" to="/decouvrir" class="discover-entry">Découvrir</router-link>
     </div>
     <p class="hint">Rangées alimentées par TMDB (France, fr-FR).</p>
     <p v-if="error" class="error">{{ error }}</p>
@@ -447,3 +448,21 @@ onUnmounted(() => {
     <MediaQuickView :target="quick" :follow="quickFollow" @close="quick = null" @changed="load" />
   </section>
 </template>
+
+<style scoped>
+.home-title-row {
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.discover-entry {
+  margin-left: auto;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+</style>

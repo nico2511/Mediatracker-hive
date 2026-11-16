@@ -124,6 +124,27 @@ describe("MediaQuickView confirm()", () => {
   });
 });
 
+describe("MediaQuickView stackOnTop", () => {
+  it("ajoute dialog-backdrop-top quand stackOnTop est actif", async () => {
+    const wrapper = mount(MediaQuickView, {
+      props: {
+        target: { title: "Démo", mediaType: "film", tmdbId: 1 },
+        stackOnTop: true,
+      },
+      global: {
+        stubs: {
+          Teleport: true,
+          RouterLink: true,
+          TmdbPosterImg: true,
+          StatusIcon: true,
+        },
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".dialog-backdrop-top").exists()).toBe(true);
+  });
+});
+
 describe("MediaQuickView openFiche()", () => {
   beforeEach(() => {
     apiMock.mockReset();
