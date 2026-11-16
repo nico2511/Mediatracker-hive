@@ -8525,6 +8525,39 @@
             ],
             "title": "Tmdb Runtime Min"
           },
+          "tmdb_trailer_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tmdb Trailer Kind"
+          },
+          "tmdb_trailer_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tmdb Trailer Language"
+          },
+          "tmdb_trailer_youtube_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tmdb Trailer Youtube Key"
+          },
           "tmdb_url": {
             "anyOf": [
               {
