@@ -120,6 +120,9 @@ class TmdbTitle:
     watch_providers_fr: tuple[str, ...] = ()
     release_by_region: dict[str, dict[str, str | None]] | None = None
     imdb_id: str | None = None
+    trailer_youtube_key: str | None = None
+    trailer_kind: str | None = None
+    trailer_language: str | None = None
 
 
 def parse_tmdb_url(url: str) -> TmdbRef:
@@ -676,9 +679,14 @@ class TmdbClient:
         return None
 
     def _movie(self, tmdb_id: int) -> TmdbTitle:
+        from mediatracker.integrations.tmdb_enrichment import _VIDEO_LANG_PARAMS
+
         row = self._get(
             f"/movie/{tmdb_id}",
-            {"append_to_response": "release_dates,watch/providers,external_ids"},
+            {
+                "append_to_response": "release_dates,watch/providers,external_ids,videos",
+                **_VIDEO_LANG_PARAMS,
+            },
         )
         released = _day(row.get("release_date"))
         release_dates = row.get("release_dates") if isinstance(row.get("release_dates"), dict) else None
@@ -700,7 +708,12 @@ class TmdbClient:
         )
 
     def _series(self, tmdb_id: int) -> TmdbTitle:
-        row = self._get(f"/tv/{tmdb_id}", {"append_to_response": "watch/providers,external_ids"})
+        from mediatracker.integrations.tmdb_enrichment import _VIDEO_LANG_PARAMS
+
+        row = self._get(
+            f"/tv/{tmdb_id}",
+            {"append_to_response": "watch/providers,external_ids,videos", **_VIDEO_LANG_PARAMS},
+        )
         seasons: list[TmdbSeason] = []
         for season in row.get("seasons") or []:
             if not isinstance(season, dict):

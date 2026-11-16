@@ -62,6 +62,10 @@ def test_spa_build_assets_served_with_headers(client):
     _assert_security_headers(asset)
 
 
+def test_csp_allows_youtube_nocookie_embeds():
+    assert "frame-src 'self' https://www.youtube-nocookie.com" in _CONTENT_SECURITY_POLICY
+
+
 def test_csp_img_src_allows_external_https_posters():
     """tmdbPosterSrc renvoie l'URL brute hors image.tmdb.org (catalogue, Jellyfin, etc.)."""
     assert "img-src 'self' data: https:" in _CONTENT_SECURITY_POLICY

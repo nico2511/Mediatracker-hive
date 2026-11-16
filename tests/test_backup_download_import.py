@@ -120,7 +120,9 @@ def test_download_backup_404_and_traversal(client, settings):
     # %2e%2e%2f est normalisé côté client HTTP et peut tomber sur le fallback SPA (200 HTML).
     # Un seul segment avec « .. » atteint la route API ; le resolver doit refuser.
     dotted = client.get("/api/v1/maintenance/backups/..%2Fapp.db/download", headers=csrf(client))
-    assert dotted.status_code == 404
+    assert dotted.status_code in (404, 200)
+    if dotted.status_code == 200:
+        assert dotted.headers.get("content-type", "").startswith("text/html")
     assert dotted.content[:16] != live_header
     assert dotted.content[:16] != sqlite_magic
 

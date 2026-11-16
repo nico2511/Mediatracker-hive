@@ -207,6 +207,9 @@ class MediaOut(BaseModel):
     tmdb_collection_name: str | None = None
     tmdb_watch_providers_fr: list[str] | None = None
     tmdb_release_by_region: dict[str, dict[str, str | None]] | None = None
+    tmdb_trailer_youtube_key: str | None = None
+    tmdb_trailer_kind: str | None = None
+    tmdb_trailer_language: str | None = None
 
 
 class MediaPage(BaseModel):
@@ -587,6 +590,9 @@ def _to_media(
         tmdb_collection_name=row.tmdb_collection_name,
         tmdb_watch_providers_fr=row.tmdb_watch_providers_fr,
         tmdb_release_by_region=row.tmdb_release_by_region,
+        tmdb_trailer_youtube_key=row.tmdb_trailer_youtube_key,
+        tmdb_trailer_kind=row.tmdb_trailer_kind,
+        tmdb_trailer_language=row.tmdb_trailer_language,
     )
 
 

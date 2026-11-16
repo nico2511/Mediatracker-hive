@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import ActionMenuPopover from "./ActionMenuPopover.vue";
 import StatusIcon from "./StatusIcon.vue";
+import TrailerPlayerDialog from "./TrailerPlayerDialog.vue";
+import { trailerSubtitle } from "../trailerSubtitle";
 import { fileStatusIcon, fileStatusLabel } from "../fileStatus";
 import { formatParis } from "../time";
 
@@ -46,9 +48,18 @@ const props = defineProps<{
   section?: "all" | "etat" | "actions";
   tmdbUrl?: string | null;
   jellyfinWebUrl?: string | null;
+  tmdbTrailerYoutubeKey?: string | null;
+  tmdbTrailerKind?: string | null;
+  tmdbTrailerLanguage?: string | null;
   /** Masque les titres de section (bandeau actions série). */
   compact?: boolean;
 }>();
+
+const trailerOpen = ref(false);
+const showTrailerButton = computed(() => Boolean(props.tmdbTrailerYoutubeKey));
+const trailerSubtitleLabel = computed(() =>
+  trailerSubtitle(props.tmdbTrailerKind, props.tmdbTrailerLanguage),
+);
 
 const showEtat = computed(() => (props.section ?? "all") !== "actions");
 const showActions = computed(() => (props.section ?? "all") !== "etat");
@@ -248,10 +259,20 @@ function checkedFrom(event: Event): boolean {
         :aria-labelledby="compact ? undefined : 'fiche-actions-title'"
       >
         <h2 v-if="!compact" id="fiche-actions-title">Actions</h2>
-        <p v-if="!followed">
+        <p v-if="!followed" class="fiche-primary-row">
           <button type="button" class="primary fiche-primary-action" @click="emit('followAgain')">Suivre à nouveau</button>
+          <button
+            v-if="showTrailerButton"
+            type="button"
+            class="fiche-trailer-btn"
+            data-testid="fiche-trailer-open"
+            @click="trailerOpen = true"
+          >
+            <StatusIcon name="play" label="Bande-annonce" />
+            Bande-annonce
+          </button>
         </p>
-        <p v-else-if="showPrimary">
+        <p v-else-if="showPrimary" class="fiche-primary-row">
           <button type="button" class="primary fiche-primary-action" :disabled="primaryDisabled" @click="runPrimary">
             <StatusIcon
               :name="primaryAction!.icon"
@@ -260,8 +281,41 @@ function checkedFrom(event: Event): boolean {
             />
             {{ primaryAction!.label }}
           </button>
+          <button
+            v-if="showTrailerButton"
+            type="button"
+            class="fiche-trailer-btn"
+            data-testid="fiche-trailer-open"
+            @click="trailerOpen = true"
+          >
+            <StatusIcon name="play" label="Bande-annonce" />
+            Bande-annonce
+          </button>
         </p>
-        <p v-else-if="filmNotYetAvailable && filmStatusLine" class="hint">{{ filmStatusLine }}</p>
+        <p v-else-if="filmNotYetAvailable && filmStatusLine" class="fiche-primary-row">
+          <span class="hint">{{ filmStatusLine }}</span>
+          <button
+            v-if="showTrailerButton"
+            type="button"
+            class="fiche-trailer-btn"
+            data-testid="fiche-trailer-open"
+            @click="trailerOpen = true"
+          >
+            <StatusIcon name="play" label="Bande-annonce" />
+            Bande-annonce
+          </button>
+        </p>
+        <p v-else-if="showTrailerButton && !showPrimary" class="fiche-primary-row">
+          <button
+            type="button"
+            class="fiche-trailer-btn"
+            data-testid="fiche-trailer-open"
+            @click="trailerOpen = true"
+          >
+            <StatusIcon name="play" label="Bande-annonce" />
+            Bande-annonce
+          </button>
+        </p>
         <p class="fiche-secondary-actions">
           <span v-if="tmdbUrl || jellyfinWebUrl" class="fiche-ext-icon-links" role="group" aria-label="Liens externes">
             <a
@@ -343,5 +397,11 @@ function checkedFrom(event: Event): boolean {
         </label>
       </section>
     </div>
+    <TrailerPlayerDialog
+      :open="trailerOpen"
+      :youtube-key="tmdbTrailerYoutubeKey || ''"
+      :subtitle="trailerSubtitleLabel"
+      @close="trailerOpen = false"
+    />
   </article>
 </template>

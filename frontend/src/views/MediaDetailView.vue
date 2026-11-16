@@ -7,6 +7,8 @@ import TmdbPosterImg from "../components/TmdbPosterImg.vue";
 import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
 import FicheMaintenance from "../components/FicheMaintenance.vue";
 import FicheStateActions from "../components/FicheStateActions.vue";
+import TrailerPlayerDialog from "../components/TrailerPlayerDialog.vue";
+import { trailerSubtitle } from "../trailerSubtitle";
 import FilmFileBlock from "../components/FilmFileBlock.vue";
 import LineMoreActions from "../components/LineMoreActions.vue";
 import SourceRank from "../components/SourceRank.vue";
@@ -101,6 +103,9 @@ interface MediaRow {
   on_disk?: boolean;
   film_not_yet_available?: boolean;
   film_status_line?: string | null;
+  tmdb_trailer_youtube_key?: string | null;
+  tmdb_trailer_kind?: string | null;
+  tmdb_trailer_language?: string | null;
 }
 
 interface Episode {
@@ -142,6 +147,10 @@ const suiviOpen = ref(route.query.suivi === "ouvert");
 const openSeasonFromQuery = ref(route.query.saison === "ouverte" || route.query.saison === "1");
 const ficheDelete = ref(false);
 const media = ref<MediaRow | null>(null);
+const heroTrailerOpen = ref(false);
+const heroTrailerSubtitle = computed(() =>
+  media.value ? trailerSubtitle(media.value.tmdb_trailer_kind, media.value.tmdb_trailer_language) : null,
+);
 const seasons = ref<Season[]>([]);
 const trashOnUnfollow = ref(false);
 const slotDraft = ref<Record<number, { season: string; episode: string }>>({});
@@ -1618,7 +1627,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
       <div class="fiche-hero-stream">
         <p v-if="media.type !== 'series' && media.overview" class="overview fiche-overview hint">{{ media.overview }}</p>
         <template v-if="!media.followed">
-          <p class="fiche-actions">
+          <p class="fiche-primary-row fiche-actions">
             <button
               type="button"
               class="primary fiche-primary-action"
@@ -1626,6 +1635,16 @@ function episodeStatusIconName(episodeRow: Episode): string {
               @click="followAgain"
             >
               Suivre à nouveau
+            </button>
+            <button
+              v-if="media.tmdb_trailer_youtube_key"
+              type="button"
+              class="fiche-trailer-btn"
+              data-testid="fiche-trailer-open"
+              @click="heroTrailerOpen = true"
+            >
+              <StatusIcon name="play" label="Bande-annonce" />
+              Bande-annonce
             </button>
           </p>
         </template>
@@ -1636,6 +1655,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
             :media-type="media.type"
             :tmdb-url="media.tmdb_url"
             :jellyfin-web-url="media.jellyfin_web_url"
+            :tmdb-trailer-youtube-key="media.tmdb_trailer_youtube_key"
+            :tmdb-trailer-kind="media.tmdb_trailer_kind"
+            :tmdb-trailer-language="media.tmdb_trailer_language"
             :followed="media.followed"
             :on-hold="media.on_hold"
             :auto-download="media.auto_download"
@@ -1750,6 +1772,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
           :media-type="media.type"
           :tmdb-url="media.tmdb_url"
           :jellyfin-web-url="media.jellyfin_web_url"
+          :tmdb-trailer-youtube-key="media.tmdb_trailer_youtube_key"
+          :tmdb-trailer-kind="media.tmdb_trailer_kind"
+          :tmdb-trailer-language="media.tmdb_trailer_language"
           :followed="media.followed"
           :on-hold="media.on_hold"
           :auto-download="media.auto_download"
@@ -1849,6 +1874,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
             :media-type="media.type"
             :tmdb-url="media.tmdb_url"
             :jellyfin-web-url="media.jellyfin_web_url"
+            :tmdb-trailer-youtube-key="media.tmdb_trailer_youtube_key"
+            :tmdb-trailer-kind="media.tmdb_trailer_kind"
+            :tmdb-trailer-language="media.tmdb_trailer_language"
             :followed="media.followed"
             :on-hold="media.on_hold"
             :auto-download="media.auto_download"
@@ -2681,6 +2709,14 @@ function episodeStatusIconName(episodeRow: Episode): string {
         </article>
       </div>
     </details>
+
+    <TrailerPlayerDialog
+      v-if="media"
+      :open="heroTrailerOpen"
+      :youtube-key="media.tmdb_trailer_youtube_key || ''"
+      :subtitle="heroTrailerSubtitle"
+      @close="heroTrailerOpen = false"
+    />
 
     <DeleteFicheDialog
       :open="ficheDelete"

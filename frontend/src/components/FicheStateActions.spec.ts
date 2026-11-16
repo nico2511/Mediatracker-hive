@@ -61,6 +61,24 @@ describe("FicheStateActions primaryAction", () => {
   });
 });
 
+describe("FicheStateActions bande-annonce", () => {
+  it("masque le bouton sans clé YouTube", () => {
+    const w = mountActions({ section: "actions" });
+    expect(w.find("[data-testid='fiche-trailer-open']").exists()).toBe(false);
+  });
+
+  it("affiche le bouton quand une clé est fournie", () => {
+    const w = mountActions({
+      section: "actions",
+      tmdbTrailerYoutubeKey: "demo-key",
+      tmdbTrailerKind: "official",
+      tmdbTrailerLanguage: "fr",
+    });
+    expect(w.find("[data-testid='fiche-trailer-open']").exists()).toBe(true);
+    expect(w.find("[data-testid='fiche-trailer-open']").text()).toContain("Bande-annonce");
+  });
+});
+
 describe("FicheStateActions libellé fichier film", () => {
   it("absent jamais obtenu : pas de « fichiers supprimés »", () => {
     const w = mount(FicheStateActions, {

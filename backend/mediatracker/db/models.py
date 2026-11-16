@@ -201,6 +201,9 @@ class Media(Base):
     tmdb_collection_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     tmdb_watch_providers_fr: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tmdb_release_by_region: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tmdb_trailer_youtube_key: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    tmdb_trailer_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    tmdb_trailer_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     tmdb_identify_last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Versions seen on the last source check, with a rejection reason when refused.
     source_report: Mapped[list | None] = mapped_column(JSON, nullable=True)

@@ -12,6 +12,7 @@ _CONTENT_SECURITY_POLICY = (
     "img-src 'self' data: https:; "
     "style-src 'self' 'unsafe-inline'; "
     "connect-src 'self'; "
+    "frame-src 'self' https://www.youtube-nocookie.com; "
     "frame-ancestors 'none'"
 )
 

@@ -2,11 +2,113 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from mediatracker.db.models import Media
 from mediatracker.integrations.tmdb import TmdbTitle
+
+_VIDEO_LANG_PARAMS = {"include_video_language": "fr,en,null"}
+
+_TRAILER_PRIORITY: tuple[tuple[str, bool | None, str], ...] = (
+    ("Trailer", True, "fr"),
+    ("Trailer", True, "en"),
+    ("Trailer", False, "fr"),
+    ("Trailer", False, "en"),
+    ("Teaser", None, "fr"),
+    ("Teaser", None, "en"),
+)
+
+_TRAILER_PRIORITY_NO_LANG: tuple[tuple[str, bool | None], ...] = (
+    ("Trailer", True),
+    ("Trailer", False),
+    ("Teaser", None),
+)
+
+
+@dataclass(frozen=True)
+class TmdbTrailerPick:
+    youtube_key: str
+    trailer_kind: str
+    language: str | None
+
+
+def _video_lang(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    code = value.strip().lower()
+    return code if code in {"fr", "en"} else None
+
+
+def pick_trailer_from_videos(videos: dict[str, Any] | None) -> TmdbTrailerPick | None:
+    """One YouTube trailer/teaser using TMDB priority (official FR/EN, then unofficial, then teaser)."""
+    if not isinstance(videos, dict):
+        return None
+    pool: list[dict[str, Any]] = []
+    for item in videos.get("results") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("site") or "").casefold() != "youtube":
+            continue
+        key = item.get("key")
+        if not isinstance(key, str) or not key.strip():
+            continue
+        vtype = item.get("type")
+        if not isinstance(vtype, str) or vtype not in {"Trailer", "Teaser"}:
+            continue
+        lang = _video_lang(item.get("iso_639_1"))
+        official = item.get("official") is True
+        pool.append({"type": vtype, "official": official, "lang": lang, "key": key.strip()})
+
+    def matches(slot: tuple[str, bool | None, str], row: dict[str, Any]) -> bool:
+        want_type, want_official, want_lang = slot
+        if row["type"] != want_type:
+            return False
+        if row["lang"] != want_lang:
+            return False
+        if want_official is None:
+            return True
+        return row["official"] is want_official
+
+    for slot in _TRAILER_PRIORITY:
+        for row in pool:
+            if not matches(slot, row):
+                continue
+            vtype, official, _ = slot
+            if vtype == "Teaser":
+                kind = "teaser"
+            elif official:
+                kind = "official"
+            else:
+                kind = "unofficial"
+            return TmdbTrailerPick(youtube_key=row["key"], trailer_kind=kind, language=slot[2])
+
+    def matches_no_lang(slot: tuple[str, bool | None], row: dict[str, Any]) -> bool:
+        want_type, want_official = slot
+        if row["lang"] is not None:
+            return False
+        if row["type"] != want_type:
+            return False
+        if want_official is None:
+            return True
+        return row["official"] is want_official
+
+    for slot in _TRAILER_PRIORITY_NO_LANG:
+        for row in pool:
+            if not matches_no_lang(slot, row):
+                continue
+            vtype, official = slot
+            if vtype == "Teaser":
+                kind = "teaser"
+            elif official:
+                kind = "official"
+            else:
+                kind = "unofficial"
+            return TmdbTrailerPick(youtube_key=row["key"], trailer_kind=kind, language=None)
+    return None
 
 TMDB_DIGITAL = 4
 TMDB_PHYSICAL = 5
@@ -119,6 +221,8 @@ def detail_enrichment_from_row(
         imdb = external.get("imdb_id")
         if isinstance(imdb, str) and imdb.startswith("tt"):
             imdb_id = imdb
+    videos_block = row.get("videos") if isinstance(row.get("videos"), dict) else None
+    trailer = pick_trailer_from_videos(videos_block)
     return {
         "vote_average": float(vote_average) if isinstance(vote_average, (int, float)) else None,
         "vote_count": int(vote_count) if isinstance(vote_count, int) else None,
@@ -130,6 +234,9 @@ def detail_enrichment_from_row(
         "watch_providers_fr": providers,
         "release_by_region": by_region,
         "imdb_id": imdb_id,
+        "trailer_youtube_key": trailer.youtube_key if trailer else None,
+        "trailer_kind": trailer.trailer_kind if trailer else None,
+        "trailer_language": trailer.language if trailer else None,
     }
 
 
@@ -146,3 +253,6 @@ def apply_tmdb_enrichment(media: Media, fetched: TmdbTitle) -> None:
         media.tmdb_release_by_region = fetched.release_by_region
     if fetched.imdb_id and not media.imdb_id:
         media.imdb_id = fetched.imdb_id
+    media.tmdb_trailer_youtube_key = fetched.trailer_youtube_key
+    media.tmdb_trailer_kind = fetched.trailer_kind
+    media.tmdb_trailer_language = fetched.trailer_language
