@@ -22,10 +22,10 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from sqlalchemy.orm import Session
 
+from mediatracker.core.hosters import URL_DOMAIN_TO_HOSTER
 from mediatracker.db.models import Setting
 from mediatracker.events import record_event
 from mediatracker.providers.sources.loading import apply_source_base_urls, source_base_url
-from mediatracker.core.hosters import URL_DOMAIN_TO_HOSTER
 from mediatracker.providers.sources.wawacity import DEFAULT_USER_AGENT
 from mediatracker.security.ssrf import OutboundUrlRejected, httpx_request_event_hooks, validate_outbound_url_static
 from mediatracker.security.wawacity_redirect import (
