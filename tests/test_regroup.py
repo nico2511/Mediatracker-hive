@@ -1,14 +1,14 @@
 """Release-named series folders regroup onto the tracked fiche, and only on confirm."""
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from tests.conftest import csrf, login
 
 from mediatracker.core.naming import ID_CONFLICT, filing_folder, library_destination
-from mediatracker.db.models import LibraryFile, LibraryRename, Media
+from mediatracker.db.models import LibraryFile, LibraryRename, Media, Setting, TrashEntry
 from mediatracker.library.audit import apply_audit, audit_library
 from mediatracker.library.parse import parse_release, strip_release_junk
 from mediatracker.library.regroup import apply_regroup, plan_regroup
@@ -441,5 +441,41 @@ def test_loose_duplicate_without_a_fiche_trashes_the_release_name(tmp_path, clie
         assert not release.exists()
         held = list((tmp_path / ".trash").rglob(release.name))
         assert len(held) == 1
+    finally:
+        db.close()
+
+
+def test_regroup_trash_purge_after_respects_trash_retention_days(tmp_path, client, app):
+    del client
+    moment = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
+    series = tmp_path / "tvshows"
+    home = series / "Refuge Sorcellerie Démo (2024)" / "Season 01"
+    kept = home / "Refuge Sorcellerie Démo (2024) - S01E01.mkv"
+    _sparse(kept, 80 * 1024 * 1024)
+    stray = series / "Refuge.Sorcellerie.Démo.S01E01.1080p.WEB"
+    release = stray / "Refuge.Sorcellerie.Démo.S01E01.FiNAL.1080p.WEB.mkv"
+    _sparse(release, 200 * 1024 * 1024)
+    db = app.state.session_factory()
+    try:
+        row = db.get(Setting, "trash_retention_days")
+        if row is None:
+            db.add(Setting(key="trash_retention_days", value="3"))
+        else:
+            row.value = "3"
+        db.commit()
+        applied, _rename_id, _after = apply_regroup(
+            db,
+            tmp_path / "Films",
+            series,
+            [],
+            validated=True,
+            include_loose=True,
+            now=moment,
+            settings=app.state.settings,
+        )
+        db.commit()
+        assert applied is True
+        entry = db.query(TrashEntry).one()
+        assert entry.purge_after - entry.deleted_at == timedelta(days=3)
     finally:
         db.close()

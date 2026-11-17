@@ -13,6 +13,8 @@ import {
   isHiveTransferAllDay,
 } from "../../hive/hiveTransferWindow";
 import { fetchSettings, patchSettings } from "../../settings";
+import { applySettingNumber, minutesForUi, settingBoundMax, settingBoundMin } from "../../settingsMeta";
+import type { SettingRow } from "../../api";
 
 const router = useRouter();
 const route = useRoute();
@@ -46,11 +48,13 @@ const activationName = ref("");
 const resetOpen = ref(false);
 const resetName = ref("");
 const inviteLink = ref("");
-const transferParallel = ref(2);
-const transferSend = ref(0);
-const transferRecv = ref(0);
-const transferWinStart = ref(0);
-const transferWinEnd = ref(24 * 60);
+const settingsRows = ref<SettingRow[]>([]);
+
+const transferParallel = ref<number | undefined>(undefined);
+const transferSend = ref<number | undefined>(undefined);
+const transferRecv = ref<number | undefined>(undefined);
+const transferWinStart = ref<number | undefined>(undefined);
+const transferWinEnd = ref<number | undefined>(undefined);
 const transferWinStartTime = ref("00:00");
 const transferWinEndTime = ref("00:00");
 const catalogAutoShare = ref(false);
@@ -58,7 +62,8 @@ const hiveRequestOnMiss = ref<"auto" | "ask" | "never">("auto");
 const hiveAutoAcceptRequests = ref(false);
 
 const transferWinAllDay = computed({
-  get: () => isHiveTransferAllDay(transferWinStart.value, transferWinEnd.value),
+  get: () =>
+    isHiveTransferAllDay(minutesForUi(transferWinStart.value), minutesForUi(transferWinEnd.value)),
   set: (on: boolean) => {
     if (on) {
       transferWinStart.value = HIVE_TRANSFER_ALL_DAY_START;
@@ -67,7 +72,9 @@ const transferWinAllDay = computed({
       transferWinEndTime.value = hiveTransferMinutesToTime(HIVE_TRANSFER_ALL_DAY_END);
       return;
     }
-    if (isHiveTransferAllDay(transferWinStart.value, transferWinEnd.value)) {
+    const start = minutesForUi(transferWinStart.value);
+    const end = minutesForUi(transferWinEnd.value);
+    if (isHiveTransferAllDay(start, end)) {
       transferWinStart.value = HIVE_TRANSFER_ALL_DAY_START;
       transferWinEnd.value = 23 * 60;
       transferWinStartTime.value = hiveTransferMinutesToTime(transferWinStart.value);
@@ -77,8 +84,8 @@ const transferWinAllDay = computed({
 });
 
 function syncTransferWindowFieldsFromMinutes() {
-  transferWinStartTime.value = hiveTransferMinutesToTime(transferWinStart.value);
-  transferWinEndTime.value = hiveTransferMinutesToTime(transferWinEnd.value);
+  transferWinStartTime.value = hiveTransferMinutesToTime(minutesForUi(transferWinStart.value));
+  transferWinEndTime.value = hiveTransferMinutesToTime(minutesForUi(transferWinEnd.value));
 }
 
 function applyTransferWindowTimesToMinutes() {
@@ -88,9 +95,10 @@ function applyTransferWindowTimesToMinutes() {
     return;
   }
   transferWinStart.value = hiveTransferTimeToMinutes(transferWinStartTime.value);
+  const startMinutes = minutesForUi(transferWinStart.value);
   transferWinEnd.value = Math.max(
     1,
-    hiveTransferEndTimeToMinutes(transferWinEndTime.value, transferWinStart.value),
+    hiveTransferEndTimeToMinutes(transferWinEndTime.value, startMinutes),
   );
 }
 
@@ -126,14 +134,30 @@ async function load() {
   error.value = "";
   try {
     const page = await fetchSettings();
+    settingsRows.value = page.settings;
     const map = new Map(page.settings?.map((row) => [row.key, row.value]));
     hiveOn.value = map.get("hive_enabled") === true || map.get("hive_enabled") === "true";
     publicAddress.value = String(map.get("hive_public_address") || "");
-    transferParallel.value = Number(map.get("hive_transfer_parallel") ?? 2);
-    transferSend.value = Number(map.get("hive_transfer_send_bps") ?? 0);
-    transferRecv.value = Number(map.get("hive_transfer_recv_bps") ?? 0);
-    transferWinStart.value = Number(map.get("hive_transfer_window_start") ?? 0);
-    transferWinEnd.value = Number(map.get("hive_transfer_window_end") ?? 24 * 60);
+    const parallel = applySettingNumber(page.settings, "hive_transfer_parallel");
+    if (parallel !== undefined) {
+      transferParallel.value = parallel;
+    }
+    const send = applySettingNumber(page.settings, "hive_transfer_send_bps");
+    if (send !== undefined) {
+      transferSend.value = send;
+    }
+    const recv = applySettingNumber(page.settings, "hive_transfer_recv_bps");
+    if (recv !== undefined) {
+      transferRecv.value = recv;
+    }
+    const winStart = applySettingNumber(page.settings, "hive_transfer_window_start");
+    if (winStart !== undefined) {
+      transferWinStart.value = winStart;
+    }
+    const winEnd = applySettingNumber(page.settings, "hive_transfer_window_end");
+    if (winEnd !== undefined) {
+      transferWinEnd.value = winEnd;
+    }
     syncTransferWindowFieldsFromMinutes();
     catalogAutoShare.value =
       map.get("hive_catalog_auto_share") === true || map.get("hive_catalog_auto_share") === "true";
@@ -486,15 +510,33 @@ async function confirmReset() {
         <div class="hive-limits-grid">
           <label class="hive-field">
             <span class="label">Transferts simultanés</span>
-            <input v-model.number="transferParallel" type="number" min="1" max="16" class="input" />
+            <input
+              v-model.number="transferParallel"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'hive_transfer_parallel', 1)"
+              :max="settingBoundMax(settingsRows, 'hive_transfer_parallel', 16)"
+              class="input"
+            />
           </label>
           <label class="hive-field">
             <span class="label">Débit envoi (o/s, 0 = illimité)</span>
-            <input v-model.number="transferSend" type="number" min="0" class="input" />
+            <input
+              v-model.number="transferSend"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'hive_transfer_send_bps', 0)"
+              :max="settingBoundMax(settingsRows, 'hive_transfer_send_bps')"
+              class="input"
+            />
           </label>
           <label class="hive-field">
             <span class="label">Débit réception (o/s)</span>
-            <input v-model.number="transferRecv" type="number" min="0" class="input" />
+            <input
+              v-model.number="transferRecv"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'hive_transfer_recv_bps', 0)"
+              :max="settingBoundMax(settingsRows, 'hive_transfer_recv_bps')"
+              class="input"
+            />
           </label>
           <fieldset class="hive-field hive-transfer-window" data-testid="hive-transfer-window">
             <legend class="label">Fenêtre horaire de transfert</legend>

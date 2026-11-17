@@ -40,6 +40,8 @@ const wawacityUrl = ref("");
 const freeTelechargerUrl = ref("");
 const cometUrls = ref("");
 const torrentioUrl = ref("");
+const defaultCometPlaceholder = ref("");
+const defaultTorrentioPlaceholder = ref("");
 const sourcesFieldError = ref("");
 const haHost = ref("http://homeassistant.local:8123");
 const haId = ref("mediatracker");
@@ -87,6 +89,10 @@ function rejectNonHttpUrl(raw: string): boolean {
 async function loadSourceFields() {
   try {
     const page = await fetchSettings();
+    if (page.source_defaults) {
+      defaultTorrentioPlaceholder.value = page.source_defaults.torrentio_base_url;
+      defaultCometPlaceholder.value = page.source_defaults.comet_base_urls[0] ?? "";
+    }
     for (const row of page.settings) {
       if (row.key === "wawacity_base_url" && row.value) {
         wawacityUrl.value = String(row.value);
@@ -536,7 +542,11 @@ async function run(action: () => Promise<void>) {
         </label>
         <label>
           <span>Comet (une URL par ligne)</span>
-          <textarea v-model="cometUrls" rows="2" placeholder="https://comet.feels.legal"></textarea>
+          <textarea
+            v-model="cometUrls"
+            rows="2"
+            :placeholder="defaultCometPlaceholder || 'https://comet-defaut.example'"
+          ></textarea>
           <span class="hint">Instances publiques sans clé AllDebrid dans l'URL.</span>
         </label>
         <label>
@@ -545,7 +555,7 @@ async function run(action: () => Promise<void>) {
             v-model="torrentioUrl"
             type="url"
             inputmode="url"
-            placeholder="https://torrentio.strem.fun"
+            :placeholder="defaultTorrentioPlaceholder || 'https://torrentio-defaut.example'"
           />
         </label>
       </fieldset>

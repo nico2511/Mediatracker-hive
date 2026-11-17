@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from mediatracker.config import Settings
 from mediatracker.maintenance.backup import _secure_backup_file_mode
+from mediatracker.maintenance.backup_sqlite import SQLITE_BACKUP_BUSY_MS
 from mediatracker.maintenance.restore_catalog import (
     BackupSummary,
     allocate_import_filename,
@@ -22,9 +23,6 @@ from mediatracker.maintenance.restore_catalog import (
 SQLITE_MAGIC = b"SQLite format 3\x00"
 BACKUP_IMPORT_MAX_BYTES = 512 * 1024 * 1024
 _READ_CHUNK = 1024 * 1024
-_BUSY_MS = 30_000
-
-
 class BackupImportError(Exception):
     def __init__(self, message: str) -> None:
         self.message = message
@@ -98,7 +96,7 @@ def validate_backup_import_file(path: Path) -> None:
         if handle.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
             raise BackupImportError("Le fichier n'est pas une base SQLite valide.")
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    conn.execute(f"pragma busy_timeout={_BUSY_MS}")
+    conn.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         quick = conn.execute("pragma quick_check").fetchone()
         if not quick or str(quick[0]).lower() != "ok":

@@ -53,6 +53,13 @@ class HiveSourceEntry:
         del db, settings, page_url, transport
         return SourceBindingProbe(False, None, {}, message="Hive ne sonde pas de page distante.")
 
-    def open_episode(self, settings, *, base_url: str | None = None, transport=None) -> object | None:
-        del settings, base_url, transport
+    def open_episode(
+        self,
+        settings,
+        *,
+        base_url: str | None = None,
+        transport: httpx.BaseTransport | None = None,
+        request_delay_seconds: float | None = None,
+    ) -> object | None:
+        del settings, base_url, transport, request_delay_seconds
         return None

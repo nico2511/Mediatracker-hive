@@ -239,6 +239,7 @@ def mirror_uptobox_violation(rel: str, line: str) -> str | None:
         return None
     # Fichiers de définition / filtre hébergeurs.
     allowed_prefixes = (
+        "backend/mediatracker/core/hosters.py",
         "backend/mediatracker/core/selection.py",
         "backend/mediatracker/events/scrub.py",
         "backend/mediatracker/providers/sources/",

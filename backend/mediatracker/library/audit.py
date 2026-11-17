@@ -15,6 +15,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.config import Settings, get_settings
 from mediatracker.core.library_plan import LibraryPlanError, _folder_title, _rollback_paths, _tag
 from mediatracker.core.naming import atomic_move, different_tmdb_ids, sanitize
 from mediatracker.core.source_select import titles_match
@@ -145,6 +146,7 @@ def apply_audit(
     now: datetime | None = None,
     trash: Path | None = None,
     skip: tuple[Path, ...] = (),
+    settings: Settings | None = None,
 ) -> AuditApply:
     """Move or trash only the chosen files, and only after an explicit validation."""
     wanted = {_key(path) for path in paths}
@@ -162,6 +164,7 @@ def apply_audit(
             else:
                 held.append(row.path)
         return AuditApply(False, None, tuple(preview), tuple(held))
+    resolved = settings or get_settings()
     moment = now or datetime.now(timezone.utc)
     trash_dir = trash if trash is not None else series.parent / ".trash"
     applied: list[dict[str, str]] = []
@@ -174,7 +177,7 @@ def apply_audit(
                 if row.blocked or not src.is_file():
                     skipped.append(row.name)
                     continue
-                _trash_release(db, src, trash_dir, moment, row.folder_title or row.name, applied)
+                _trash_release(db, src, trash_dir, moment, row.folder_title or row.name, applied, settings=resolved)
                 continue
             if row.blocked or not row.target_path:
                 skipped.append(row.name)
@@ -342,13 +345,15 @@ def _trash_release(
     moment: datetime,
     title: str,
     applied: list[dict[str, str]],
+    *,
+    settings: Settings,
 ) -> None:
-    dest = _send_to_trash(db, src, trash, moment, None, title, reason="duplicate")
+    dest = _send_to_trash(db, src, trash, moment, None, title, reason="duplicate", settings=settings)
     applied.append({"src": str(src), "dest": str(dest)})
     for extra in _sidecars(src):
         if not extra.is_file():
             continue
-        extra_dest = _send_to_trash(db, extra, trash, moment, None, title, reason="duplicate")
+        extra_dest = _send_to_trash(db, extra, trash, moment, None, title, reason="duplicate", settings=settings)
         applied.append({"src": str(extra), "dest": str(extra_dest)})
 
 

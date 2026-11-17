@@ -158,6 +158,7 @@ def test_frozen_hive_sha_skips_other_profile_match(db, ruche_hex):
         sha="f" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="f0" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -166,6 +167,7 @@ def test_frozen_hive_sha_skips_other_profile_match(db, ruche_hex):
         sha="e" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="e0" * 16,
     )
     chain = ProfileChain((_vff_principal(), _vostfr_repli()))
     pick = pick_hive_catalog_for_item(db, media, item, chain, frozen_sha256="f" * 64)

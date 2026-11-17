@@ -281,6 +281,7 @@ def test_recommended_version_ignores_tiny_unknown(db, settings, ruche_hex):
         joignable=True,
         ruche_hex=ruche_hex,
         taille=SUSPECT_BYTES,
+        file_id_hex="f0" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -290,6 +291,7 @@ def test_recommended_version_ignores_tiny_unknown(db, settings, ruche_hex):
         joignable=True,
         ruche_hex=ruche_hex,
         taille=GOOD_BYTES,
+        file_id_hex="10" * 16,
     )
     refresh_hive_catalogue_store(db, now=NOW)
     db.commit()

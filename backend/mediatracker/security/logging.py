@@ -13,6 +13,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mediatracker.security.log_defaults import LOG_BACKUP_COUNT_DEFAULT, LOG_MAX_BYTES_DEFAULT
+
 _BEARER = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 _API_TOKEN = re.compile(r"\bmt_[A-Za-z0-9]+_[A-Za-z0-9_\-]+\b")
 _GH_TOKEN = re.compile(r"\b(?:ghp_|github_pat_)[A-Za-z0-9_]+")
@@ -102,8 +104,8 @@ def _patch_stream_emit() -> None:
 
 _LEVEL = "INFO"
 _LOG_DIR: Path | None = None
-_LOG_MAX_BYTES = 2_000_000
-_LOG_BACKUP_COUNT = 5
+_LOG_MAX_BYTES = LOG_MAX_BYTES_DEFAULT
+_LOG_BACKUP_COUNT = LOG_BACKUP_COUNT_DEFAULT
 _ORIGINAL_DICT = None
 _ORIGINAL_FILE = None
 _ORIGINAL_BASIC = None

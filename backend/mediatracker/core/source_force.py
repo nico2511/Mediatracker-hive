@@ -101,13 +101,16 @@ def _candidates(db: Session, since: datetime) -> list[Media]:
 
 def _advance_past_wave(db: Session, media: Media, since: datetime, settings: Settings, *, commit: bool = True) -> None:
     """One fiche per wave. A poll that does not move ``last_source_poll_at`` must not run again next tick."""
+    from mediatracker.providers.sources.loading import _int_setting
+
     now = datetime.now(timezone.utc)
     last = _aware(media.last_source_poll_at)
     if last is None or last < since:
         media.last_source_poll_at = since + timedelta(microseconds=1)
     nxt = _aware(media.next_source_poll_at)
     if nxt is None or nxt <= now:
-        minutes = media.scan_interval_min or settings.scan_interval_min
+        interval_default = _int_setting(db, "scan_interval_min", settings.scan_interval_min)
+        minutes = media.scan_interval_min or interval_default
         media.next_source_poll_at = now + timedelta(minutes=max(minutes, 60))
     if commit:
         db.commit()

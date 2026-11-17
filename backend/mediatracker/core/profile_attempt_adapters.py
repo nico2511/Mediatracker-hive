@@ -209,12 +209,16 @@ def legacy_comet_context(db: Session, media: Media, settings: Settings) -> tuple
 
 
 def rank_catalog_version_for_profile_attempt(
-    version_key: str, *, profile: Profile, size: int | None = None
+    version_key: str,
+    *,
+    profile: Profile,
+    size: int | None = None,
+    release_text: str | None = None,
 ) -> int | None:
     """Hive catalogue version rank for one explicit profile (lot C)."""
     from mediatracker.hive.source_catalog import rank_catalog_version_for_profile_attempt as _rank
 
-    return _rank(version_key, profile=profile, size=size)
+    return _rank(version_key, profile=profile, size=size, release_text=release_text)
 
 
 def pick_catalog_match_for_profile_attempt(
@@ -226,6 +230,7 @@ def pick_catalog_match_for_profile_attempt(
     prefer_available: bool = True,
     version_key: str | None = None,
     skip_bitrate_sanity: bool = False,
+    skip_profile_filter: bool = False,
 ):
     """Hive catalogue selection for one explicit profile (no DB profile resolution)."""
     from mediatracker.hive.source_catalog import pick_catalog_match_for_profile_attempt as _pick
@@ -238,6 +243,7 @@ def pick_catalog_match_for_profile_attempt(
         prefer_available=prefer_available,
         version_key=version_key,
         skip_bitrate_sanity=skip_bitrate_sanity,
+        skip_profile_filter=skip_profile_filter,
     )
 
 

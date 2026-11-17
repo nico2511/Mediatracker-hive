@@ -809,6 +809,7 @@ def apply_review_files(
             validated=body.validated,
             trash=layout.trash_dir,
             skip=library_skip(layout),
+            settings=request.app.state.settings,
         )
     except LibraryPlanError as exc:
         raise Problem(409, "Conflit", exc.message) from exc
@@ -929,6 +930,7 @@ def apply_library_regroup(
             protected=protected,
             include_loose=body.include_loose,
             skip=_scan_skip(db, request.app.state.settings),
+            settings=request.app.state.settings,
         )
     except LibraryPlanError as exc:
         raise Problem(409, "Conflit", exc.message) from exc

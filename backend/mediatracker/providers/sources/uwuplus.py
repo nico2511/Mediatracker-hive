@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from mediatracker.core.hosters import BLOCKED_SOURCE_HOSTERS, hoster_is_blocked
 from mediatracker.core.quality_profile import (
     Profile,
     ReleaseCandidate,
@@ -127,14 +128,25 @@ class UwuPlusProvider:
         )
 
     @classmethod
-    def open_episode(cls, settings, *, base_url: str | None = None, transport=None):
+    def open_episode(
+        cls,
+        settings,
+        *,
+        base_url: str | None = None,
+        transport=None,
+        request_delay_seconds: float | None = None,
+    ):
         if base_url is not None:
             root = base_url.strip().rstrip("/")
         else:
             root = (getattr(settings, "uwuplus_base_url", None) or "").strip().rstrip("/")
         if not root:
             return None
-        delay = float(settings.source_request_delay_seconds)
+        delay = float(
+            settings.source_request_delay_seconds
+            if request_delay_seconds is None
+            else request_delay_seconds
+        )
         return UwuPlusSource(root, delay=delay, transport=transport)
 
     def search(self, query: str, media_type: MediaType | None) -> list[SourceResult]:
@@ -385,7 +397,7 @@ def _profile_pair(row: object, query: EpisodeQuery) -> tuple[LinkCandidate, Rele
     unlock_url, hoster = _unlock_url_and_hoster(row)
     if unlock_url is None or hoster is None:
         return None
-    if hoster.casefold() == "uptobox":
+    if hoster_is_blocked(hoster):
         return None
     description = row.get("description") if isinstance(row.get("description"), str) else ""
     name = row.get("name") if isinstance(row.get("name"), str) else ""
@@ -453,7 +465,7 @@ def _is_ddl_row(row: dict[str, Any]) -> bool:
     unlock_url, hoster = _unlock_url_and_hoster(row)
     if unlock_url is None or hoster is None:
         return False
-    if hoster.casefold() == "uptobox":
+    if hoster_is_blocked(hoster):
         return False
     stream_url = row.get("url") if isinstance(row.get("url"), str) else ""
     if not stream_url or "resolve-stream" not in urlsplit(stream_url).path:
@@ -576,8 +588,9 @@ def _map_hoster_label(label: str) -> str | None:
         return "dailyuploads"
     if folded.startswith("nitroflare"):
         return "nitroflare"
-    if folded.startswith("uptobox"):
-        return "uptobox"
+    for blocked in BLOCKED_SOURCE_HOSTERS:
+        if folded.startswith(blocked):
+            return blocked
     if folded in KNOWN_ALIASES:
         return KNOWN_ALIASES[folded]
     return None

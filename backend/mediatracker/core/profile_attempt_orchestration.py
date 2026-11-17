@@ -257,6 +257,7 @@ def pick_hive_catalog_for_item(
             prefer_available=prefer_available,
             version_key=version_key,
             skip_bitrate_sanity=explicit_version,
+            skip_profile_filter=explicit_version,
         )
         if match is None:
             continue

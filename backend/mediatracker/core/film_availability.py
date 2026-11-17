@@ -11,10 +11,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.db.models import Media, MediaItem
 from mediatracker.integrations.tmdb import TmdbTitle
-
-TMDB_DIGITAL = 4
-TMDB_PHYSICAL = 5
-TMDB_THEATRICAL = 3
+from mediatracker.integrations.tmdb_enrichment import TMDB_DIGITAL, TMDB_PHYSICAL, TMDB_THEATRICAL
 
 _SETTING_FALLBACK_MONTHS = "film_theatrical_fallback_months"
 _TRUSTED_DIGITAL_SOURCES = frozenset({"digital_fr", "physical_fr", "digital_any"})

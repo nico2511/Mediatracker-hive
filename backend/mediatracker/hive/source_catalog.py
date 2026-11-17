@@ -101,6 +101,99 @@ def _rows_for_item(db: Session, media: Media, item: MediaItem) -> list[HiveCatal
     return out
 
 
+def _nom_fichier_for_sha(db: Session, sha256_hex: str) -> str | None:
+    from sqlalchemy import select
+
+    entry = db.scalar(
+        select(HiveEntry)
+        .where(HiveEntry.sha256_hex == sha256_hex, HiveEntry.etat == "disponible")
+        .order_by(HiveEntry.id.desc())
+        .limit(1)
+    )
+    if entry is None:
+        return None
+    for doc_raw in (entry.fiche_json, entry.payload_json):
+        doc = _parse_json(doc_raw or "")
+        nf = doc.get("nom_fichier")
+        if isinstance(nf, str) and nf.strip():
+            return nf.strip()
+    return None
+
+
+def _nom_fichier_from_sources(sources: list[dict[str, Any]], sha256_hex: str) -> str | None:
+    want = str(sha256_hex).casefold()
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        sha = src.get("sha256")
+        if not isinstance(sha, str) or sha.casefold() != want:
+            continue
+        nf = src.get("nom_fichier")
+        if isinstance(nf, str) and nf.strip():
+            return nf.strip()
+    return None
+
+
+def _catalogue_row_sources(row: HiveCatalogue) -> list[dict[str, Any]]:
+    try:
+        sources = json.loads(row.sources_json)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(sources, list):
+        return []
+    return [s for s in sources if isinstance(s, dict)]
+
+
+def _release_text_for_sha(
+    db: Session,
+    sources: list[dict[str, Any]],
+    sha256_hex: str,
+) -> str | None:
+    nf = _nom_fichier_from_sources(sources, sha256_hex)
+    if nf is None:
+        nf = _nom_fichier_for_sha(db, sha256_hex)
+    return nf
+
+
+def rank_catalogue_row_for_profile_attempt(
+    db: Session,
+    row: HiveCatalogue,
+    *,
+    profile,
+    default_size: int | None = None,
+) -> int | None:
+    """Meilleur rang profil parmi les sources ; chaque SHA n'utilise que son propre nom."""
+    sources = _catalogue_row_sources(row)
+    shas = [
+        str(src["sha256"])
+        for src in sources
+        if isinstance(src.get("sha256"), str) and str(src["sha256"]).strip()
+    ]
+    if not shas:
+        return rank_catalog_version_for_profile_attempt(
+            row.version_key,
+            profile=profile,
+            size=default_size,
+            release_text=None,
+        )
+    best: int | None = None
+    for sha in shas:
+        nf = _release_text_for_sha(db, sources, sha)
+        src_size = _expected_size_for_sha(db, sha)
+        size = src_size if src_size > 0 else default_size
+        rank = rank_catalog_version_for_profile_attempt(
+            row.version_key,
+            profile=profile,
+            size=size if size and size > 0 else None,
+            release_text=nf,
+        )
+        if rank is None:
+            continue
+        if best is None or rank < best:
+            best = rank
+    return best
+
+
 def _expected_size_for_sha(db: Session, sha256_hex: str) -> int:
     from sqlalchemy import select
 
@@ -158,10 +251,12 @@ def rank_catalog_version_for_profile_attempt(
     *,
     profile,
     size: int | None = None,
+    release_text: str | None = None,
 ) -> int | None:
     """Rank one catalogue version for a single explicit profile (no fiche prefs, no CSV).
 
-    Exclusions ``exclude_keywords`` use only ``version_key`` (no release filename on Hive rows).
+    ``exclude_keywords`` et le départage MULTI utilisent ``release_text`` (nom de fichier gossip)
+    quand il est fourni ; sinon ``version_key`` (annonces legacy).
     
     ``unknown+unknown`` (métadonnées release absentes) reste éligible avec une pénalité fixe,
     sans élargissement via les préférences de la fiche.
@@ -200,12 +295,13 @@ def rank_catalog_version_for_profile_attempt(
     size_known = size is not None and size > 0
     if has_size_bounds and not size_known:
         return None
+    candidate_text = (release_text or "").strip() or version_key
     return acceptance_rank(
         ReleaseCandidate(
             language=normalized_language,
             resolution=normalized_resolution,
             size=size,
-            text=version_key,
+            text=candidate_text,
         ),
         profile,
         enforce_size=has_size_bounds and size_known,
@@ -221,6 +317,7 @@ def pick_catalog_match_for_profile_attempt(
     prefer_available: bool = True,
     version_key: str | None = None,
     skip_bitrate_sanity: bool = False,
+    skip_profile_filter: bool = False,
 ) -> HiveCatalogMatch | None:
     """Catalogue match for one explicit profile (orchestrator / lot C entry point)."""
     candidates = _rows_for_item(db, media, item)
@@ -258,14 +355,15 @@ def pick_catalog_match_for_profile_attempt(
             if reason is not None:
                 logger.info("%s — qualité=%s, taille=%s o", reason, quality or "?", size)
                 continue
-        rank = rank_catalog_version_for_profile_attempt(
-            row.version_key,
+        rank = rank_catalogue_row_for_profile_attempt(
+            db,
+            row,
             profile=profile,
-            size=size if size > 0 else None,
+            default_size=size if size > 0 else None,
         )
-        if rank is None:
+        if rank is None and not skip_profile_filter:
             continue
-        penalty = rank
+        penalty = rank if rank is not None else UNKNOWN_VERSION_RANK
         if prefer_available and not row.disponible:
             penalty += 10_000
         ranked.append((penalty, row))
@@ -373,11 +471,17 @@ def catalogue_request_miss_detail(
         if row.disponible:
             any_disponible = True
         size = _expected_size_for_sha(db, _sha_for_catalogue_row(row))
-        if rank_catalog_version_for_profile_attempt(
-            row.version_key, profile=profile, size=size if size > 0 else None
-        ) is not None:
+        if (
+            rank_catalogue_row_for_profile_attempt(
+                db,
+                row,
+                profile=profile,
+                default_size=size if size > 0 else None,
+            )
+            is not None
+        ):
             ranked = True
-    if not ranked:
+    if not ranked and not (explicit_version and vk):
         return "Les versions Hive ne correspondent pas à votre profil qualité."
     if not any_disponible:
         return "Les sources Hive sont injoignables pour l'instant."
@@ -441,11 +545,19 @@ def catalog_sha_on_item_matches_profile(
         sha = _sha_for_catalogue_row(row)
         if not sha or str(sha).lower() != want:
             continue
+        sources = _catalogue_row_sources(row)
+        if not any(
+            isinstance(s.get("sha256"), str) and str(s["sha256"]).casefold() == want
+            for s in sources
+        ):
+            continue
         size = _expected_size_for_sha(db, sha)
+        nf = _release_text_for_sha(db, sources, sha)
         rank = rank_catalog_version_for_profile_attempt(
             row.version_key,
             profile=profile,
             size=size if size > 0 else None,
+            release_text=nf,
         )
         if rank is not None:
             return True

@@ -48,6 +48,8 @@ import { tmdbBackdropSrc, tmdbPosterSrc } from "../tmdbImages";
 import HiveContextMenuItems from "../components/HiveContextMenuItems.vue";
 import HiveMediaShareRow from "../components/HiveMediaShareRow.vue";
 import HiveMediaRequestCard from "../components/hive/HiveMediaRequestCard.vue";
+import HiveLocalCatalogueBlock from "../components/hive/HiveLocalCatalogueBlock.vue";
+import { provideHiveSeriesCatalogue } from "../composables/useHiveSeriesCatalogue";
 import type { HiveMyRequestItem } from "../hive/hiveRequests";
 import HiveBulkShareMenuItems from "../components/HiveBulkShareMenuItems.vue";
 import HiveSeriesShareSummary from "../components/HiveSeriesShareSummary.vue";
@@ -200,6 +202,10 @@ const autoDays = ref("");
 const globalAutoDeleteDays = ref(14);
 const filmItem = ref<Episode | null>(null);
 const { hiveEnabled } = useHiveEnabled();
+const hiveSeriesCatalogue = provideHiveSeriesCatalogue(
+  computed(() => media.value?.tmdb_id ?? null),
+  computed(() => hiveEnabled.value && media.value?.type === "series"),
+);
 const hiveShare = ref<HiveShareUiState | null>(null);
 const hiveItemRequest = ref<{ announced: boolean; promptAvailable: boolean; retracted: boolean } | null>(null);
 const hiveEpisodeShares = ref<Record<number, HiveShareUiState>>({});
@@ -1268,6 +1274,18 @@ const seasonNumbers = computed(() =>
 
 const filmObtained = computed(() => media.value?.type === "film" && media.value.poll.reason === "film_obtained");
 
+const showHiveLocalCatalogueFilm = computed(() => {
+  if (!hiveEnabled.value || !media.value || media.value.type !== "film" || media.value.tmdb_id == null) {
+    return false;
+  }
+  const item = filmItem.value;
+  if (item?.downloaded) {
+    return false;
+  }
+  const fileStatus = item?.file_status ?? media.value.file_status;
+  return fileStatus !== "present";
+});
+
 const heroBackdropStyle = computed((): Record<string, string> | null => {
   const url = tmdbBackdropSrc(media.value?.backdrop_url) ?? tmdbPosterSrc(media.value?.poster_url);
   if (!url) {
@@ -2038,6 +2056,13 @@ function episodeStatusIconName(episodeRow: Episode): string {
     <p v-if="error" class="error" data-force-status>{{ error }}</p>
     <p v-else-if="message" class="hint" data-force-status>{{ message }}</p>
 
+    <HiveLocalCatalogueBlock
+      v-if="showHiveLocalCatalogueFilm"
+      media-type="film"
+      :tmdb-id="media.tmdb_id!"
+      @changed="reload"
+    />
+
     <article v-if="media.type === 'film' && filmItem && !media.film_not_yet_available" class="panel film-file-panel">
       <h2>Film</h2>
       <FilmFileBlock
@@ -2055,6 +2080,14 @@ function episodeStatusIconName(episodeRow: Episode): string {
       />
     </article>
 
+    <p
+      v-if="media.type === 'series' && hiveEnabled && hiveSeriesCatalogue.error.value"
+      class="error"
+      role="alert"
+      data-testid="hive-series-catalogue-error"
+    >
+      {{ hiveSeriesCatalogue.error.value }}
+    </p>
     <section v-if="media.type === 'series' && (media.followed || ficheHasFiles)" class="fiche-seasons-stack">
       <article class="panel fiche-seasons-intro">
         <h2 class="fiche-seasons-title">
@@ -2317,6 +2350,15 @@ function episodeStatusIconName(episodeRow: Episode): string {
                   </button>
                 </LineMoreActions>
               </div>
+              <HiveLocalCatalogueBlock
+                v-if="hiveEnabled && media.tmdb_id != null && !episodeRow.downloaded"
+                media-type="series"
+                :tmdb-id="media.tmdb_id"
+                :season="group.number"
+                :episode="episodeRow.episode"
+                :catalogue-work="hiveSeriesCatalogue.episodeWork(group.number, episodeRow.episode)"
+                @changed="() => { void hiveSeriesCatalogue.refresh(); void reload(); }"
+              />
             </li>
           </ul>
         </template>

@@ -22,6 +22,7 @@ from mediatracker.core.pipeline.download_guard import (
 )
 from mediatracker.core.polling import EpisodeAir, PollSubject, should_poll_source
 from mediatracker.core.selection import (
+    DEFAULT_HOSTER_PREFERENCE,
     hoster_allowed,
     hoster_rank,
     parse_hoster_preference,
@@ -693,10 +694,11 @@ def _collect(
         )
     if commit:
         release_sqlite_before_network(db)
+    preference = _hosters(db, settings)
     found: list[LinkCandidate] = []
     for page in pages:
         try:
-            found.extend(_page_links(source, page, spec))  # type: ignore[arg-type]
+            found.extend(_page_links(source, page, spec, hoster_preference=preference))  # type: ignore[arg-type]
         except SourceFetchError as exc:
             _mark_binding_error(db, media.id, provider_id, page, now, exc.message)
             if bound is not None and not retry_with_search:
@@ -728,7 +730,6 @@ def _collect(
             items=items,
             profile_rank=pick_profile_rank,
         )
-    preference = _hosters(db, settings)
     kept = [link for link in found if hoster_allowed(link.hoster, preference)]
     kept.sort(key=lambda link: (link.season or 0, link.episode or 0, hoster_rank(link.hoster, preference), link.url))
     poll_qp_id = getattr(spec, "quality_profile_id", None) if spec is not None else None
@@ -768,11 +769,14 @@ def _collect(
     )
 
 
-def _page_links(source, page, profile) -> list[LinkCandidate]:
+def _page_links(source, page, profile, *, hoster_preference=None) -> list[LinkCandidate]:
     ref = SourceRef(ref=page.ref, url=page.url)
+    kwargs: dict = {}
+    if hoster_preference is not None:
+        kwargs["hoster_preference"] = hoster_preference
     if getattr(source, "type", None) == "wawacity" and profile is not None:
-        return list(source.get_links(ref, profile=profile))  # type: ignore[call-arg]
-    return list(source.get_links(ref))  # type: ignore[attr-defined]
+        return list(source.get_links(ref, profile=profile, **kwargs))  # type: ignore[call-arg]
+    return list(source.get_links(ref, **kwargs))  # type: ignore[attr-defined]
 
 
 def _search(
@@ -1716,7 +1720,7 @@ def _hosters(db: Session, settings: Settings) -> list[str]:
     try:
         return parse_hoster_preference(raw)
     except ValueError:
-        return parse_hoster_preference(settings.hoster_preference)
+        return parse_hoster_preference(",".join(DEFAULT_HOSTER_PREFERENCE))
 
 
 def _items_for(db: Session, media_ids: list[int]) -> dict[int, list[MediaItem]]:

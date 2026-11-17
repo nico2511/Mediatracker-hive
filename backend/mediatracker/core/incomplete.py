@@ -26,10 +26,11 @@ from mediatracker.core.storage import incomplete_dir, is_under, library_skip, st
 from mediatracker.db.models import Download, Setting, TrashEntry
 from mediatracker.events import record_event
 from mediatracker.library.parse import is_video, parse_release, show_key
+from mediatracker.retention import INCOMPLETE_ORPHAN_KEEP_DAYS
 
 logger = logging.getLogger(__name__)
 
-KEEP_DAYS = 3
+KEEP_DAYS = INCOMPLETE_ORPHAN_KEEP_DAYS
 TINY_BYTES = 64 * 1024
 BUSY = ("pending", "resolving", "queued", "downloading", "post_processing")
 _STAMP = "incomplete_cleanup_at"

@@ -18,6 +18,7 @@ from mediatracker.integrations.jellyfin import JellyfinClient, JellyfinError, ma
 from mediatracker.integrations.jellyfin_sync import (
     LAST_ERROR,
     LAST_POLL_AT,
+    _poll_minutes,
     apply_webhook,
     jellyfin_settings,
     save_webhook_secret,
@@ -138,7 +139,7 @@ def jellyfin_status(
     settings = request.app.state.settings
     base = effective_public_base_url(db, settings) or str(request.base_url).rstrip("/")
     webhook = f"{base}/api/v1/integrations/jellyfin/webhook" if secret else None
-    interval = _poll_minutes(db)
+    interval = _poll_minutes(db, settings)
     return JellyfinStatus(
         configured=bool(url and _key),
         url=url or None,
@@ -388,13 +389,3 @@ def _sync_error(db: Session) -> str | None:
     return row.value
 
 
-def _poll_minutes(db: Session) -> int:
-    from mediatracker.db.models import Setting
-
-    row = db.get(Setting, "jellyfin_poll_interval_min")
-    if row is None or not row.value:
-        return 30
-    try:
-        return int(row.value)
-    except ValueError:
-        return 30

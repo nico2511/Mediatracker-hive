@@ -2,13 +2,22 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { RouterLink } from "vue-router";
 
+import { useServiceStatus } from "../../composables/useServiceStatus";
 import CometInstanceList from "../../components/CometInstanceList.vue";
 import HosterOrderList from "../../components/HosterOrderList.vue";
 import StremioAddonList, { type StremioAddonRow } from "../../components/StremioAddonList.vue";
 import SourceRank from "../../components/SourceRank.vue";
 import { api, userFacingApiError } from "../../api";
 import { fetchSettings, patchSettings } from "../../settings";
-import { settingAsCommaList, settingAsLineList, settingAsString, settingCommaTokens } from "../../settingsCoerce";
+import { applySettingNumber, settingBoundMax, settingBoundMin } from "../../settingsMeta";
+import type { SettingRow } from "../../api";
+import {
+  mergeCommaOrderPreservingHidden,
+  settingAsCommaList,
+  settingAsLineList,
+  settingAsString,
+  settingCommaTokens,
+} from "../../settingsCoerce";
 import { sourceDisplayLabel } from "../../sourceLabels";
 import { formatParisClock } from "../../time";
 
@@ -38,18 +47,20 @@ const SOURCE_IDS = [
   "stremio_addons",
 ] as const;
 
-const sourceOrder = ref("wawacity,free_telecharger,hive,comet,torrentio,stremio_addons");
+const sourceOrder = ref("");
 const statuses = ref<SourceStatus[]>([]);
 const availableSourceIds = ref<string[]>([]);
-const downloadReady = ref(true);
 const blockedMessage = ref("");
 const expanded = reactive<Record<string, boolean>>({});
 
-const requestDelay = ref(5);
-const cacheSeconds = ref(900);
-const errorBackoffMin = ref(180);
-const remoteSearchCooldownHours = ref(6);
-const hosterOrder = ref<string[]>(["rapidgator", "turbobit", "uploady", "dailyuploads", "1fichier"]);
+const settingsRows = ref<SettingRow[]>([]);
+
+const requestDelay = ref<number | undefined>(undefined);
+const cacheSeconds = ref<number | undefined>(undefined);
+const errorBackoffMin = ref<number | undefined>(undefined);
+const remoteSearchCooldownHours = ref<number | undefined>(undefined);
+const hosterOrder = ref<string[]>([]);
+const hosterPreferenceStored = ref("");
 
 const wawacityUrl = ref("");
 const wawacityAgent = ref("");
@@ -81,9 +92,35 @@ const message = ref("");
 const error = ref("");
 const saving = ref(false);
 
+const defaultTorrentioUrl = ref("");
+
+const {
+  adConnected,
+  downloadReady,
+  hiveEnabled,
+  isSourceAvailable,
+  serviceStatusLoaded,
+  refresh: refreshServiceStatus,
+} = useServiceStatus();
+
 const statusBySource = computed(() => new Map((statuses.value ?? []).map((row) => [row.source, row])));
 
-const displaySourceIds = computed(() => availableSourceIds.value);
+const maskSourcesForAd = computed(() => serviceStatusLoaded.value && !adConnected.value);
+
+const displaySourceIds = computed(() => {
+  const ids = availableSourceIds.value;
+  if (!maskSourcesForAd.value) {
+    return ids;
+  }
+  return ids.filter((id) => isSourceAvailable(id));
+});
+
+const showAdGateLine = computed(() => {
+  if (!maskSourcesForAd.value) {
+    return false;
+  }
+  return availableSourceIds.value.some((id) => !isSourceAvailable(id));
+});
 
 const orderedSources = computed(() => {
   const visible = new Set(displaySourceIds.value);
@@ -91,6 +128,39 @@ const orderedSources = computed(() => {
   const disabledTail = SOURCE_IDS.filter((id) => !enabled.includes(id) && visible.has(id));
   return [...enabled, ...disabledTail];
 });
+
+const visibleSourceCards = computed(() =>
+  orderedSources.value.filter((id) => {
+    if (!maskSourcesForAd.value) {
+      return true;
+    }
+    if (id === "hive" && hiveEnabled.value) {
+      return true;
+    }
+    return isSourceAvailable(id);
+  }),
+);
+
+function visibleIdsForOrderMerge(): string[] {
+  return maskSourcesForAd.value ? displaySourceIds.value : availableSourceIds.value;
+}
+
+function resolvedDownloadSourceOrder(): string {
+  const visible = visibleIdsForOrderMerge();
+  const visibleTokens = settingCommaTokens(sourceOrder.value).filter((id) => visible.includes(id));
+  return mergeCommaOrderPreservingHidden(sourceOrder.value, visible, visibleTokens);
+}
+
+function resolvedHosterPreference(): string {
+  if (!maskSourcesForAd.value) {
+    return hosterOrder.value.join(",");
+  }
+  const current = hosterOrder.value.join(",");
+  if (current) {
+    return current;
+  }
+  return hosterPreferenceStored.value;
+}
 
 function labelForSource(id: string): string {
   const row = statusBySource.value.get(id);
@@ -114,18 +184,44 @@ function isEnabled(id: string): boolean {
 }
 
 function setEnabled(id: string, on: boolean) {
-  const enabled = parseEnabled();
+  if (!displaySourceIds.value.includes(id)) {
+    return;
+  }
+  let visibleEnabled = settingCommaTokens(sourceOrder.value).filter((token) =>
+    displaySourceIds.value.includes(token),
+  );
   if (on) {
-    if (!enabled.includes(id)) {
-      sourceOrder.value = [...enabled, id].join(",");
+    if (visibleEnabled.includes(id)) {
+      return;
     }
-    return;
+    visibleEnabled = [...visibleEnabled, id];
+  } else {
+    visibleEnabled = visibleEnabled.filter((token) => token !== id);
+    if (!visibleEnabled.length) {
+      return;
+    }
   }
-  const next = enabled.filter((item) => item !== id);
-  if (!next.length) {
-    return;
+  const priorVisibleEnabled = settingCommaTokens(sourceOrder.value).filter((token) =>
+    displaySourceIds.value.includes(token),
+  );
+  let merged = mergeCommaOrderPreservingHidden(
+    sourceOrder.value,
+    visibleIdsForOrderMerge(),
+    visibleEnabled,
+  );
+  if (on) {
+    const newlyEnabled = visibleEnabled.filter((token) => !priorVisibleEnabled.includes(token));
+    if (newlyEnabled.length) {
+      const tokens = settingCommaTokens(merged);
+      for (const token of newlyEnabled) {
+        if (!tokens.includes(token)) {
+          tokens.push(token);
+        }
+      }
+      merged = tokens.join(",");
+    }
   }
-  sourceOrder.value = next.join(",");
+  sourceOrder.value = merged;
 }
 
 function statusDotClass(source: string): string {
@@ -220,7 +316,6 @@ async function loadStatuses() {
   }>("/api/v1/settings/sources/status");
   statuses.value = Array.isArray(body?.sources) ? body.sources : [];
   availableSourceIds.value = Array.isArray(body?.available_sources) ? body.available_sources : [];
-  downloadReady.value = body?.download_ready !== false;
   blockedMessage.value = (body?.blocked_message || "").trim();
 }
 
@@ -266,6 +361,26 @@ async function loadProviders() {
 
 async function loadSettings() {
   const body = await fetchSettings();
+  settingsRows.value = body.settings;
+  if (body.source_defaults) {
+    defaultTorrentioUrl.value = body.source_defaults.torrentio_base_url;
+  }
+  const delay = applySettingNumber(body.settings, "source_request_delay_seconds");
+  if (delay !== undefined) {
+    requestDelay.value = delay;
+  }
+  const cache = applySettingNumber(body.settings, "source_cache_seconds");
+  if (cache !== undefined) {
+    cacheSeconds.value = cache;
+  }
+  const backoff = applySettingNumber(body.settings, "source_error_backoff_min");
+  if (backoff !== undefined) {
+    errorBackoffMin.value = backoff;
+  }
+  const cooldown = applySettingNumber(body.settings, "remote_search_cooldown_hours");
+  if (cooldown !== undefined) {
+    remoteSearchCooldownHours.value = cooldown;
+  }
   for (const row of body.settings) {
     if (row.key === "download_source_order") {
       const next = settingAsCommaList(row.value);
@@ -273,20 +388,10 @@ async function loadSettings() {
         sourceOrder.value = next;
       }
     }
-    if (row.key === "source_request_delay_seconds" && typeof row.value === "number") {
-      requestDelay.value = row.value;
-    }
-    if (row.key === "source_cache_seconds" && typeof row.value === "number") {
-      cacheSeconds.value = row.value;
-    }
-    if (row.key === "source_error_backoff_min" && typeof row.value === "number") {
-      errorBackoffMin.value = row.value;
-    }
-    if (row.key === "remote_search_cooldown_hours" && typeof row.value === "number") {
-      remoteSearchCooldownHours.value = row.value;
-    }
     if (row.key === "hoster_preference") {
-      const tokens = settingCommaTokens(settingAsCommaList(row.value));
+      const comma = settingAsCommaList(row.value);
+      hosterPreferenceStored.value = comma;
+      const tokens = settingCommaTokens(comma);
       if (tokens.length) {
         hosterOrder.value = tokens;
       }
@@ -352,7 +457,7 @@ async function loadSettings() {
 }
 
 async function refresh() {
-  await Promise.all([loadStatuses(), loadHiveRuches(), loadWawacityDomain()]);
+  await Promise.all([loadStatuses(), loadHiveRuches(), loadWawacityDomain(), refreshServiceStatus()]);
 }
 
 onMounted(async () => {
@@ -360,6 +465,7 @@ onMounted(async () => {
     await loadSettings();
     await loadProviders();
     await refresh();
+    await refreshServiceStatus();
   } catch (err) {
     error.value = userFacingApiError(err, "Chargement des sources impossible.");
   }
@@ -372,12 +478,12 @@ async function saveCore() {
   try {
     await patchSettings({
       values: {
-        download_source_order: sourceOrder.value,
+        download_source_order: resolvedDownloadSourceOrder(),
         source_request_delay_seconds: requestDelay.value,
         source_cache_seconds: cacheSeconds.value,
         source_error_backoff_min: errorBackoffMin.value,
         remote_search_cooldown_hours: remoteSearchCooldownHours.value,
-        hoster_preference: hosterOrder.value.join(","),
+        hoster_preference: resolvedHosterPreference(),
         wawacity_base_url: wawacityUrl.value,
         wawacity_user_agent: wawacityAgent.value,
         free_telecharger_user_agent: freeTelechargerAgent.value,
@@ -575,11 +681,12 @@ const SOURCE_BLURBS: Record<string, string> = {
 
     <p v-if="!downloadReady && blockedMessage" class="hint source-blocked-banner" role="status">
       {{ blockedMessage }}
-      <RouterLink to="/reglages/alldebrid">AllDebrid</RouterLink>
+      <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
       ou
       <RouterLink to="/reglages/hive">Hive</RouterLink>.
     </p>
 
+    <template v-if="downloadReady">
     <section class="panel stack source-order-panel">
       <h3>Ordre des sources</h3>
       <p class="hint">
@@ -617,34 +724,61 @@ const SOURCE_BLURBS: Record<string, string> = {
       <p v-if="probeError" class="error">{{ probeError }}</p>
     </section>
 
-    <section class="panel stack source-rhythm-panel">
+    <p v-if="serviceStatusLoaded && showAdGateLine" class="hint source-ad-gate" role="status">
+      Disponible après connexion d'AllDebrid →
+      <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+    </p>
+
+    <section v-if="!serviceStatusLoaded || adConnected" class="panel stack source-rhythm-panel">
       <h3>Rythme des requêtes (toutes les sources)</h3>
       <p class="hint">
-        {{ requestDelay }} s entre requêtes — {{ Math.round(cacheSeconds / 60) }} min de cache — {{ errorBackoffMin }}
+        {{ requestDelay ?? "—" }} s entre requêtes —
+        {{ cacheSeconds != null ? Math.round(cacheSeconds / 60) : "—" }} min de cache —
+        {{ errorBackoffMin ?? "—" }}
         min de recul après erreur.
       </p>
       <label>
         <span>Délai entre requêtes (secondes)</span>
-        <input v-model.number="requestDelay" type="number" min="2" max="60" />
+        <input
+          v-model.number="requestDelay"
+          type="number"
+          :min="settingBoundMin(settingsRows, 'source_request_delay_seconds', 2)"
+          :max="settingBoundMax(settingsRows, 'source_request_delay_seconds', 60)"
+        />
       </label>
       <label>
         <span>Cache des pages (secondes)</span>
-        <input v-model.number="cacheSeconds" type="number" min="0" max="3600" />
+        <input
+          v-model.number="cacheSeconds"
+          type="number"
+          :min="settingBoundMin(settingsRows, 'source_cache_seconds', 0)"
+          :max="settingBoundMax(settingsRows, 'source_cache_seconds', 3600)"
+        />
       </label>
       <label>
         <span>Recul après erreur (minutes)</span>
-        <input v-model.number="errorBackoffMin" type="number" min="1" max="1440" />
+        <input
+          v-model.number="errorBackoffMin"
+          type="number"
+          :min="settingBoundMin(settingsRows, 'source_error_backoff_min', 30)"
+          :max="settingBoundMax(settingsRows, 'source_error_backoff_min', 1440)"
+        />
       </label>
       <label>
         <span>Délai entre deux recherches distantes d'une même fiche (heures)</span>
-        <input v-model.number="remoteSearchCooldownHours" type="number" min="1" max="72" />
+        <input
+          v-model.number="remoteSearchCooldownHours"
+          type="number"
+          :min="settingBoundMin(settingsRows, 'remote_search_cooldown_hours', 1)"
+          :max="settingBoundMax(settingsRows, 'remote_search_cooldown_hours', 72)"
+        />
       </label>
       <HosterOrderList v-model="hosterOrder" />
       <button type="button" class="btn" :disabled="saving" @click="saveCore">Enregistrer le rythme</button>
     </section>
 
     <article
-      v-for="id in orderedSources"
+      v-for="id in visibleSourceCards"
       :key="id"
       class="panel source-card"
       :class="{ expanded: expanded[id], 'is-off': !isEnabled(id) }"
@@ -673,7 +807,15 @@ const SOURCE_BLURBS: Record<string, string> = {
         {{ statusBySource.get(id)?.message }}
       </p>
       <div class="source-card-actions">
-        <button type="button" class="btn btn-sm" :disabled="probeBusy" @click="runProbe([id])">Tester</button>
+        <button
+          v-if="!serviceStatusLoaded || isSourceAvailable(id)"
+          type="button"
+          class="btn btn-sm"
+          :disabled="probeBusy"
+          @click="runProbe([id])"
+        >
+          Tester
+        </button>
         <button type="button" class="btn btn-sm" @click="toggleExpanded(id)">
           {{ expanded[id] ? "Masquer ▾" : "Réglages ▾" }}
         </button>
@@ -724,7 +866,7 @@ const SOURCE_BLURBS: Record<string, string> = {
         <template v-else-if="id === 'torrentio'">
           <label>
             <span>Adresse de l’addon</span>
-            <input v-model="torrentioUrl" placeholder="https://torrentio.strem.fun" />
+            <input v-model="torrentioUrl" :placeholder="defaultTorrentioUrl || 'https://torrentio-addon.example'" />
           </label>
           <p class="hint">Sans clé : MediaTracker envoie lui-même l’aimant à AllDebrid.</p>
         </template>
@@ -740,5 +882,6 @@ const SOURCE_BLURBS: Record<string, string> = {
 
     <p v-if="message" class="hint">{{ message }}</p>
     <p v-if="error" class="error">{{ error }}</p>
+    </template>
   </div>
 </template>

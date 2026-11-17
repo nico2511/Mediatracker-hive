@@ -9,10 +9,9 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from mediatracker.db.models import HiveFileFingerprint, HiveFingerprintQueue, HiveShareIntent
+from mediatracker.hive.fingerprint import HIVE_CLAIM_STALE
 
 logger = logging.getLogger(__name__)
-
-QUEUE_CLAIM_STALE_SECONDS = 20 * 60
 
 
 def enqueue_fingerprint_work(db: Session, media_item_id: int, *, now: datetime) -> None:
@@ -134,7 +133,7 @@ def refresh_running_claim_lease(db: Session, media_item_id: int, *, now: datetim
 def recover_fingerprint_queue(db: Session, *, now: datetime) -> int:
     """Claims abandonnés et lignes orphelines (empreinte déjà complète)."""
     changed = 0
-    stale_before = now.timestamp() - QUEUE_CLAIM_STALE_SECONDS
+    stale_before = (now - HIVE_CLAIM_STALE).timestamp()
     rows = list(db.scalars(select(HiveFingerprintQueue)).all())
     for row in rows:
         fp = db.get(HiveFileFingerprint, row.media_item_id)

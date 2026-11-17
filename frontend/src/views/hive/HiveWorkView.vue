@@ -9,13 +9,15 @@ import HiveEmpreintesPanel from "../../components/HiveEmpreintesPanel.vue";
 import { useHiveEnabled } from "../../composables/useHive";
 import TmdbPosterImg from "../../components/TmdbPosterImg.vue";
 import StatusIcon from "../../components/StatusIcon.vue";
-import { formatBytes } from "../../diskFormat";
+import HiveCatalogueVersionList from "../../components/hive/HiveCatalogueVersionList.vue";
 import {
   hiveCatalogueShowProgressBar,
   hiveCatalogueStateLabel,
   type HiveCatalogueCardState,
 } from "../../hive/hiveCatalogueCard";
 import { mediaKind } from "../../labels";
+import { useHiveOutOfProfileConfirm } from "../../composables/useHiveOutOfProfileConfirm";
+import { hiveVersionProfileCompatible } from "../../hive/hiveVersionProfile";
 
 interface VersionRow {
   version_key: string;
@@ -26,6 +28,7 @@ interface VersionRow {
   size_bytes?: number | null;
   ruche_count?: number | null;
   recommended?: boolean;
+  profile_compatible?: boolean;
 }
 
 interface WorkRow extends HiveCatalogueCardState {
@@ -52,8 +55,11 @@ const work = ref<WorkRow | null>(null);
 const error = ref("");
 const busy = ref(false);
 const compactLabels = ref(false);
-const selectedQuality = ref<string | null>(null);
-const selectedLanguage = ref<string | null>(null);
+const selectedEpisodeVersionKey = ref<string | null>(null);
+/** Série : sélection hors profil déjà confirmée dans la liste des versions (évite double confirmation). */
+const outOfProfileVersionPickConfirmed = ref(false);
+const { pendingId: confirmTargetId, resetConfirm, beginOrConfirm, needsConfirm } = useHiveOutOfProfileConfirm();
+const HERO_REQUEST_ID = "hero";
 const { hiveEnabled } = useHiveEnabled();
 const hiveEmpreintesSignal = ref(0);
 
@@ -82,69 +88,33 @@ function episodeSlot(row: WorkRow): string {
   return `S${row.season} · E${String(row.episode).padStart(2, "0")}`;
 }
 
-const qualityOptions = computed(() => {
-  const set = new Set<string>();
-  for (const ver of work.value?.versions ?? []) {
-    const q = (ver.quality || ver.version_key.split("+", 1)[0] || "").trim();
-    if (q) {
-      set.add(q);
-    }
-  }
-  return [...set].sort((a, b) => a.localeCompare(b, "fr"));
-});
-
-const languageOptions = computed(() => {
-  const set = new Set<string>();
-  for (const ver of work.value?.versions ?? []) {
-    const parts = ver.version_key.split("+");
-    const lang = (ver.language || (parts.length > 1 ? parts[1] : "") || "").trim();
-    if (lang) {
-      set.add(lang);
-    }
-  }
-  return [...set].sort((a, b) => a.localeCompare(b, "fr"));
-});
-
-function versionForSelection(quality: string, language: string): VersionRow | undefined {
-  return work.value?.versions.find((ver) => {
-    const q = (ver.quality || ver.version_key.split("+", 1)[0] || "").trim();
-    const parts = ver.version_key.split("+");
-    const lang = (ver.language || (parts.length > 1 ? parts[1] : "") || "").trim();
-    return q === quality && lang === language;
-  });
-}
-
-const selectedVersion = computed(() => {
-  const q = selectedQuality.value;
-  const lang = selectedLanguage.value;
-  if (!q || !lang) {
-    return null;
-  }
-  return versionForSelection(q, lang) ?? null;
-});
-
-const requestCtaLabel = computed(() => {
-  const q = selectedQuality.value;
-  const lang = selectedLanguage.value;
-  if (!q || !lang) {
-    return "Télécharger via Hive";
-  }
-  return `Télécharger via Hive · ${q} · ${lang}`;
-});
-
 function pickDefaultVersionSelection() {
   if (!work.value?.versions.length) {
-    selectedQuality.value = null;
-    selectedLanguage.value = null;
+    selectedEpisodeVersionKey.value = null;
     return;
   }
   const recommended = work.value.versions.find((ver) => ver.recommended && ver.disponible);
+  const compatible = work.value.versions.find((ver) => ver.profile_compatible && ver.disponible);
   const fallback = work.value.versions.find((ver) => ver.disponible) ?? work.value.versions[0];
-  const seed = recommended ?? fallback;
-  const parts = seed.version_key.split("+");
-  selectedQuality.value = (seed.quality || parts[0] || "").trim() || null;
-  selectedLanguage.value = (seed.language || (parts.length > 1 ? parts[1] : "") || "").trim() || null;
+  selectedEpisodeVersionKey.value = (recommended ?? compatible ?? fallback)?.version_key ?? null;
+  outOfProfileVersionPickConfirmed.value = false;
 }
+
+function onVersionPicked(versionKey: string) {
+  selectedEpisodeVersionKey.value = versionKey;
+  const ver = work.value?.versions.find((row) => row.version_key === versionKey);
+  outOfProfileVersionPickConfirmed.value = Boolean(
+    ver && !hiveVersionProfileCompatible(ver),
+  );
+}
+
+const selectedVersion = computed(() => {
+  const key = selectedEpisodeVersionKey.value;
+  if (!key || !work.value) {
+    return null;
+  }
+  return work.value.versions.find((ver) => ver.version_key === key) ?? null;
+});
 
 async function load() {
   const key = route.params.workKey;
@@ -173,6 +143,8 @@ onUnmounted(() => {
 });
 
 watch(() => route.params.workKey, () => void load());
+
+watch(selectedEpisodeVersionKey, () => resetConfirm());
 
 async function follow() {
   if (!work.value) {
@@ -216,11 +188,46 @@ async function requestTarget(target: WorkRow, version?: VersionRow) {
   }
 }
 
-function requestFilmWithSelection() {
-  if (!work.value || !selectedVersion.value) {
+function requestEpisodeFromSelection(ep: WorkRow) {
+  const ver = selectedVersion.value;
+  if (!ver) {
+    error.value = "Choisissez une version dans la liste.";
     return;
   }
-  void requestTarget(work.value, selectedVersion.value);
+  const run = () => void requestTarget(ep, ver);
+  if (isSeriesShell.value && outOfProfileVersionPickConfirmed.value) {
+    void run();
+    return;
+  }
+  beginOrConfirm(ep.work_key, ver, run);
+}
+
+function requestFilmAuto() {
+  if (!work.value) {
+    return;
+  }
+  resetConfirm();
+  void requestTarget(work.value);
+}
+
+function onHeroHiveDownload() {
+  if (!work.value) {
+    return;
+  }
+  const ver = selectedVersion.value;
+  if (ver && !hiveVersionProfileCompatible(ver)) {
+    beginOrConfirm(HERO_REQUEST_ID, ver, () => void requestTarget(work.value!, ver));
+    return;
+  }
+  requestFilmAuto();
+}
+
+function heroNeedsConfirm(): boolean {
+  return needsConfirm(HERO_REQUEST_ID, selectedVersion.value);
+}
+
+function episodeNeedsConfirm(ep: WorkRow): boolean {
+  return needsConfirm(ep.work_key, selectedVersion.value);
 }
 
 function canRequest(row: WorkRow): boolean {
@@ -237,14 +244,6 @@ const showHeroMenu = computed(
   () => showHeroFollow.value || showHeroRequest.value || showHeroMediaLink.value || showHeroHiveShare.value,
 );
 
-watch([selectedQuality, selectedLanguage], () => {
-  if (!selectedQuality.value || !languageOptions.value.includes(selectedLanguage.value || "")) {
-    const match = languageOptions.value.find((lang) => versionForSelection(selectedQuality.value || "", lang));
-    if (match) {
-      selectedLanguage.value = match;
-    }
-  }
-});
 </script>
 
 <template>
@@ -291,6 +290,13 @@ watch([selectedQuality, selectedLanguage], () => {
             </span>
           </p>
           <p v-if="work.error_line" class="error">{{ work.error_line }}</p>
+          <p
+            v-if="heroNeedsConfirm()"
+            class="hint hive-version-confirm"
+            data-testid="hive-hero-version-confirm"
+          >
+            Télécharger quand même ?
+          </p>
         </div>
         <div class="fiche-hero-rest">
           <p v-if="work.overview" class="overview hint">{{ work.overview }}</p>
@@ -321,9 +327,20 @@ watch([selectedQuality, selectedLanguage], () => {
                 role="menuitem"
                 :disabled="busy"
                 data-testid="hive-work-request"
-                @click="requestFilmWithSelection"
+                @click="onHeroHiveDownload"
               >
-                {{ requestCtaLabel }}
+                {{ heroNeedsConfirm() ? "Confirmer" : "Télécharger via Hive" }}
+              </button>
+              <button
+                v-if="showHeroRequest && heroNeedsConfirm()"
+                type="button"
+                class="action-menu-item"
+                role="menuitem"
+                :disabled="busy"
+                data-testid="hive-hero-cancel-confirm"
+                @click="resetConfirm"
+              >
+                Annuler
               </button>
               <HiveBulkShareMenuItems
                 v-if="showHeroHiveShare && work.media_id"
@@ -363,16 +380,36 @@ watch([selectedQuality, selectedLanguage], () => {
               <p class="hint">{{ stateLabelShort(ep) }}</p>
               <p v-if="ep.error_line" class="error">{{ ep.error_line }}</p>
             </div>
-            <div class="row">
-              <button
-                v-if="canRequest(ep)"
-                type="button"
-                class="btn btn-sm primary"
-                :disabled="busy"
-                @click="requestTarget(ep)"
+            <div class="row stack episode-actions">
+              <p
+                v-if="episodeNeedsConfirm(ep)"
+                class="hint hive-version-confirm"
+                data-testid="hive-episode-version-confirm"
               >
-                Télécharger
-              </button>
+                Télécharger quand même ?
+              </p>
+              <div class="row">
+                <button
+                  v-if="canRequest(ep)"
+                  type="button"
+                  class="btn btn-sm primary"
+                  :disabled="busy || !selectedEpisodeVersionKey"
+                  data-testid="hive-episode-request"
+                  @click="requestEpisodeFromSelection(ep)"
+                >
+                  {{ episodeNeedsConfirm(ep) ? "Confirmer" : "Télécharger" }}
+                </button>
+                <button
+                  v-if="episodeNeedsConfirm(ep)"
+                  type="button"
+                  class="btn btn-sm btn-ghost"
+                  :disabled="busy"
+                  data-testid="hive-episode-cancel-confirm"
+                  @click="resetConfirm"
+                >
+                  Annuler
+                </button>
+              </div>
             </div>
           </div>
         </li>
@@ -381,48 +418,20 @@ watch([selectedQuality, selectedLanguage], () => {
 
     <section class="panel stack" aria-labelledby="hive-versions-title">
       <h2 id="hive-versions-title">Versions</h2>
-      <fieldset v-if="!isSeriesShell && work.versions.length" class="version-pickers stack">
-        <legend class="sr-only">Qualité et langue</legend>
-        <div v-if="qualityOptions.length" class="version-radio-group">
-          <p class="lbl hint">Qualité</p>
-          <div class="row wrap version-radios" role="radiogroup" aria-label="Qualité">
-            <label v-for="q in qualityOptions" :key="q" class="version-radio">
-              <input v-model="selectedQuality" type="radio" name="hive-version-quality" :value="q" />
-              <span>{{ q }}</span>
-            </label>
-          </div>
-        </div>
-        <div v-if="languageOptions.length" class="version-radio-group">
-          <p class="lbl hint">Langue</p>
-          <div class="row wrap version-radios" role="radiogroup" aria-label="Langue">
-            <label v-for="lang in languageOptions" :key="lang" class="version-radio">
-              <input v-model="selectedLanguage" type="radio" name="hive-version-language" :value="lang" />
-              <span>{{ lang }}</span>
-            </label>
-          </div>
-        </div>
-        <p v-if="selectedVersion" class="hint version-meta">
-          <span v-if="selectedVersion.recommended" class="pill ok">Conseillée</span>
-          <span>{{ selectedVersion.source_count }} source{{ selectedVersion.source_count > 1 ? "s" : "" }}</span>
-          <span v-if="selectedVersion.size_bytes"> · {{ formatBytes(selectedVersion.size_bytes) }}</span>
-          <span v-if="selectedVersion.ruche_count">
-            · {{ selectedVersion.ruche_count }} ruche{{ selectedVersion.ruche_count > 1 ? "s" : "" }}
-          </span>
-          <span v-if="selectedVersion && !selectedVersion.disponible" class="off"> · Indisponible pour l’instant</span>
-        </p>
-        <button
-          v-if="canRequest(work)"
-          type="button"
-          class="btn primary"
-          :disabled="busy || !selectedVersion?.disponible"
-          data-testid="hive-work-version-request"
-          @click="requestFilmWithSelection"
-        >
-          {{ requestCtaLabel }}
-        </button>
-      </fieldset>
-      <p v-else-if="!work.versions.length" class="hint">Aucune version annoncée pour le moment.</p>
-      <p v-if="isSeriesShell" class="hint">Choisissez un épisode ci-dessus pour lancer un transfert.</p>
+      <HiveCatalogueVersionList
+        v-if="work.versions.length"
+        :work-key="work.work_key"
+        :versions="work.versions"
+        :season="work.season"
+        :episode="work.episode"
+        :busy="busy"
+        :pick-only="isSeriesShell"
+        :selected-version-key="selectedEpisodeVersionKey"
+        @pick="onVersionPicked"
+        @requested="load"
+      />
+      <p v-else class="hint">Aucune version annoncée pour le moment.</p>
+      <p v-if="isSeriesShell" class="hint">Choisissez une version, puis un épisode pour lancer le transfert.</p>
     </section>
   </section>
   <p v-else-if="error" class="error" role="alert">{{ error }}</p>

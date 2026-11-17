@@ -94,6 +94,15 @@ afterEach(() => {
 });
 
 describe("Réglages maj — Mettre à jour maintenant", () => {
+  it("affiche le lien Doc Watchtower", async () => {
+    const w = await mountMaj();
+    const doc = w.find("[data-testid=maj-watchtower-doc]");
+    expect(doc.exists()).toBe(true);
+    expect(doc.attributes("href")).toBe("https://watchtower.nickfedor.com/");
+    expect(doc.text()).toBe("Doc Watchtower ↗");
+    w.unmount();
+  });
+
   it("non configuré : bouton présent, grisé ; raison ne nomme que le champ manquant", async () => {
     state.configured = false;
     rows.value = [

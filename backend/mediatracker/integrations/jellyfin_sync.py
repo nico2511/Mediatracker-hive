@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mediatracker.config import Settings
+from mediatracker.config import Settings, get_settings
 from mediatracker.core.metrics.worker_counters import TASK_JELLYFIN_SYNC, track_task
 from mediatracker.db.models import Media, MediaItem, Setting
 from mediatracker.db.session import release_sqlite_before_network
@@ -38,7 +38,6 @@ LAST_ERROR = "jellyfin.last_sync_error"
 POLL_RETRY_AT = "jellyfin.poll_retry_at"
 POLL_FAIL_COUNT = "jellyfin.poll_fail_count"
 DEBOUNCE = timedelta(seconds=60)
-DEFAULT_POLL_MINUTES = 30
 MIN_POLL_RETRY = timedelta(minutes=5)
 
 
@@ -87,7 +86,8 @@ def maybe_sync_jellyfin(
                 else:
                     _clear(db, REFRESH_AT, moment)
                     _touch(db, "jellyfin.refresh_fired_at", moment)
-            if _poll_due(db, moment, _poll_minutes(db)):
+            poll_min = _poll_minutes(db, settings)
+            if _poll_due(db, moment, poll_min):
                 release_sqlite_before_network(db)
                 try:
                     resolved = resolve_configured_user(db, client, user_id, moment)
@@ -97,7 +97,7 @@ def maybe_sync_jellyfin(
                 except JellyfinError as exc:
                     logger.info("Synchro Jellyfin ignorée : %s", exc.message)
                     _remember(db, LAST_ERROR, exc.message, moment)
-                    _schedule_poll_retry(db, moment, _poll_minutes(db))
+                    _schedule_poll_retry(db, moment, poll_min)
                 else:
                     watches = [
                         item
@@ -768,14 +768,16 @@ def _clear_poll_retry(db: Session, now: datetime) -> None:
     _remember(db, POLL_FAIL_COUNT, "0", now)
 
 
-def _poll_minutes(db: Session) -> int:
+def _poll_minutes(db: Session, settings: Settings | None = None) -> int:
     raw = _text(db, "jellyfin_poll_interval_min")
-    if not raw:
-        return DEFAULT_POLL_MINUTES
-    try:
-        return int(raw)
-    except ValueError:
-        return DEFAULT_POLL_MINUTES
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    if settings is not None:
+        return settings.jellyfin_poll_interval_min
+    return get_settings().jellyfin_poll_interval_min
 
 
 def _text(db: Session, key: str) -> str:

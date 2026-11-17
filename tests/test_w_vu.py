@@ -350,7 +350,7 @@ def test_film_unfollow_after_download(client, app):
         download = Download(media_item_id=item_id, state="post_processing", filename=source.name, error=str(source))
         db.add(download)
         db.flush()
-        _finish_download(db, download, row, media, dest, source, NOW, store_release=False)
+        _finish_download(db, download, row, media, dest, source, NOW, app.state.settings, store_release=False)
         db.commit()
         db.refresh(media)
         assert media.followed is False
@@ -390,7 +390,7 @@ def test_series_stays_followed_after_download(client, app):
         download = Download(media_item_id=item_id, state="post_processing", filename=source.name, error=str(source))
         db.add(download)
         db.flush()
-        _finish_download(db, download, row, media, dest, source, NOW, store_release=False)
+        _finish_download(db, download, row, media, dest, source, NOW, app.state.settings, store_release=False)
         db.commit()
         db.refresh(media)
         assert media.followed is True

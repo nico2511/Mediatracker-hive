@@ -32,6 +32,14 @@ vi.mock("../../components/StatusIcon.vue", () => ({
   default: { template: "<span />" },
 }));
 
+vi.mock("../../components/hive/HiveCatalogueVersionList.vue", () => ({
+  default: {
+    props: ["workKey", "versions"],
+    emits: ["requested"],
+    template: `<div data-testid="hive-card-version-list" />`,
+  },
+}));
+
 import HiveCatalogueView from "./HiveCatalogueView.vue";
 
 const SERIES_AGG = {
@@ -65,6 +73,10 @@ const FILM_ROW = {
   type: "film",
   title: "Film fictif",
   episode_count: null,
+  versions: [
+    { version_key: "HD+VFF", disponible: true, source_count: 1, profile_compatible: true, recommended: true },
+    { version_key: "4K+VO", disponible: true, source_count: 1, profile_compatible: false, recommended: false },
+  ],
 };
 
 beforeEach(() => {
@@ -90,12 +102,12 @@ describe("HiveCatalogueView — carte série agrégée", () => {
     );
   });
 
-  it("garde Télécharger sur un film disponible", async () => {
+  it("affiche une liste de versions sur un film disponible", async () => {
     const wrapper = mount(HiveCatalogueView);
     await flushPromises();
 
     const filmRoot = wrapper.findAll(".poster-card-stub")[1];
-    expect(filmRoot.find('[data-testid="hive-card-request"]').exists()).toBe(true);
+    expect(filmRoot.find('[data-testid="hive-card-version-list"]').exists()).toBe(true);
     expect(filmRoot.find('[data-testid="hive-card-open-fiche"]').exists()).toBe(false);
   });
 });

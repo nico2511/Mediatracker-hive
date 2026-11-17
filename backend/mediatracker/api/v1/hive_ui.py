@@ -164,6 +164,25 @@ def _display_meta(db: Session, cle: dict[str, Any]) -> dict[str, Any]:
     return {"title": fallback, "year": cle.get("year"), "poster_url": stable_poster}
 
 
+def _catalogue_sources_public(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        row: dict[str, Any] = {}
+        sha = src.get("sha256")
+        if isinstance(sha, str) and sha.strip():
+            row["sha256"] = sha.strip()
+        if isinstance(src.get("joignable"), bool):
+            row["joignable"] = src["joignable"]
+        nf = src.get("nom_fichier")
+        if isinstance(nf, str) and nf.strip():
+            row["nom_fichier"] = nf.strip()
+        if row:
+            out.append(row)
+    return out
+
+
 def _catalogue_version_fields(db: Session, sources: list[dict[str, Any]]) -> dict[str, Any]:
     ruche_hex: set[str] = set()
     size_bytes: int | None = None
@@ -191,6 +210,7 @@ def _mark_recommended_versions(db: Session, settings: Settings, work: dict[str, 
     for ver in versions:
         if isinstance(ver, dict):
             ver["recommended"] = False
+            ver["profile_compatible"] = False
     tmdb_id = work.get("tmdb_id")
     media_type = work.get("type")
     if tmdb_id is None or media_type is None:
@@ -213,13 +233,34 @@ def _mark_recommended_versions(db: Session, settings: Settings, work: dict[str, 
         vk = str(ver.get("version_key") or "")
         if not vk or not ver.get("disponible"):
             continue
-        rank = rank_catalog_version_for_profile_attempt(
-            vk,
-            profile=profile,
-            size=ver.get("size_bytes"),
-        )
-        if rank is None:
+        src_list = [s for s in (ver.get("sources") or []) if isinstance(s, dict)]
+        ranks: list[int] = []
+        if not src_list:
+            only = rank_catalog_version_for_profile_attempt(
+                vk,
+                profile=profile,
+                size=ver.get("size_bytes"),
+                release_text=None,
+            )
+            if only is not None:
+                ranks.append(only)
+        else:
+            for src in src_list:
+                nf = src.get("nom_fichier")
+                release_text = nf.strip() if isinstance(nf, str) and nf.strip() else None
+                one = rank_catalog_version_for_profile_attempt(
+                    vk,
+                    profile=profile,
+                    size=ver.get("size_bytes"),
+                    release_text=release_text,
+                )
+                if one is not None:
+                    ranks.append(one)
+        if ranks:
+            ver["profile_compatible"] = True
+        if not ranks:
             continue
+        rank = min(ranks)
         if best_rank is None or rank < best_rank:
             best_rank = rank
             best_key = vk
@@ -277,6 +318,7 @@ def _works_index(db: Session) -> dict[str, dict[str, Any]]:
         src_list = _parse_sources_json(row.sources_json)
         quality, language = _parse_version_parts(row.version_key)
         extra = _catalogue_version_fields(db, src_list)
+        public_sources = _catalogue_sources_public(src_list)
         works[wk]["versions"].append(
             {
                 "version_key": row.version_key,
@@ -285,6 +327,8 @@ def _works_index(db: Session) -> dict[str, dict[str, Any]]:
                 "quality": quality,
                 "language": language,
                 "recommended": False,
+                "profile_compatible": False,
+                "sources": public_sources,
                 **extra,
             }
         )
@@ -329,6 +373,12 @@ def get_hive_overview(
     return HiveOverviewOut(enabled=hive_enabled_in_db(db))
 
 
+class CatalogueSourceOut(BaseModel):
+    sha256: str | None = None
+    nom_fichier: str | None = None
+    joignable: bool | None = None
+
+
 class CatalogueVersionOut(BaseModel):
     version_key: str
     disponible: bool
@@ -338,6 +388,8 @@ class CatalogueVersionOut(BaseModel):
     size_bytes: int | None = None
     ruche_count: int | None = None
     recommended: bool = False
+    profile_compatible: bool = False
+    sources: list[CatalogueSourceOut] = []
 
 
 class CatalogueWorkOut(BaseModel):
@@ -380,6 +432,7 @@ def get_hive_catalogue(
     _principal=Depends(require_scope("read")),
     q: str | None = None,
     media_type: str | None = Query(default=None, pattern="^(film|series)$"),
+    tmdb_id: int | None = None,
     version: str | None = None,
     hide_owned: bool = False,
     refresh: bool = False,
@@ -393,8 +446,28 @@ def get_hive_catalogue(
         db.commit()
     works = aggregate_catalogue_works(db, settings, list(_works_index(db).values()))
     needle = (q or "").strip().casefold()
-    if media_type:
-        works = [w for w in works if w.get("type") == media_type]
+    resolved_media_type = media_type
+    if tmdb_id is not None:
+        if not resolved_media_type:
+            types = {
+                w.get("type")
+                for w in works
+                if w.get("tmdb_id") == tmdb_id and w.get("type") in ("film", "series")
+            }
+            if len(types) > 1:
+                raise Problem(
+                    422,
+                    "Requête invalide",
+                    (
+                        "Le filtre tmdb_id exige media_type=film ou media_type=series "
+                        "lorsque le type ne peut pas être déduit."
+                    ),
+                )
+            if len(types) == 1:
+                resolved_media_type = next(iter(types))
+        works = [w for w in works if w.get("tmdb_id") == tmdb_id]
+    if resolved_media_type:
+        works = [w for w in works if w.get("type") == resolved_media_type]
     if hide_owned:
         works = [w for w in works if not w.get("in_library")]
     if version:

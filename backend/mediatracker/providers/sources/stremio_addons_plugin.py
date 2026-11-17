@@ -80,14 +80,21 @@ class StremioAddonsSourceEntry:
         base_urls: list[str] | None = None,
         addons: list[StremioAddonEntry] | None = None,
         transport: httpx.BaseTransport | None = None,
+        request_delay_seconds: float | None = None,
     ) -> object | None:
         del base_urls
         if addons is not None:
-            return StremioAddonsProvider.open_episode(settings, addons=addons, transport=transport)
+            return StremioAddonsProvider.open_episode(
+                settings,
+                addons=addons,
+                transport=transport,
+                request_delay_seconds=request_delay_seconds,
+            )
         if base_url:
             return StremioAddonsProvider.open_episode(
                 settings,
                 addons=[StremioAddonEntry(url=base_url, enabled=True)],
                 transport=transport,
+                request_delay_seconds=request_delay_seconds,
             )
         return None

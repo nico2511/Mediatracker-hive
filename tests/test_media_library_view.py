@@ -14,7 +14,10 @@ def test_media_list_view_wires_videotheque_grid_and_density_storage():
     assert 'class="poster-grid pc-grid media-library-grid"' in source
     assert "pc-grid--dense" in source
     assert "PosterCard" in source
-    assert '@open="quick = mediaTarget(item)"' in source
+    assert '@open="onCardOpen(item)"' in source
+    assert "DeleteFicheDialog" in source
+    assert "Sélectionner" in source
+    assert "/api/v1/media/bulk" in source
     assert "@click=\"unfollowIdentified\"" in source
     assert 'placeholder="Rechercher dans la collection"' in source
     assert "media-library-extra-filters" in source

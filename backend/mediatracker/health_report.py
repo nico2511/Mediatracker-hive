@@ -183,10 +183,10 @@ def _disk(db: Session, settings: Settings) -> Component:
     limit = threshold_bytes(db, settings)
     free_gb = free / (1024 * 1024 * 1024)
     if limit and free < limit:
-        return Component("disk", "down", f"{free_gb:.1f} Go libres, sous le seuil.")
+        return Component("disk", "down", f"{free_gb:.1f} Gio libres, sous le seuil.")
     if limit:
-        return Component("disk", "ok", f"{free_gb:.1f} Go libres.")
-    return Component("disk", "ok", f"{free_gb:.1f} Go libres. Seuil désactivé.")
+        return Component("disk", "ok", f"{free_gb:.1f} Gio libres.")
+    return Component("disk", "ok", f"{free_gb:.1f} Gio libres. Seuil désactivé.")
 
 
 def _instantiate(row: Provider, settings: Settings, db: Session):

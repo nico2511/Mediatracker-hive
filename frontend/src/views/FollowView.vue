@@ -8,7 +8,7 @@ import TmdbPosterImg from "../components/TmdbPosterImg.vue";
 import {api, userFacingApiError} from "../api";
 import { useConnectivity } from "../pwa/connectivity";
 import { fetchSettings } from "../settings";
-import { mediaKind, tmdbPage } from "../labels";
+import { mediaKind, tmdbPage, tmdbSearch } from "../labels";
 
 interface Hit {
   tmdb_id: number;
@@ -152,7 +152,7 @@ async function follow(payload: Record<string, unknown>) {
           <a
             v-if="query.trim().length >= 2"
             class="button-link"
-            :href="`https://www.themoviedb.org/search?query=${encodeURIComponent(query.trim())}`"
+            :href="tmdbSearch(query)"
             target="_blank"
             rel="noreferrer"
           >Chercher sur TMDB ↗</a>

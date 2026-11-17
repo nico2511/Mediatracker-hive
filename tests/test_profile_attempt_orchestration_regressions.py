@@ -1215,6 +1215,7 @@ def test_rediscover_hive_gate_accepts_queued_sha_when_better_rank_unavailable(cl
             sha=sha_a,
             joignable=False,
             ruche_hex=ruche_hex,
+            file_id_hex="a0" * 16,
         )
         _seed_catalogue_row(
             db,
@@ -1223,6 +1224,7 @@ def test_rediscover_hive_gate_accepts_queued_sha_when_better_rank_unavailable(cl
             sha=sha_b,
             joignable=True,
             ruche_hex=ruche_hex,
+            file_id_hex="b0" * 16,
         )
         from tests.test_hive_catalogue_request import _ensure_hive_enqueue_prereqs
 

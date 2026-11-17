@@ -78,6 +78,12 @@ class TorrentioSourceEntry:
         base_url: str | None = None,
         base_urls: list[str] | None = None,
         transport: httpx.BaseTransport | None = None,
+        request_delay_seconds: float | None = None,
     ) -> object | None:
         del base_urls
-        return TorrentioProvider.open_episode(settings, base_url=base_url, transport=transport)
+        return TorrentioProvider.open_episode(
+            settings,
+            base_url=base_url,
+            transport=transport,
+            request_delay_seconds=request_delay_seconds,
+        )

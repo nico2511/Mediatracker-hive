@@ -980,11 +980,10 @@ def _note_failure(db: Session, plan: Plan, exc: CleanupError, now: datetime) -> 
 
 
 def _notify_upcoming(db: Session, settings: Settings, plan: Plan, now: datetime) -> None:
-    del settings
     count = len(plan.files)
     if count == 0:
         return
-    hours = _int_setting(db, "cleanup_notice_hours", 24)
+    hours = _int_setting(db, "cleanup_notice_hours", settings.cleanup_notice_hours)
     dedupe_key = f"cleanup.upcoming:{plan.key}"
     payload = _notice_payload(plan, hours)
     appeared_at = _plan_last_appearance(plan)
@@ -997,7 +996,7 @@ def _notify_upcoming(db: Session, settings: Settings, plan: Plan, now: datetime)
             existing.payload = payload
             from mediatracker.events.deliver import schedule_deliveries
 
-            schedule_deliveries(db, existing, now)
+            schedule_deliveries(db, existing, now, settings)
         return
     record_event(
         db,

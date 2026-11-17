@@ -17,6 +17,7 @@ from mediatracker.hive.signal_miss_prompt import cherche_miss_prompt_active, set
 from mediatracker.hive.signal_policy import (
     CHERCHE_CATCHUP_AT_KEY,
     HIVE_REQUEST_ON_MISS_KEY,
+    explicit_announce_cherche,
     maybe_catchup_cherche_for_followed,
     maybe_publish_cherche_on_follow,
     maybe_publish_cherche_on_source_miss,
@@ -433,6 +434,51 @@ def test_list_my_requests_hides_ineligible_slots(client, settings):
         assert local_cherche_active(
             db, ruche_id=rid, origin=origin, cle=_cle_document(aired_film, aired_item)
         )
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_explicit_announce_rejects_unaired_episode(client, settings):
+    _enable_hive(client)
+    db = client.app.state.session_factory()
+    try:
+        origin = _origin_id(settings)
+        rid = _join_fixture_ruche(db, origin)
+        media = Media(type="series", title="Œuvre annonce refusée", year=2099, tmdb_id=882016, followed=True)
+        db.add(media)
+        db.flush()
+        future_ep = _series_eps(db, media, [(1, 3, FUTURE_AIR)])[0]
+        db.commit()
+        moment = FIXED_MOMENT
+        assert not explicit_announce_cherche(db, settings, media=media, item=future_ep, now=moment)
+        db.flush()
+        assert not local_cherche_active(
+            db, ruche_id=rid, origin=origin, cle=_cle_document(media, future_ep)
+        )
+        rows = list_my_requests(db, settings)
+        assert all(r["media_item_id"] != future_ep.id for r in rows)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_list_my_requests_hides_future_episode_with_voluntary_retract(client, settings):
+    _enable_hive(client)
+    db = client.app.state.session_factory()
+    try:
+        media = Media(type="series", title="Œuvre retract future", year=2099, tmdb_id=882017, followed=True)
+        db.add(media)
+        db.flush()
+        future_ep = _series_eps(db, media, [(2, 1, FUTURE_AIR)])[0]
+        moment = FIXED_MOMENT
+        db.flush()
+        retract_cherche_follow_item(
+            db, settings, media=media, item=future_ep, now=moment, remember_user_withdraw=True
+        )
+        db.commit()
+        rows = list_my_requests(db, settings)
+        assert all(r["media_item_id"] != future_ep.id for r in rows)
         db.commit()
     finally:
         db.close()

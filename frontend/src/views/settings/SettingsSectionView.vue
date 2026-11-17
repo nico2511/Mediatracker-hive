@@ -6,8 +6,18 @@ import AllDebridAccountBlock from "../../components/AllDebridAccountBlock.vue";
 import PasswordFieldWithGenerator from "../../components/PasswordFieldWithGenerator.vue";
 import DatabaseBackupRestore from "../../components/DatabaseBackupRestore.vue";
 import DiskSpaceCard from "../../components/DiskSpaceCard.vue";
-import {api, ApiError, isNetworkError, isTransientHttpStatus, userFacingApiError} from "../../api";
+import DocLink from "../../components/settings/DocLink.vue";
+import ServiceCard from "../../components/settings/ServiceCard.vue";
+import { api, ApiError, isNetworkError, isTransientHttpStatus, userFacingApiError, type SettingRow } from "../../api";
 import { fetchSettings, patchSettings } from "../../settings";
+import {
+  formatDefaultLabel,
+  hintWithDefault,
+  hintWithDefaultUnit,
+  resolvedSettingNumber,
+  settingBoundMax,
+  settingBoundMin,
+} from "../../settingsMeta";
 import { openInstallPanel, usePwaInstall } from "../../pwa/pwaInstall";
 import { formatParisClock, parseInstant } from "../../time";
 import {
@@ -17,6 +27,7 @@ import {
   qualityProfileSummary,
   type QualityProfileLike,
 } from "../../profileFallback";
+import { useServiceStatus } from "../../composables/useServiceStatus";
 import { sectionBySlug, SETTINGS_SECTION_SLUGS } from "./sections";
 
 const route = useRoute();
@@ -49,19 +60,29 @@ const fields = [
   {
     key: "scan_interval_min",
     label: "Intervalle de scan des sources (minutes)",
-    hint: "Défaut 720, soit 12 h. Uniquement les séries suivies encore en cours.",
+    hintTail: "soit 12 h. Uniquement les séries suivies encore en cours.",
   },
   {
     key: "scan_air_window_days",
     label: "Fenêtre autour de la date de diffusion (jours)",
-    hint: "Séries uniquement : une source n'est interrogée que si un épisode est attendu ou vient de sortir.",
+    hintTail: "Séries uniquement : une source n'est interrogée que si un épisode est attendu ou vient de sortir.",
   },
   {
     key: "film_theatrical_fallback_months",
     label: "Films sans date numérique TMDB (mois après la sortie en salle)",
-    hint: "Estimation de disponibilité quand TMDB ne publie pas encore de date numérique ou physique.",
+    hintTail: "Estimation de disponibilité quand TMDB ne publie pas encore de date numérique ou physique.",
   },
 ] as const;
+
+const settingsRows = ref<SettingRow[]>([]);
+
+function scanFieldHint(key: string, hintTail: string): string {
+  const label = formatDefaultLabel(settingsRows.value, key);
+  if (!label) {
+    return hintTail.charAt(0).toUpperCase() + hintTail.slice(1);
+  }
+  return `${label}, ${hintTail}`;
+}
 
 const ongoing = ref(true);
 const allowFallback = ref(false);
@@ -88,27 +109,27 @@ const storageHint = ref({
   series_dir: "/data/media/Series",
   downloads_dir: "/data/downloads",
   trash_dir: "/data/.trash",
+  backups_dir: "/config/backups",
   warning: "",
 });
-const libraryHours = ref(24);
-const values = reactive<Record<string, number>>({
-  scan_interval_min: 720,
-  source_request_delay_seconds: 5,
-  source_error_backoff_min: 180,
-  scan_air_window_days: 3,
-  film_theatrical_fallback_months: 4,
+const libraryHours = ref<number | undefined>(undefined);
+const values = reactive<Record<string, number | undefined>>({
+  scan_interval_min: undefined,
+  scan_air_window_days: undefined,
+  film_theatrical_fallback_months: undefined,
 });
 const message = ref("");
 const error = ref("");
 
 const jellyfinUrl = ref("");
+const jellyfinUrlStored = ref("");
 const jellyfinKey = ref("");
 const jellyfinKeySet = ref(false);
 const jellyfinUser = ref("");
 const jellyfinUsers = ref<{ id: string; name: string }[]>([]);
 const jellyfinPrefix = ref("");
 const jellyfinMap = ref("");
-const jellyfinPoll = ref(30);
+const jellyfinPoll = ref<number | undefined>(undefined);
 const webhookUrl = ref("");
 const webhookTokenHeader = ref("X-MediaTracker-Token");
 const webhookTokenSet = ref(false);
@@ -151,19 +172,35 @@ interface TrashItem {
 }
 
 const publicBase = ref("");
-const groupSeconds = ref(120);
+const groupSeconds = ref<number | undefined>(undefined);
 const quietStart = ref("");
 const quietEnd = ref("");
 const autoDeleteEnabled = ref(true);
 const incompleteCleanup = ref(false);
-const autoDays = ref(14);
-const noticeHours = ref(24);
-const trashDays = ref(7);
+const autoDays = ref<number | undefined>(undefined);
+const noticeHours = ref<number | undefined>(undefined);
+const trashDays = ref<number | undefined>(undefined);
+interface FixedRetentionDays {
+  event_journal_days: number;
+  source_state_days: number;
+  metrics_history_days: number;
+  incomplete_orphan_keep_days: number;
+}
+const fixedRetentionDays = ref<FixedRetentionDays | null>(null);
 const notifyMessage = ref("");
 const notifyError = ref("");
 const targetNotes = ref<Record<number, { ok: boolean; message: string }>>({});
 const cleanupMessage = ref("");
 const cleanupError = ref("");
+type CorbeilleSavedBlock = "contenu" | "duree" | "auto-delete" | "incomplets" | "conservation";
+const lastSavedCorbeilleBlock = ref<CorbeilleSavedBlock | null>(null);
+
+function beginCorbeilleFeedback(block: CorbeilleSavedBlock) {
+  lastSavedCorbeilleBlock.value = block;
+  cleanupMessage.value = "";
+  cleanupError.value = "";
+}
+
 const cleanupMigrationBanner = ref("");
 const notifyEvents = ref<NotifyEvent[]>([]);
 const targets = ref<WebhookTarget[]>([]);
@@ -182,8 +219,8 @@ const previewUpcoming = ref<PreviewFile[]>([]);
 const trashItems = ref<TrashItem[]>([]);
 const trashBytes = ref(0);
 const reclaimedBytes = ref(0);
-const diskMinGb = ref(5);
-const backupKeep = ref(7);
+const diskMinGb = ref<number | undefined>(undefined);
+const backupKeep = ref<number | undefined>(undefined);
 const alldebridAutoPurge = ref(true);
 const autoDownloadDefault = ref(true);
 const alldebridMessage = ref("");
@@ -253,9 +290,13 @@ const bootstrapDone = ref(false);
 const loadedSections = ref(new Set<string>());
 
 async function applySettingsBody(body: Awaited<ReturnType<typeof fetchSettings>>) {
+  settingsRows.value = body.settings;
   for (const row of body.settings) {
-    if (row.key in values && typeof row.value === "number") {
-      values[row.key] = row.value;
+    if (row.key in values) {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        values[row.key] = n;
+      }
     }
     if (row.key === "scan_ongoing_only" && typeof row.value === "boolean") {
       ongoing.value = row.value;
@@ -278,11 +319,15 @@ async function applySettingsBody(body: Awaited<ReturnType<typeof fetchSettings>>
     if (row.key === "trash_dir" && typeof row.value === "string") {
       trashPath.value = row.value;
     }
-    if (row.key === "library_scan_interval_hours" && typeof row.value === "number") {
-      libraryHours.value = row.value;
+    if (row.key === "library_scan_interval_hours") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        libraryHours.value = n;
+      }
     }
     if (row.key === "jellyfin_url" && typeof row.value === "string") {
       jellyfinUrl.value = row.value;
+      jellyfinUrlStored.value = row.value;
     }
     if (row.key === "jellyfin_api_key") {
       jellyfinKeySet.value = row.set;
@@ -296,14 +341,20 @@ async function applySettingsBody(body: Awaited<ReturnType<typeof fetchSettings>>
     if (row.key === "jellyfin_path_map" && typeof row.value === "string") {
       jellyfinMap.value = row.value;
     }
-    if (row.key === "jellyfin_poll_interval_min" && typeof row.value === "number") {
-      jellyfinPoll.value = row.value;
+    if (row.key === "jellyfin_poll_interval_min") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        jellyfinPoll.value = n;
+      }
     }
     if (row.key === "public_base_url" && typeof row.value === "string") {
       publicBase.value = row.value;
     }
-    if (row.key === "notify_group_seconds" && typeof row.value === "number") {
-      groupSeconds.value = row.value;
+    if (row.key === "notify_group_seconds") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        groupSeconds.value = n;
+      }
     }
     if (row.key === "notify_quiet_start" && typeof row.value === "string") {
       quietStart.value = row.value;
@@ -317,20 +368,35 @@ async function applySettingsBody(body: Awaited<ReturnType<typeof fetchSettings>>
     if (row.key === "auto_delete_enabled" && typeof row.value === "boolean") {
       autoDeleteEnabled.value = row.value;
     }
-    if (row.key === "auto_delete_days" && typeof row.value === "number") {
-      autoDays.value = row.value;
+    if (row.key === "auto_delete_days") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        autoDays.value = n;
+      }
     }
-    if (row.key === "cleanup_notice_hours" && typeof row.value === "number") {
-      noticeHours.value = row.value;
+    if (row.key === "cleanup_notice_hours") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        noticeHours.value = n;
+      }
     }
-    if (row.key === "trash_retention_days" && typeof row.value === "number") {
-      trashDays.value = row.value;
+    if (row.key === "trash_retention_days") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        trashDays.value = n;
+      }
     }
-    if (row.key === "disk_min_free_gb" && typeof row.value === "number") {
-      diskMinGb.value = row.value;
+    if (row.key === "disk_min_free_gb") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        diskMinGb.value = n;
+      }
     }
-    if (row.key === "backup_keep" && typeof row.value === "number") {
-      backupKeep.value = row.value;
+    if (row.key === "backup_keep") {
+      const n = resolvedSettingNumber(row);
+      if (n !== undefined) {
+        backupKeep.value = n;
+      }
     }
     if (row.key === "alldebrid_auto_purge" && typeof row.value === "boolean") {
       alldebridAutoPurge.value = row.value;
@@ -350,11 +416,15 @@ async function applySettingsBody(body: Awaited<ReturnType<typeof fetchSettings>>
     if (row.key === "jellyfin_auto_rename" && typeof row.value === "boolean") {
       autoRename.value = row.value;
     }
+    if (row.key === "tmdb_read_token") tmdbSet.value = row.set;
     if (row.key === "ghcr_read_token") ghcrSet.value = row.set;
     if (row.key === "github_update_token") githubSet.value = row.set;
-    if (row.key === "watchtower_url" && typeof row.value === "string") {
-      watchtowerUrl.value = row.value;
-      watchtowerUrlStored.value = row.value;
+    if (row.key === "watchtower_url") {
+      if (typeof row.value === "string") {
+        watchtowerUrl.value = row.value;
+        watchtowerUrlStored.value = row.value;
+      }
+      watchtowerUrlSet.value = row.set;
     }
     if (row.key === "watchtower_token") watchtowerTokenSet.value = row.set;
     if (row.key === "notify_on_update" && typeof row.value === "boolean") {
@@ -396,8 +466,13 @@ async function loadSectionData(slug: string) {
     case "notifications":
       await loadNotifications();
       break;
-    case "nettoyage":
+    case "disque":
+      await loadStorage();
+      break;
+    case "corbeille":
+      await loadStorage();
       await loadTrash();
+      await loadFixedRetentionDays();
       await loadCleanupMigrationBanner();
       break;
     case "jetons":
@@ -422,6 +497,14 @@ watch(
   { immediate: true },
 );
 
+async function loadFixedRetentionDays() {
+  try {
+    fixedRetentionDays.value = await api<FixedRetentionDays>("/api/v1/settings/fixed-retention");
+  } catch {
+    fixedRetentionDays.value = null;
+  }
+}
+
 async function loadStorage() {
   try {
     const layout = await api<{
@@ -430,6 +513,7 @@ async function loadStorage() {
       series_dir: string;
       downloads_dir: string;
       trash_dir: string;
+      backups_dir?: string;
       warning: string | null;
     }>("/api/v1/storage");
     storageHint.value = {
@@ -438,6 +522,7 @@ async function loadStorage() {
       series_dir: layout.series_dir,
       downloads_dir: layout.downloads_dir,
       trash_dir: layout.trash_dir,
+      backups_dir: layout.backups_dir ?? "/config/backups",
       warning: layout.warning || "",
     };
   } catch {
@@ -507,11 +592,9 @@ async function save() {
         library_movies_path: moviesPath.value,
         library_series_path: seriesPath.value,
         downloads_dir: downloadsPath.value,
-        trash_dir: trashPath.value,
         library_scan_interval_hours: libraryHours.value,
         auto_download_default: autoDownloadDefault.value,
         library_auto_follow: libraryAutoFollow.value,
-        downloads_completed_action: completedAction.value,
       },
     });
     message.value = "Enregistré.";
@@ -521,27 +604,55 @@ async function save() {
   }
 }
 
-async function saveJellyfin() {
-  jellyfinMessage.value = "";
+async function saveJellyfinCredentials() {
+  lastSavedCard.value = "jellyfin";
+  updateError.value = "";
+  updateTokensMessage.value = "";
   jellyfinError.value = "";
-  const values: Record<string, string | number | boolean> = {
-    jellyfin_url: jellyfinUrl.value,
-    jellyfin_user_id: jellyfinUser.value,
-    jellyfin_path_prefix: jellyfinPrefix.value,
-    jellyfin_path_map: jellyfinMap.value,
-    jellyfin_poll_interval_min: jellyfinPoll.value,
-    jellyfin_push_watched: pushWatched.value,
-    jellyfin_auto_rename: autoRename.value,
-  };
+  const trimmedUrl = jellyfinUrl.value.trim();
+  const values: Record<string, string> = {};
+  if (trimmedUrl !== jellyfinUrlStored.value.trim()) {
+    values.jellyfin_url = trimmedUrl;
+  }
   if (jellyfinKey.value) {
     values.jellyfin_api_key = jellyfinKey.value;
+  }
+  if (!Object.keys(values).length) {
+    return;
   }
   try {
     await patchSettings({ values });
     jellyfinKey.value = "";
     jellyfinKeySet.value = jellyfinKeySet.value || Boolean(values.jellyfin_api_key);
+    if ("jellyfin_url" in values) {
+      jellyfinUrlStored.value = trimmedUrl;
+      jellyfinUrl.value = trimmedUrl;
+    }
+    await refreshServiceStatus();
+    updateTokensMessage.value = "Enregistré.";
+  } catch (err) {
+    updateError.value = userFacingApiError(err, "Enregistrement impossible.");
+  }
+}
+
+async function saveJellyfin() {
+  jellyfinMessage.value = "";
+  jellyfinError.value = "";
+  const values: Record<string, string | number | boolean> = {
+    jellyfin_user_id: jellyfinUser.value,
+    jellyfin_path_prefix: jellyfinPrefix.value,
+    jellyfin_path_map: jellyfinMap.value,
+    jellyfin_push_watched: pushWatched.value,
+    jellyfin_auto_rename: autoRename.value,
+  };
+  if (jellyfinPoll.value != null) {
+    values.jellyfin_poll_interval_min = jellyfinPoll.value;
+  }
+  try {
+    await patchSettings({ values });
     jellyfinMessage.value = "Jellyfin enregistré.";
     await loadJellyfin();
+    await refreshServiceStatus();
   } catch (err) {
     jellyfinError.value = userFacingApiError(err, "Enregistrement impossible.");
   }
@@ -684,28 +795,67 @@ async function dismissCleanupMigrationBanner() {
   cleanupMigrationBanner.value = "";
 }
 
-async function saveCleanup() {
-  cleanupMessage.value = "";
-  cleanupError.value = "";
+async function saveCorbeilleTrashDuration() {
+  beginCorbeilleFeedback("duree");
   try {
     await patchSettings({
       values: {
-        incomplete_cleanup_enabled: incompleteCleanup.value,
+        trash_retention_days: trashDays.value,
+        trash_dir: trashPath.value,
+      },
+    });
+    cleanupMessage.value = "Enregistré.";
+    await loadStorage();
+  } catch (err) {
+    cleanupError.value = userFacingApiError(err, "Enregistrement impossible.");
+  }
+}
+
+async function saveAutoDeleteSettings() {
+  beginCorbeilleFeedback("auto-delete");
+  try {
+    await patchSettings({
+      values: {
         auto_delete_enabled: autoDeleteEnabled.value,
         auto_delete_days: autoDays.value,
         cleanup_notice_hours: noticeHours.value,
-        trash_retention_days: trashDays.value,
       },
     });
-    cleanupMessage.value = "Nettoyage enregistré.";
+    cleanupMessage.value = "Enregistré.";
+  } catch (err) {
+    cleanupError.value = userFacingApiError(err, "Enregistrement impossible.");
+  }
+}
+
+async function saveIncompleteCleanupSettings() {
+  beginCorbeilleFeedback("incomplets");
+  try {
+    await patchSettings({
+      values: { incomplete_cleanup_enabled: incompleteCleanup.value },
+    });
+    cleanupMessage.value = "Enregistré.";
+  } catch (err) {
+    cleanupError.value = userFacingApiError(err, "Enregistrement impossible.");
+  }
+}
+
+async function saveCorbeilleConservation() {
+  beginCorbeilleFeedback("conservation");
+  try {
+    await patchSettings({
+      values: {
+        backup_keep: backupKeep.value,
+        downloads_completed_action: completedAction.value,
+      },
+    });
+    cleanupMessage.value = "Enregistré.";
   } catch (err) {
     cleanupError.value = userFacingApiError(err, "Enregistrement impossible.");
   }
 }
 
 async function loadPreview() {
-  cleanupMessage.value = "";
-  cleanupError.value = "";
+  beginCorbeilleFeedback("contenu");
   try {
     const body = await api<{ due: PreviewFile[]; upcoming: PreviewFile[] }>("/api/v1/cleanup/preview");
     previewDue.value = body.due;
@@ -723,7 +873,7 @@ async function loadTrash() {
 }
 
 async function restoreTrash(id: number) {
-  cleanupError.value = "";
+  beginCorbeilleFeedback("contenu");
   try {
     await api(`/api/v1/trash/${id}/restore`, { method: "POST" });
     cleanupMessage.value = "Fichier restauré.";
@@ -734,7 +884,7 @@ async function restoreTrash(id: number) {
 }
 
 async function purgeTrash(item: TrashItem) {
-  cleanupError.value = "";
+  beginCorbeilleFeedback("contenu");
   const size = formatBytes(item.size);
   if (!window.confirm(`Supprimer définitivement « ${item.label} » (${size}) de la corbeille ?`)) {
     return;
@@ -749,7 +899,7 @@ async function purgeTrash(item: TrashItem) {
 }
 
 async function emptyTrash() {
-  cleanupError.value = "";
+  beginCorbeilleFeedback("contenu");
   const count = trashItems.value.length;
   const size = formatBytes(trashBytes.value);
   const noun = count > 1 ? "fichiers" : "fichier";
@@ -823,7 +973,7 @@ async function saveDisk() {
   diskError.value = "";
   try {
     await patchSettings({
-      values: { disk_min_free_gb: diskMinGb.value, backup_keep: backupKeep.value },
+      values: { disk_min_free_gb: diskMinGb.value },
     });
     diskMessage.value = "Enregistré.";
   } catch (err) {
@@ -1003,16 +1153,64 @@ const updateInfo = ref("");
 const updateError = ref("");
 const notifyOnUpdate = ref(false);
 const updateNotifySaved = ref(false);
+const tmdbSet = ref(false);
+const tmdbToken = ref("");
 const ghcrSet = ref(false);
 const githubSet = ref(false);
 const ghcrToken = ref("");
 const githubToken = ref("");
 const watchtowerUrl = ref("");
 const watchtowerUrlStored = ref("");
+const watchtowerUrlSet = ref(false);
 const watchtowerToken = ref("");
 const watchtowerTokenSet = ref(false);
 const updateTokensMessage = ref("");
-const watchtowerConfigured = ref(false);
+type UpdateTokensCard = "tmdb" | "github" | "watchtower" | "jellyfin";
+const lastSavedCard = ref<UpdateTokensCard | null>(null);
+const {
+  adConnected,
+  downloadReady,
+  jellyfinConfigured,
+  serviceStatusLoaded,
+  watchtowerConfigured,
+  refresh: refreshServiceStatus,
+} = useServiceStatus();
+
+const maskAllDebridExtras = computed(() => serviceStatusLoaded.value && !adConnected.value);
+const maskDownloadFeatures = computed(() => serviceStatusLoaded.value && !downloadReady.value);
+const maskJellyfinExtras = computed(() => serviceStatusLoaded.value && !jellyfinConfigured.value);
+const maskWatchtowerNotify = computed(() => serviceStatusLoaded.value && !watchtowerConfigured.value);
+
+const tmdbCardConfigured = computed(() => tmdbSet.value);
+const githubCardConfigured = computed(() => ghcrSet.value || githubSet.value);
+const watchtowerCardConfigured = computed(() => watchtowerUrlSet.value && watchtowerTokenSet.value);
+const apiAccessConfigured = computed(() => tokens.value.length > 0);
+
+const TMDB_GETTING_STARTED_URL = "https://developer.themoviedb.org/docs/getting-started";
+const TMDB_READ_TOKEN_DOCS_URL = "https://developer.themoviedb.org/docs/authentication-application";
+const GHCR_DOCS_URL =
+  "https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry";
+const GITHUB_PAT_DOCS_URL =
+  "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens";
+const WATCHTOWER_DOCS_URL = "https://watchtower.nickfedor.com/";
+const ALLDEBRID_DOCS_URL = "https://docs.alldebrid.com/";
+const JELLYFIN_DOCS_URL = "https://jellyfin.org/docs/";
+const JELLYFIN_API_DOCS_URL = "https://api.jellyfin.org/";
+const JELLYFIN_MOVIES_DOCS_URL = "https://jellyfin.org/docs/general/server/media/movies/";
+const JELLYFIN_SHOWS_DOCS_URL = "https://jellyfin.org/docs/general/server/media/shows/";
+const JELLYFIN_WEBHOOK_PLUGIN_URL = "https://github.com/jellyfin/jellyfin-plugin-webhook";
+const JELLYFIN_PLUGINS_DOCS_URL = "https://jellyfin.org/docs/general/server/plugins/";
+const JELLYFIN_NETWORKING_DOCS_URL = "https://jellyfin.org/docs/general/networking/";
+const HA_WEBHOOK_TRIGGER_DOCS_URL =
+  "https://www.home-assistant.io/docs/automation/trigger/#webhook-trigger";
+const NTFY_PUBLISH_DOCS_URL = "https://docs.ntfy.sh/publish/";
+
+const scanSettingsFields = computed(() => {
+  if (!maskDownloadFeatures.value) {
+    return fields;
+  }
+  return fields.filter((field) => field.key !== "scan_interval_min" && field.key !== "scan_air_window_days");
+});
 const updateSnapshot = ref({
   version: "",
   currentSha: "",
@@ -1038,15 +1236,15 @@ const watchtowerUnavailableLine = computed(() => {
   const missingUrl = !watchtowerUrl.value.trim();
   const missingToken = !watchtowerTokenSet.value;
   if (missingUrl && missingToken) {
-    return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → Jetons d'API, bloc « Secrets pour services distants ».";
+    return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → Jetons d'API, carte Watchtower.";
   }
   if (missingUrl) {
-    return "Indisponible : renseignez l'URL Watchtower dans Réglages → Jetons d'API, bloc « Secrets pour services distants ».";
+    return "Indisponible : renseignez l'URL Watchtower dans Réglages → Jetons d'API, carte Watchtower.";
   }
   if (missingToken) {
-    return "Indisponible : renseignez le jeton Watchtower (variable WATCHTOWER_HTTP_API_TOKEN) dans le même bloc, pas un jeton Accès API.";
+    return "Indisponible : renseignez le jeton Watchtower (variable WATCHTOWER_HTTP_API_TOKEN) sur la carte Watchtower, pas un jeton Accès API.";
   }
-  return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → Jetons d'API, bloc « Secrets pour services distants ».";
+  return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → Jetons d'API, carte Watchtower.";
 });
 
 const updateNowButtonLabel = computed(() => {
@@ -1244,7 +1442,6 @@ async function loadUpdate() {
       watchtower_configured: boolean;
       active_downloads: number;
     }>("/api/v1/ha/update");
-    watchtowerConfigured.value = body.watchtower_configured;
     activeDownloads.value = body.active_downloads ?? 0;
     updateSnapshot.value = {
       version: body.version ?? "",
@@ -1260,27 +1457,41 @@ async function loadUpdate() {
   }
 }
 
-async function saveUpdateTokens() {
+async function saveUpdateTokens(card: UpdateTokensCard) {
+  lastSavedCard.value = card;
   updateError.value = "";
   updateTokensMessage.value = "";
   const values: Record<string, string> = {};
-  if (ghcrToken.value) values.ghcr_read_token = ghcrToken.value;
-  if (githubToken.value) values.github_update_token = githubToken.value;
-  if (watchtowerUrl.value.trim()) values.watchtower_url = watchtowerUrl.value.trim();
-  if (watchtowerToken.value) values.watchtower_token = watchtowerToken.value;
+  if (card === "tmdb") {
+    if (tmdbToken.value) values.tmdb_read_token = tmdbToken.value;
+  } else if (card === "github") {
+    if (ghcrToken.value) values.ghcr_read_token = ghcrToken.value;
+    if (githubToken.value) values.github_update_token = githubToken.value;
+  } else {
+    if (watchtowerUrl.value.trim()) values.watchtower_url = watchtowerUrl.value.trim();
+    if (watchtowerToken.value) values.watchtower_token = watchtowerToken.value;
+  }
   if (!Object.keys(values).length) return;
   try {
     await patchSettings({ values });
-    ghcrToken.value = "";
-    githubToken.value = "";
-    watchtowerToken.value = "";
-    ghcrSet.value = ghcrSet.value || "ghcr_read_token" in values;
-    githubSet.value = githubSet.value || "github_update_token" in values;
-    watchtowerTokenSet.value = watchtowerTokenSet.value || "watchtower_token" in values;
-    if ("watchtower_url" in values) {
-      watchtowerUrlStored.value = watchtowerUrl.value.trim();
+    if (card === "tmdb") {
+      tmdbToken.value = "";
+      tmdbSet.value = tmdbSet.value || "tmdb_read_token" in values;
+    } else if (card === "github") {
+      ghcrToken.value = "";
+      githubToken.value = "";
+      ghcrSet.value = ghcrSet.value || "ghcr_read_token" in values;
+      githubSet.value = githubSet.value || "github_update_token" in values;
+    } else {
+      watchtowerToken.value = "";
+      watchtowerTokenSet.value = watchtowerTokenSet.value || "watchtower_token" in values;
+      if ("watchtower_url" in values) {
+        watchtowerUrlStored.value = watchtowerUrl.value.trim();
+        watchtowerUrlSet.value = true;
+      }
+      await loadUpdate();
     }
-    await loadUpdate();
+    await refreshServiceStatus();
     updateTokensMessage.value = "Enregistré.";
   } catch (err) {
     updateError.value = userFacingApiError(err, "Enregistrement impossible.");
@@ -1692,6 +1903,11 @@ async function saveProfileFallback() {
         <p v-if="fallbackMessage" class="hint">{{ fallbackMessage }}</p>
       </form>
 
+      <p v-if="maskDownloadFeatures" class="hint" role="status">
+        Disponible lorsque les téléchargements sont prêts →
+        <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+      </p>
+      <div v-if="!maskDownloadFeatures" class="stack">
       <h2 id="profils-qualite" class="settings-section-title">Profils de qualité</h2>
       <p class="hint">
             Langues dans l'ordre de préférence, résolution, taille et mots exclus. Wawacity et Comet utilisent le même profil.
@@ -1752,20 +1968,27 @@ async function saveProfileFallback() {
           </form>
           <p v-if="profileError" class="error">{{ profileError }}</p>
           <p v-if="profileMessage" class="hint">{{ profileMessage }}</p>
+      </div>
     </section>
     <section v-if="section === 'scan'" class="settings-section panel stack">
       <h2 class="settings-section-title">Réglages de scan</h2>
       <form @submit.prevent="save">
-            <label v-for="field in fields" :key="field.key">
+            <label v-for="field in scanSettingsFields" :key="field.key">
               <span>{{ field.label }}</span>
-              <input v-model.number="values[field.key]" type="number" required />
-              <span class="hint">{{ field.hint }}</span>
+              <input
+                v-model.number="values[field.key]"
+                type="number"
+                :min="settingBoundMin(settingsRows, field.key)"
+                :max="settingBoundMax(settingsRows, field.key)"
+                required
+              />
+              <span class="hint">{{ scanFieldHint(field.key, field.hintTail) }}</span>
             </label>
             <p class="hint">
               L’ordre des sources, le rythme commun et les URL se règlent dans
               <RouterLink to="/reglages/sources">Sources</RouterLink>.
             </p>
-            <label>
+            <label v-if="!maskDownloadFeatures">
               <span>Séries en cours seulement</span>
               <select v-model="ongoing">
                 <option :value="true">Oui</option>
@@ -1793,16 +2016,30 @@ async function saveProfileFallback() {
               <input v-model="downloadsPath" placeholder="/data/downloads" />
               <span class="hint">En vigueur : <code>{{ storageHint.downloads_dir }}</code>. Même disque que les bibliothèques.</span>
             </label>
-            <label>
-              <span>Corbeille</span>
-              <input v-model="trashPath" placeholder="/data/.trash" />
-              <span class="hint">En vigueur : <code>{{ storageHint.trash_dir }}</code>. Même disque que les bibliothèques.</span>
-            </label>
             <p v-if="storageHint.warning" class="error">{{ storageHint.warning }}</p>
+            <p class="hint">
+              Dossier et durée de la corbeille :
+              <RouterLink to="/reglages/corbeille">voir Corbeille</RouterLink>.
+            </p>
             <label>
               <span>Repasse de la bibliothèque (heures)</span>
-              <input v-model.number="libraryHours" type="number" min="1" max="168" required />
-              <span class="hint">Défaut 24 h. Une repasse a aussi lieu après chaque fichier déposé.</span>
+              <input
+                v-model.number="libraryHours"
+                type="number"
+                :min="settingBoundMin(settingsRows, 'library_scan_interval_hours', 1)"
+                :max="settingBoundMax(settingsRows, 'library_scan_interval_hours', 168)"
+                required
+              />
+              <span class="hint">
+                {{
+                  hintWithDefaultUnit(
+                    settingsRows,
+                    "library_scan_interval_hours",
+                    "h",
+                    "Une repasse a aussi lieu après chaque fichier déposé.",
+                  )
+                }}
+              </span>
             </label>
             <label>
               <span>Repasse automatique</span>
@@ -1819,19 +2056,21 @@ async function saveProfileFallback() {
               </select>
               <span class="hint">Par défaut, identifier un dossier le relie à TMDB sans le suivre.</span>
             </label>
-            <label>
-              <span>Après téléchargement</span>
-              <select v-model="completedAction">
-                <option value="archive">Archiver</option>
-                <option value="remove">Supprimer de la liste</option>
-              </select>
-              <span class="hint">Le fichier dans la bibliothèque n'est jamais supprimé.</span>
-            </label>
-            <label class="check">
-              <input v-model="autoDownloadDefault" type="checkbox" />
-              <span>Téléchargement automatique pour les nouveaux suivis</span>
-            </label>
-            <p class="hint">Activé par défaut. Chaque fiche peut le couper ensuite.</p>
+            <p class="hint">
+              Action après téléchargement terminé :
+              <RouterLink to="/reglages/corbeille">voir Corbeille</RouterLink>.
+            </p>
+            <div v-if="!maskDownloadFeatures" class="stack">
+              <label class="check">
+                <input v-model="autoDownloadDefault" type="checkbox" />
+                <span>Téléchargement automatique pour les nouveaux suivis</span>
+              </label>
+              <p class="hint">Activé par défaut. Chaque fiche peut le couper ensuite.</p>
+            </div>
+            <p v-if="maskDownloadFeatures" class="hint" role="status">
+              Réglages liés au téléchargement depuis les sources →
+              <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+            </p>
             <p v-if="error" class="error">{{ error }}</p>
             <p v-if="message">{{ message }}</p>
             <button type="submit">{{ saveSettingsLabel() }}</button>
@@ -1839,24 +2078,21 @@ async function saveProfileFallback() {
     </section>
     <section v-if="section === 'jellyfin'" class="settings-section panel stack">
       <h2 class="settings-section-title">Jellyfin</h2>
+      <p v-if="maskJellyfinExtras" class="hint" role="status">
+        Disponible après connexion de Jellyfin dans
+        <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>.
+      </p>
+      <div v-else class="stack">
       <p class="hint">
-            URL et clé API du serveur sur le LAN. Après chaque fichier déposé, la bibliothèque est rafraîchie
-            (une fois, après une minute). L'état « vu » suit l'utilisateur unique : webhook si l'URL est collée
-            dans le plugin, sinon un passage toutes les 30 minutes.
+            Après chaque fichier déposé, la bibliothèque est rafraîchie (une fois, après une minute). L'état « vu »
+            suit l'utilisateur unique : webhook si l'URL est collée dans le plugin, sinon
+            <template v-if="jellyfinPoll != null && jellyfinPoll > 0">
+              un passage toutes les {{ jellyfinPoll }} minute{{ jellyfinPoll > 1 ? "s" : "" }}.
+            </template>
+            <template v-else>un passage périodique.</template>
           </p>
           <form @submit.prevent="saveJellyfin">
-            <label>
-              <span>URL Jellyfin</span>
-              <input v-model="jellyfinUrl" placeholder="http://jellyfin:8096" />
-              <span class="hint">
-                Dans le même réseau Docker, <code>http://jellyfin:8096</code>. Clé API : tableau de bord Jellyfin,
-                icône engrenage, puis Clés API.
-              </span>
-            </label>
-            <label>
-              <span>Clé API</span>
-              <input v-model="jellyfinKey" type="password" autocomplete="off" :placeholder="jellyfinKeySet ? 'inchangée' : ''" />
-            </label>
+            <div class="stack">
             <label>
               <span>Utilisateur Jellyfin</span>
               <select v-model="jellyfinUser">
@@ -1872,6 +2108,18 @@ async function saveProfileFallback() {
             </label>
             <label>
               <span>Correspondance des chemins</span>
+              <p class="settings-inline-docs">
+                <DocLink
+                  :href="JELLYFIN_MOVIES_DOCS_URL"
+                  label="Films"
+                  data-testid="jellyfin-doc-movies"
+                />
+                <DocLink
+                  :href="JELLYFIN_SHOWS_DOCS_URL"
+                  label="Séries"
+                  data-testid="jellyfin-doc-shows"
+                />
+              </p>
               <input
                 v-model="jellyfinMap"
                 placeholder="/data/movies=/data/Films;/data/tvshows=/data/Séries"
@@ -1905,12 +2153,35 @@ async function saveProfileFallback() {
             </label>
             <label>
               <span>Synchro « vu » (minutes)</span>
-              <input v-model.number="jellyfinPoll" type="number" min="5" max="1440" required />
+              <input
+                v-model.number="jellyfinPoll"
+                type="number"
+                :min="settingBoundMin(settingsRows, 'jellyfin_poll_interval_min', 5)"
+                :max="settingBoundMax(settingsRows, 'jellyfin_poll_interval_min', 1440)"
+                required
+              />
               <span class="hint">
-                Défaut 30. Le webhook, s'il est branché, met à jour un « vu » tout de suite.
-                ItemAdded et ItemUpdated ne font que demander une lecture incrémentale : le corps du message n'est pas une source.
+                {{
+                  hintWithDefault(
+                    settingsRows,
+                    "jellyfin_poll_interval_min",
+                    "Le webhook, s'il est branché, met à jour un « vu » tout de suite. ItemAdded et ItemUpdated ne font que demander une lecture incrémentale : le corps du message n'est pas une source.",
+                  )
+                }}
               </span>
             </label>
+            <p class="settings-field-docs">
+              <DocLink
+                :href="JELLYFIN_WEBHOOK_PLUGIN_URL"
+                label="Plugin Webhook"
+                data-testid="jellyfin-doc-webhook-plugin"
+              />
+              <DocLink
+                :href="JELLYFIN_PLUGINS_DOCS_URL"
+                label="Plugins Jellyfin"
+                data-testid="jellyfin-doc-plugins"
+              />
+            </p>
             <p v-if="webhookUrl" class="hint">
               URL du webhook (PlaybackStop, UserDataSaved, ItemAdded, ItemUpdated) :
               <code>{{ webhookUrl }}</code>.
@@ -1932,15 +2203,17 @@ async function saveProfileFallback() {
               Si Jellyfin monte les films et les séries ailleurs, la correspondance ci-dessus aligne les chemins
               sans changer les bibliothèques Jellyfin. Santé signale des dossiers qui ne sont pas sur le même disque.
             </p>
-            <p v-if="jellyfinError" class="error">{{ jellyfinError }}</p>
-            <p v-if="jellyfinMessage">{{ jellyfinMessage }}</p>
             <button type="submit">{{ saveSettingsLabel() }}</button>
             <button type="button" @click="testJellyfin">Tester la connexion</button>
             <button type="button" @click="syncJellyfin">Synchroniser les vus</button>
             <p v-if="jellyfinSyncMessage" class="hint">{{ jellyfinSyncMessage }}</p>
             <p v-if="jellyfinSyncAt" class="hint">Dernière synchro : {{ jellyfinSyncAt }}</p>
             <p v-if="jellyfinSyncError" class="error">{{ jellyfinSyncError }}</p>
+            </div>
+            <p v-if="jellyfinError" class="error">{{ jellyfinError }}</p>
+            <p v-if="jellyfinMessage">{{ jellyfinMessage }}</p>
           </form>
+      </div>
     </section>
     <section v-if="section === 'notifications'" class="settings-section panel stack">
       <h2 class="settings-section-title">Notifications</h2>
@@ -1956,7 +2229,13 @@ async function saveProfileFallback() {
             </label>
             <label>
               <span>Regroupement (secondes)</span>
-              <input v-model.number="groupSeconds" type="number" min="0" max="3600" required />
+              <input
+                v-model.number="groupSeconds"
+                type="number"
+                :min="settingBoundMin(settingsRows, 'notify_group_seconds', 0)"
+                :max="settingBoundMax(settingsRows, 'notify_group_seconds', 3600)"
+                required
+              />
               <span class="hint">Plusieurs épisodes terminés dans cette fenêtre ne font qu'une notification. 0 désactive.</span>
             </label>
             <div class="row">
@@ -1995,6 +2274,13 @@ async function saveProfileFallback() {
               </label>
               <label>
                 <span>Identifiant du webhook</span>
+                <p class="settings-inline-docs">
+                  <DocLink
+                    :href="HA_WEBHOOK_TRIGGER_DOCS_URL"
+                    label="Déclencheur webhook"
+                    data-testid="ha-webhook-trigger-doc"
+                  />
+                </p>
                 <input v-model="haId" placeholder="mediatracker" />
                 <span class="hint">Défaut mediatracker. C'est le secret : il n'est pas renvoyé dans le corps.</span>
               </label>
@@ -2002,6 +2288,13 @@ async function saveProfileFallback() {
             <template v-else-if="targetType === 'ntfy'">
               <label>
                 <span>URL du topic</span>
+                <p class="settings-inline-docs">
+                  <DocLink
+                    :href="NTFY_PUBLISH_DOCS_URL"
+                    label="Doc ntfy"
+                    data-testid="ntfy-publish-doc"
+                  />
+                </p>
                 <input v-model="ntfyUrl" placeholder="https://ntfy.example/mediatracker" />
               </label>
               <label>
@@ -2067,115 +2360,236 @@ async function saveProfileFallback() {
             </p>
           </form>
     </section>
-    <section v-if="section === 'nettoyage'" class="settings-section panel stack">
-      <h2 class="settings-section-title">Nettoyage</h2>
+    <section v-if="section === 'corbeille'" class="settings-section panel stack">
+      <h2 class="settings-section-title">Corbeille</h2>
       <p v-if="cleanupMigrationBanner" class="hint panel migration-banner">
-            {{ cleanupMigrationBanner }}
-            <button type="button" @click="dismissCleanupMigrationBanner">Compris</button>
+        {{ cleanupMigrationBanner }}
+        <button type="button" @click="dismissCleanupMigrationBanner">Compris</button>
+      </p>
+
+      <article class="panel stack" data-testid="corbeille-bloc-contenu">
+        <h3 class="settings-subsection-title">Contenu</h3>
+        <p v-if="cleanupError && lastSavedCorbeilleBlock === 'contenu'" class="error">{{ cleanupError }}</p>
+        <p v-if="cleanupMessage && lastSavedCorbeilleBlock === 'contenu'" class="settings-saved">{{ cleanupMessage }}</p>
+        <p class="hint" data-testid="trash-summary">
+          En corbeille : {{ trashItems.length }} fichier(s), {{ formatBytes(trashBytes) }}.
+          Espace repris après purge : {{ formatBytes(reclaimedBytes) }}.
+        </p>
+        <p class="actions">
+          <button
+            type="button"
+            class="danger"
+            data-testid="empty-trash"
+            :disabled="trashItems.length === 0"
+            @click="emptyTrash"
+          >
+            Vider la corbeille
+          </button>
+        </p>
+        <ul>
+          <li v-for="item in trashItems" :key="item.id" class="row">
+            <span>{{ item.label }} · {{ formatBytes(item.size) }} · {{ item.reason }}</span>
+            <span class="actions">
+              <button type="button" @click="restoreTrash(item.id)">Restaurer</button>
+              <button type="button" class="danger" @click="purgeTrash(item)">Supprimer</button>
+            </span>
+          </li>
+        </ul>
+      </article>
+
+      <article class="panel stack" data-testid="corbeille-bloc-duree">
+        <h3 class="settings-subsection-title">Durée en corbeille</h3>
+        <form class="stack" @submit.prevent="saveCorbeilleTrashDuration">
+          <label>
+            <span>Corbeille (jours)</span>
+            <input
+              v-model.number="trashDays"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'trash_retention_days', 1)"
+              :max="settingBoundMax(settingsRows, 'trash_retention_days', 90)"
+              required
+            />
+            <span class="hint">{{ hintWithDefault(settingsRows, "trash_retention_days", "Avant purge définitive.") }}</span>
+          </label>
+          <label>
+            <span>Dossier corbeille</span>
+            <input v-model="trashPath" placeholder="/data/.trash" />
+            <span class="hint">En vigueur : <code>{{ storageHint.trash_dir }}</code>. Même disque que les bibliothèques.</span>
+          </label>
+          <p v-if="storageHint.warning" class="error">{{ storageHint.warning }}</p>
+          <p v-if="cleanupError && lastSavedCorbeilleBlock === 'duree'" class="error">{{ cleanupError }}</p>
+          <p v-if="cleanupMessage && lastSavedCorbeilleBlock === 'duree'" class="settings-saved">{{ cleanupMessage }}</p>
+          <button type="submit">{{ saveSettingsLabel() }}</button>
+        </form>
+      </article>
+
+      <article class="panel stack" data-testid="corbeille-bloc-auto-delete">
+        <h3 class="settings-subsection-title">Suppression automatique du vu</h3>
+        <p class="hint">
+          Le contenu vu part à la corbeille après le délai et le préavis. Le suivi n'est pas requis. Une saison
+          n'est retirée que si elle est entièrement vue. Une fiche peut imposer son propre délai ou être marquée
+          « Garder ».
+        </p>
+        <form class="stack" @submit.prevent="saveAutoDeleteSettings">
+          <label class="check">
+            <input v-model="autoDeleteEnabled" type="checkbox" />
+            <span>Suppression automatique</span>
+          </label>
+          <label :class="{ 'cleanup-days-muted': !autoDeleteEnabled }">
+            <span>Jours après le visionnage</span>
+            <input
+              v-model.number="autoDays"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'auto_delete_days', 1)"
+              :max="settingBoundMax(settingsRows, 'auto_delete_days', 365)"
+              :disabled="!autoDeleteEnabled"
+              :required="autoDeleteEnabled"
+            />
+            <span v-if="autoDeleteEnabled" class="hint">
+              {{ hintWithDefault(settingsRows, "auto_delete_days", "Délai par défaut pour les fiches sans surcharge.") }}
+            </span>
+            <span v-else class="hint">Désactivée : aucun fichier ne partira à la corbeille automatiquement.</span>
+          </label>
+          <label>
+            <span>Prévenir avant suppression (heures)</span>
+            <input
+              v-model.number="noticeHours"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'cleanup_notice_hours', 1)"
+              :max="settingBoundMax(settingsRows, 'cleanup_notice_hours', 168)"
+              required
+            />
+            <span class="hint">
+              {{ hintWithDefault(settingsRows, "cleanup_notice_hours", "Une notification part avant le déplacement.") }}
+            </span>
+          </label>
+          <p v-if="cleanupError && lastSavedCorbeilleBlock === 'auto-delete'" class="error">{{ cleanupError }}</p>
+          <p v-if="cleanupMessage && lastSavedCorbeilleBlock === 'auto-delete'" class="settings-saved">
+            {{ cleanupMessage }}
           </p>
-          <p class="hint">
-            Le contenu vu part à la corbeille automatiquement après le délai et le préavis ci-dessous. Le suivi
-            n'est pas requis. Une saison n'est retirée que si elle est entièrement vue. Marquez « Garder » sur
-            une fiche, une saison ou un épisode pour l'exclure. Les fichiers vont à la corbeille, sur le même volume.
-          </p>
-          <form @submit.prevent="saveCleanup">
-            <label>
-              <span>Incomplets automatiques</span>
-              <select v-model="incompleteCleanup">
-                <option :value="false">Non</option>
-                <option :value="true">Oui</option>
-              </select>
-              <span class="hint">
-                Après l'aperçu dans Bibliothèque. Les orphelins déjà en bibliothèque, les fichiers minuscules
-                et les contrôles aria2 partent à la corbeille. Les autres incomplets restent trois jours.
-              </span>
-            </label>
-            <label class="check">
-              <input v-model="autoDeleteEnabled" type="checkbox" />
-              <span>Suppression automatique</span>
-            </label>
-            <label :class="{ 'cleanup-days-muted': !autoDeleteEnabled }">
-              <span>Jours après le visionnage</span>
-              <input
-                v-model.number="autoDays"
-                type="number"
-                min="1"
-                max="365"
-                :disabled="!autoDeleteEnabled"
-                :required="autoDeleteEnabled"
-              />
-              <span v-if="autoDeleteEnabled" class="hint">Défaut 14. La fiche peut imposer un autre délai.</span>
-              <span v-else class="hint">Désactivée : aucun fichier ne partira à la corbeille automatiquement.</span>
-            </label>
-            <label>
-              <span>Prévenir avant suppression (heures)</span>
-              <input v-model.number="noticeHours" type="number" min="1" max="168" required />
-              <span class="hint">Défaut 24. Une notification part avant le déplacement.</span>
-            </label>
-            <label>
-              <span>Corbeille (jours)</span>
-              <input v-model.number="trashDays" type="number" min="1" max="90" required />
-            </label>
-            <p v-if="cleanupError" class="error">{{ cleanupError }}</p>
-            <p v-if="cleanupMessage">{{ cleanupMessage }}</p>
-            <button type="submit">{{ saveSettingsLabel() }}</button>
-            <button type="button" @click="loadPreview">Aperçu du prochain passage</button>
-          </form>
-          <p v-if="previewDue.length === 0 && previewUpcoming.length === 0" class="hint">
-            L'aperçu liste ce qui partira au prochain passage, et ce qui est seulement annoncé.
-          </p>
-          <div v-if="previewDue.length">
-            <h2>Sera supprimé au prochain passage</h2>
-            <ul>
-              <li v-for="row in previewDue" :key="`${row.media_id}-${row.season}-${row.episode}`">
-                {{ row.title }}
-                <template v-if="row.season != null"> S{{ row.season }}</template>
-                <template v-if="row.episode != null">E{{ row.episode }}</template>
-                · {{ formatBytes(row.bytes) }}
-              </li>
-            </ul>
-          </div>
-          <div v-if="previewUpcoming.length">
-            <h2>Annoncé, pas encore supprimé</h2>
-            <ul>
-              <li v-for="row in previewUpcoming" :key="`up-${row.media_id}-${row.season}-${row.episode}`">
-                {{ row.title }}
-                <template v-if="row.season != null"> S{{ row.season }}</template>
-                <template v-if="row.episode != null">E{{ row.episode }}</template>
-                · {{ formatBytes(row.bytes) }}
-              </li>
-            </ul>
-          </div>
-          <h2>Corbeille</h2>
-          <p class="hint" data-testid="trash-summary">
-            En corbeille : {{ trashItems.length }} fichier(s), {{ formatBytes(trashBytes) }}.
-            Espace repris après purge : {{ formatBytes(reclaimedBytes) }}.
-          </p>
-          <p class="actions">
-            <button
-              type="button"
-              class="danger"
-              data-testid="empty-trash"
-              :disabled="trashItems.length === 0"
-              @click="emptyTrash"
-            >
-              Vider la corbeille
-            </button>
-          </p>
+          <button type="submit">{{ saveSettingsLabel() }}</button>
+          <button type="button" @click="loadPreview">Aperçu du prochain passage</button>
+        </form>
+        <p v-if="previewDue.length === 0 && previewUpcoming.length === 0" class="hint">
+          L'aperçu liste ce qui partira au prochain passage, et ce qui est seulement annoncé.
+        </p>
+        <div v-if="previewDue.length">
+          <h4>Sera supprimé au prochain passage</h4>
           <ul>
-            <li v-for="item in trashItems" :key="item.id" class="row">
-              <span>{{ item.label }} · {{ formatBytes(item.size) }} · {{ item.reason }}</span>
-              <span class="actions">
-                <button type="button" @click="restoreTrash(item.id)">Restaurer</button>
-                <button type="button" class="danger" @click="purgeTrash(item)">Supprimer</button>
-              </span>
+            <li v-for="row in previewDue" :key="`${row.media_id}-${row.season}-${row.episode}`">
+              {{ row.title }}
+              <template v-if="row.season != null"> S{{ row.season }}</template>
+              <template v-if="row.episode != null">E{{ row.episode }}</template>
+              · {{ formatBytes(row.bytes) }}
             </li>
           </ul>
+        </div>
+        <div v-if="previewUpcoming.length">
+          <h4>Annoncé, pas encore supprimé</h4>
+          <ul>
+            <li v-for="row in previewUpcoming" :key="`up-${row.media_id}-${row.season}-${row.episode}`">
+              {{ row.title }}
+              <template v-if="row.season != null"> S{{ row.season }}</template>
+              <template v-if="row.episode != null">E{{ row.episode }}</template>
+              · {{ formatBytes(row.bytes) }}
+            </li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="panel stack" data-testid="corbeille-bloc-incomplets">
+        <h3 class="settings-subsection-title">Téléchargements incomplets</h3>
+        <form class="stack" @submit.prevent="saveIncompleteCleanupSettings">
+          <label>
+            <span>Incomplets automatiques</span>
+            <select v-model="incompleteCleanup">
+              <option :value="false">Non</option>
+              <option :value="true">Oui</option>
+            </select>
+            <span class="hint">
+              Après l'aperçu dans Bibliothèque. Les orphelins déjà en bibliothèque, les fichiers minuscules
+              et les contrôles aria2 partent à la corbeille. Les autres incomplets restent
+              {{ fixedRetentionDays?.incomplete_orphan_keep_days ?? "—" }} jour(s).
+            </span>
+          </label>
+          <p v-if="cleanupError && lastSavedCorbeilleBlock === 'incomplets'" class="error">{{ cleanupError }}</p>
+          <p v-if="cleanupMessage && lastSavedCorbeilleBlock === 'incomplets'" class="settings-saved">{{ cleanupMessage }}</p>
+          <button type="submit">{{ saveSettingsLabel() }}</button>
+        </form>
+      </article>
+
+      <article class="panel stack" data-testid="corbeille-bloc-conservation">
+        <h3 class="settings-subsection-title">Conservation</h3>
+        <form class="stack" @submit.prevent="saveCorbeilleConservation">
+          <label>
+            <span>Sauvegardes conservées</span>
+            <input
+              v-model.number="backupKeep"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'backup_keep', 1)"
+              :max="settingBoundMax(settingsRows, 'backup_keep', 90)"
+              required
+            />
+            <span class="hint">{{ hintWithDefault(settingsRows, "backup_keep", "Une par jour.") }}</span>
+          </label>
+          <label>
+            <span>Après téléchargement</span>
+            <select v-model="completedAction">
+              <option value="archive">Archiver</option>
+              <option value="remove">Supprimer de la liste</option>
+            </select>
+            <span class="hint">Le fichier dans la bibliothèque n'est jamais supprimé.</span>
+          </label>
+          <p v-if="cleanupError && lastSavedCorbeilleBlock === 'conservation'" class="error">{{ cleanupError }}</p>
+          <p v-if="cleanupMessage && lastSavedCorbeilleBlock === 'conservation'" class="settings-saved">
+            {{ cleanupMessage }}
+          </p>
+          <button type="submit">{{ saveSettingsLabel() }}</button>
+        </form>
+      </article>
+
+      <article class="panel stack" data-testid="corbeille-bloc-durees-fixes">
+        <h3 class="settings-subsection-title">Durées fixes</h3>
+        <p class="hint">Conservation automatique côté serveur, non modifiable.</p>
+        <dl v-if="fixedRetentionDays" class="settings-update-dl">
+          <div>
+            <dt>Journal des événements</dt>
+            <dd>{{ fixedRetentionDays.event_journal_days }} jours</dd>
+          </div>
+          <div>
+            <dt>Historique des états des sources</dt>
+            <dd>{{ fixedRetentionDays.source_state_days }} jours</dd>
+          </div>
+          <div>
+            <dt>Métriques de performance</dt>
+            <dd>{{ fixedRetentionDays.metrics_history_days }} jours</dd>
+          </div>
+          <div>
+            <dt>Téléchargements incomplets (avant nettoyage)</dt>
+            <dd>{{ fixedRetentionDays.incomplete_orphan_keep_days }} jours</dd>
+          </div>
+        </dl>
+        <p v-else class="hint">Durées fixes indisponibles.</p>
+      </article>
+
+      <article
+        v-if="serviceStatusLoaded && adConnected"
+        class="panel stack"
+        data-testid="corbeille-bloc-alldebrid"
+      >
+        <h3 class="settings-subsection-title">AllDebrid</h3>
+        <p class="hint">
+          <RouterLink to="/reglages/alldebrid">Purge AllDebrid</RouterLink>
+        </p>
+      </article>
     </section>
     <section v-if="section === 'alldebrid'" class="settings-section panel stack">
       <h2 class="settings-section-title">AllDebrid</h2>
-      <AllDebridAccountBlock />
-      <div class="alldebrid-account divider-line" aria-hidden="true" />
+      <p v-if="maskAllDebridExtras" class="hint" role="status">
+        Disponible après connexion de AllDebrid dans
+        <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>.
+      </p>
+      <div v-if="!maskAllDebridExtras" class="stack">
       <form @submit.prevent="saveDebrid">
             <label class="check">
               <input v-model="alldebridAutoPurge" type="checkbox" />
@@ -2190,11 +2604,12 @@ async function saveProfileFallback() {
             <button type="submit">{{ saveSettingsLabel() }}</button>
             <button type="button" @click="purgeDebrid(false)">Purger AllDebrid</button>
             <button type="button" @click="purgeDebrid(true)">Tout purger</button>
+            <p class="hint">
+              « Purger AllDebrid » ne retire que les liens des téléchargements terminés par MediaTracker.
+              « Tout purger » demande une confirmation : l'historique récent du compte est vidé en entier.
+            </p>
           </form>
-          <p class="hint">
-            « Purger AllDebrid » ne retire que les liens des téléchargements terminés par MediaTracker.
-            « Tout purger » demande une confirmation : l'historique récent du compte est vidé en entier.
-          </p>
+      </div>
     </section>
     <section v-if="section === 'disque'" class="settings-section panel stack">
       <h2 class="settings-section-title">Disque et sauvegardes</h2>
@@ -2205,19 +2620,26 @@ async function saveProfileFallback() {
       <DiskSpaceCard heading />
           <p class="hint">
             Sous le seuil, les téléchargements passent en pause et une notification part. Les copies quotidiennes
-            sont dans <code>/config/backups</code>.
+            sont dans <code>{{ storageHint.backups_dir }}</code>.
           </p>
           <form @submit.prevent="saveDisk">
             <label>
-              <span>Espace libre minimum (Go)</span>
-              <input v-model.number="diskMinGb" type="number" min="0" max="1024" required />
-              <span class="hint">Défaut 5. 0 désactive le garde-fou.</span>
+              <span>Espace libre minimum (Gio)</span>
+              <input
+                v-model.number="diskMinGb"
+                type="number"
+                :min="settingBoundMin(settingsRows, 'disk_min_free_gb', 0)"
+                :max="settingBoundMax(settingsRows, 'disk_min_free_gb', 1024)"
+                required
+              />
+              <span class="hint">
+                {{ hintWithDefault(settingsRows, "disk_min_free_gb", "0 désactive le garde-fou.") }}
+              </span>
             </label>
-            <label>
-              <span>Sauvegardes conservées</span>
-              <input v-model.number="backupKeep" type="number" min="1" max="90" required />
-              <span class="hint">Défaut 7. Une par jour.</span>
-            </label>
+            <p class="hint">
+              Nombre de sauvegardes gardées :
+              <RouterLink to="/reglages/corbeille">voir Corbeille</RouterLink>.
+            </p>
             <p v-if="diskError" class="error">{{ diskError }}</p>
             <p v-if="diskMessage">{{ diskMessage }}</p>
             <button type="submit">{{ saveSettingsLabel() }}</button>
@@ -2260,11 +2682,21 @@ async function saveProfileFallback() {
           </div>
           <article class="settings-update-now panel stack">
             <h3 class="settings-subsection-title">Mettre à jour maintenant</h3>
+            <p class="settings-inline-docs">
+              <DocLink
+                :href="WATCHTOWER_DOCS_URL"
+                label="Doc Watchtower"
+                data-testid="maj-watchtower-doc"
+              />
+            </p>
             <p class="hint">
               Watchtower télécharge la dernière image et redémarre MediaTracker. Comptez environ une minute
               d'interruption.
             </p>
-            <p v-if="watchtowerUnavailableLine" class="hint settings-update-unavail">
+            <p
+              v-if="serviceStatusLoaded && watchtowerUnavailableLine"
+              class="hint settings-update-unavail"
+            >
               {{ watchtowerUnavailableLine }}
             </p>
             <p class="actions">
@@ -2300,7 +2732,7 @@ async function saveProfileFallback() {
             <button type="button" @click="checkUpdate">Vérifier la mise à jour</button>
             <button type="button" @click="restartApp">Redémarrer</button>
           </p>
-          <div class="settings-setrow">
+          <div v-if="!maskWatchtowerNotify" class="settings-setrow">
             <div>
               <div class="settings-setrow-label">Me notifier quand Watchtower installe une nouvelle version</div>
               <p class="hint settings-setrow-hint">
@@ -2323,74 +2755,248 @@ async function saveProfileFallback() {
     </section>
     <section v-if="section === 'jetons'" class="settings-section panel stack">
       <h2 class="settings-section-title">Jetons d'API</h2>
-      <article class="panel stack" data-testid="outbound-secrets-block">
-        <h3 class="settings-subsection-title">Secrets pour services distants</h3>
-        <p class="hint">
-          Jetons que MediaTracker utilise pour joindre d'autres services (GHCR, GitHub, Watchtower).
-          Collez ici la valeur de <code>WATCHTOWER_HTTP_API_TOKEN</code> pour Watchtower — pas un jeton
-          « Accès API » ci-dessous. Les secrets ne sont jamais réaffichés après enregistrement.
-        </p>
-        <form data-testid="outbound-secrets-form" @submit.prevent="saveUpdateTokens">
-          <label>
-            <span>
-              Jeton GHCR (lecture)
-              <span class="badge" :class="{ on: ghcrSet }" data-testid="ghcr-secret-status">{{
-                ghcrSet ? "enregistré" : "non renseigné"
-              }}</span>
-            </span>
-            <input v-model="ghcrToken" type="password" autocomplete="off" :placeholder="ghcrSet ? 'inchangé' : ''" />
-          </label>
-          <label>
-            <span>
-              Jeton GitHub (repli)
-              <span class="badge" :class="{ on: githubSet }" data-testid="github-secret-status">{{
-                githubSet ? "enregistré" : "non renseigné"
-              }}</span>
-            </span>
-            <input v-model="githubToken" type="password" autocomplete="off" :placeholder="githubSet ? 'inchangé' : ''" />
-          </label>
-          <h4 class="settings-subsection-title">Watchtower</h4>
-          <p class="hint" data-testid="watchtower-url-status">
-            URL enregistrée :
-            {{ watchtowerUrlStored.trim() ? watchtowerUrlStored : "non renseignée" }}
-          </p>
-          <label>
-            <span>URL de Watchtower</span>
-            <input v-model="watchtowerUrl" data-testid="watchtower-url-input" autocomplete="off" />
-            <span class="hint">
-              Même réseau Docker que MediaTracker, sans exposer de port sur l'hôte. Exemple :
-              <code>http://watchtower:8080</code>
-            </span>
-          </label>
-          <label>
-            <span>
-              Jeton Watchtower
-              <span class="badge" :class="{ on: watchtowerTokenSet }" data-testid="watchtower-secret-status">{{
-                watchtowerTokenSet ? "enregistré" : "non renseigné"
-              }}</span>
-            </span>
-            <input
-              v-model="watchtowerToken"
-              type="password"
-              autocomplete="off"
-              data-testid="watchtower-token-input"
-              :placeholder="watchtowerTokenSet ? 'inchangé' : ''"
+      <p class="hint settings-lead">
+        Un service par carte. Les secrets sortants ne sont jamais réaffichés après enregistrement.
+        Pour Watchtower, utilisez <code>WATCHTOWER_HTTP_API_TOKEN</code> — pas un jeton Accès API.
+      </p>
+      <div class="settings-jetons-cards">
+        <ServiceCard
+          title="TMDB"
+          :configured="tmdbCardConfigured"
+          status-test-id="tmdb-card-status"
+          data-testid="service-card-tmdb"
+        >
+          <template #docs>
+            <DocLink
+              :href="TMDB_GETTING_STARTED_URL"
+              label="Doc TMDB"
+              data-testid="tmdb-doc-getting-started"
             />
-            <span class="hint">
-              Doit correspondre à <code>WATCHTOWER_HTTP_API_TOKEN</code> du conteneur Watchtower.
-            </span>
-          </label>
-          <p v-if="updateError" class="error">{{ updateError }}</p>
-          <p v-if="updateTokensMessage" class="settings-saved">{{ updateTokensMessage }}</p>
-          <button type="submit">{{ saveSettingsLabel() }}</button>
-        </form>
-      </article>
-      <article class="panel stack" data-testid="api-access-block">
-        <h3 class="settings-subsection-title">Accès API</h3>
-        <p class="hint">
-          Jetons que MediaTracker délivre à des scripts sur le LAN. Ne sert pas pour Watchtower.
-          Le secret s'affiche une seule fois. Portées : lecture, écriture, administration.
-        </p>
+            <DocLink
+              :href="TMDB_READ_TOKEN_DOCS_URL"
+              label="Jeton de lecture"
+              data-testid="tmdb-doc-read-token"
+            />
+          </template>
+          <p class="settings-service-card-unlock">
+            Ce que ça déverrouille : Découvrir, Nouveautés et identification des médias.
+          </p>
+          <form data-testid="tmdb-secrets-form" @submit.prevent="saveUpdateTokens('tmdb')">
+            <label>
+              <span>
+                Jeton de lecture TMDB
+                <span class="badge" :class="{ on: tmdbSet }" data-testid="tmdb-secret-status">{{
+                  tmdbSet ? "enregistré" : "non renseigné"
+                }}</span>
+              </span>
+              <input
+                v-model="tmdbToken"
+                type="password"
+                autocomplete="off"
+                data-testid="tmdb-token-input"
+                :placeholder="tmdbSet ? 'inchangé' : ''"
+              />
+            </label>
+            <p v-if="updateError && lastSavedCard === 'tmdb'" class="error">{{ updateError }}</p>
+            <p v-if="updateTokensMessage && lastSavedCard === 'tmdb'" class="settings-saved">
+              {{ updateTokensMessage }}
+            </p>
+            <button type="submit">{{ saveSettingsLabel() }}</button>
+          </form>
+        </ServiceCard>
+
+        <ServiceCard
+          title="AllDebrid"
+          :configured="adConnected"
+          configured-label="Connecté"
+          not-configured-label="Non connecté"
+          status-test-id="alldebrid-card-status"
+          data-testid="service-card-alldebrid"
+        >
+          <template #docs>
+            <DocLink :href="ALLDEBRID_DOCS_URL" label="Doc AllDebrid" data-testid="alldebrid-doc" />
+          </template>
+          <p class="settings-service-card-unlock">
+            Ce que ça déverrouille : les
+            <RouterLink to="/reglages/sources">sources</RouterLink>
+            de téléchargement (sauf Hive), le rythme des requêtes, l'ordre des hébergeurs et la purge
+            <RouterLink to="/reglages/alldebrid">AllDebrid</RouterLink>.
+          </p>
+          <AllDebridAccountBlock />
+        </ServiceCard>
+
+        <ServiceCard
+          title="Jellyfin"
+          :configured="jellyfinConfigured"
+          status-test-id="jellyfin-card-status"
+          data-testid="service-card-jellyfin"
+        >
+          <template #docs>
+            <DocLink :href="JELLYFIN_DOCS_URL" label="Doc Jellyfin" data-testid="jellyfin-doc" />
+            <DocLink :href="JELLYFIN_API_DOCS_URL" label="API Jellyfin" data-testid="jellyfin-api-doc" />
+          </template>
+          <p class="settings-service-card-unlock">
+            Ce que ça déverrouille : les options Jellyfin, l'alignement dans la Bibliothèque et l'import d'historique.
+          </p>
+          <p class="actions">
+            <RouterLink class="button" to="/bibliotheque/importer-historique">Importer l'historique</RouterLink>
+          </p>
+          <form data-testid="jellyfin-secrets-form" @submit.prevent="saveJellyfinCredentials">
+            <label>
+              <span>URL Jellyfin</span>
+              <input
+                v-model="jellyfinUrl"
+                data-testid="jellyfin-url-input"
+                placeholder="http://jellyfin:8096"
+                autocomplete="off"
+              />
+              <p class="settings-inline-docs">
+                <DocLink
+                  :href="JELLYFIN_NETWORKING_DOCS_URL"
+                  label="Réseau Jellyfin"
+                  data-testid="jellyfin-networking-doc"
+                />
+              </p>
+              <span class="hint">
+                Dans le même réseau Docker, <code>http://jellyfin:8096</code>. Clé API : tableau de bord Jellyfin, icône
+                engrenage, puis Clés API.
+              </span>
+            </label>
+            <label>
+              <span>
+                Clé API
+                <span class="badge" :class="{ on: jellyfinKeySet }" data-testid="jellyfin-secret-status">{{
+                  jellyfinKeySet ? "enregistrée" : "non renseignée"
+                }}</span>
+              </span>
+              <input
+                v-model="jellyfinKey"
+                type="password"
+                autocomplete="off"
+                data-testid="jellyfin-key-input"
+                :placeholder="jellyfinKeySet ? 'inchangée' : ''"
+              />
+            </label>
+            <p v-if="updateError && lastSavedCard === 'jellyfin'" class="error">{{ updateError }}</p>
+            <p v-if="updateTokensMessage && lastSavedCard === 'jellyfin'" class="settings-saved">
+              {{ updateTokensMessage }}
+            </p>
+            <button type="submit">{{ saveSettingsLabel() }}</button>
+          </form>
+        </ServiceCard>
+
+        <ServiceCard
+          title="GitHub"
+          :configured="githubCardConfigured"
+          status-test-id="github-card-status"
+          data-testid="service-card-github"
+        >
+          <template #docs>
+            <DocLink :href="GHCR_DOCS_URL" label="Doc GHCR" data-testid="github-doc-ghcr" />
+            <DocLink :href="GITHUB_PAT_DOCS_URL" label="Doc jetons GitHub" data-testid="github-doc-pat" />
+          </template>
+          <p class="settings-service-card-unlock">
+            Ce que ça déverrouille : comparaison de version dans
+            <RouterLink to="/reglages/maj">Mise à jour</RouterLink>.
+          </p>
+          <form data-testid="github-secrets-form" @submit.prevent="saveUpdateTokens('github')">
+            <label>
+              <span>
+                Jeton GHCR (lecture)
+                <span class="badge" :class="{ on: ghcrSet }" data-testid="ghcr-secret-status">{{
+                  ghcrSet ? "enregistré" : "non renseigné"
+                }}</span>
+              </span>
+              <input v-model="ghcrToken" type="password" autocomplete="off" :placeholder="ghcrSet ? 'inchangé' : ''" />
+            </label>
+            <label>
+              <span>
+                Jeton GitHub (repli)
+                <span class="badge" :class="{ on: githubSet }" data-testid="github-secret-status">{{
+                  githubSet ? "enregistré" : "non renseigné"
+                }}</span>
+              </span>
+              <input
+                v-model="githubToken"
+                type="password"
+                autocomplete="off"
+                :placeholder="githubSet ? 'inchangé' : ''"
+              />
+            </label>
+            <p v-if="updateError && lastSavedCard === 'github'" class="error">{{ updateError }}</p>
+            <p v-if="updateTokensMessage && lastSavedCard === 'github'" class="settings-saved">
+              {{ updateTokensMessage }}
+            </p>
+            <button type="submit">{{ saveSettingsLabel() }}</button>
+          </form>
+        </ServiceCard>
+
+        <ServiceCard
+          title="Watchtower"
+          :configured="watchtowerCardConfigured"
+          status-test-id="watchtower-card-status"
+          data-testid="service-card-watchtower"
+        >
+          <template #docs>
+            <DocLink :href="WATCHTOWER_DOCS_URL" label="Doc Watchtower" data-testid="watchtower-doc" />
+          </template>
+          <p class="settings-service-card-unlock">
+            Ce que ça déverrouille :
+            <RouterLink to="/reglages/maj">Mettre à jour maintenant</RouterLink>
+            et la notification après mise à jour automatique.
+          </p>
+          <form data-testid="outbound-secrets-form" @submit.prevent="saveUpdateTokens('watchtower')">
+            <p class="hint" data-testid="watchtower-url-status">
+              URL enregistrée :
+              {{ watchtowerUrlStored.trim() ? watchtowerUrlStored : "non renseignée" }}
+            </p>
+            <label>
+              <span>URL de Watchtower</span>
+              <input v-model="watchtowerUrl" data-testid="watchtower-url-input" autocomplete="off" />
+              <span class="hint">
+                Même réseau Docker que MediaTracker, sans exposer de port sur l'hôte. Exemple :
+                <code>http://watchtower:8080</code>
+              </span>
+            </label>
+            <label>
+              <span>
+                Jeton Watchtower
+                <span class="badge" :class="{ on: watchtowerTokenSet }" data-testid="watchtower-secret-status">{{
+                  watchtowerTokenSet ? "enregistré" : "non renseigné"
+                }}</span>
+              </span>
+              <input
+                v-model="watchtowerToken"
+                type="password"
+                autocomplete="off"
+                data-testid="watchtower-token-input"
+                :placeholder="watchtowerTokenSet ? 'inchangé' : ''"
+              />
+              <span class="hint">
+                Doit correspondre à <code>WATCHTOWER_HTTP_API_TOKEN</code> du conteneur Watchtower.
+              </span>
+            </label>
+            <p v-if="updateError && lastSavedCard === 'watchtower'" class="error">{{ updateError }}</p>
+            <p v-if="updateTokensMessage && lastSavedCard === 'watchtower'" class="settings-saved">
+              {{ updateTokensMessage }}
+            </p>
+            <button type="submit">{{ saveSettingsLabel() }}</button>
+          </form>
+        </ServiceCard>
+
+        <ServiceCard
+          title="Accès API"
+          :configured="apiAccessConfigured"
+          status-test-id="api-access-card-status"
+          data-testid="api-access-block"
+        >
+          <p class="settings-service-card-unlock">
+            Ce que ça déverrouille : scripts sur le réseau local et intégrations Home Assistant.
+          </p>
+          <p class="hint">
+            Jetons que MediaTracker délivre à des scripts sur le LAN. Ne sert pas pour Watchtower.
+            Le secret s'affiche une seule fois. Portées : lecture, écriture, administration.
+          </p>
           <form @submit.prevent="createToken">
             <label>
               <span>Nom</span>
@@ -2420,7 +3026,8 @@ async function saveProfileFallback() {
               <button type="button" @click="revokeToken(token.id)">Révoquer</button>
             </li>
           </ul>
-      </article>
+        </ServiceCard>
+      </div>
     </section>
     <section v-if="section === 'reset'" class="settings-section panel stack">
       <h2 class="settings-section-title">Réinitialiser la base</h2>

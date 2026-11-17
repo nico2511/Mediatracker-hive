@@ -2,7 +2,9 @@
 import { computed } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 
-import { SETTINGS_SECTIONS } from "./sections";
+import { settingsSectionsByGroup } from "./sections";
+
+const navGroups = settingsSectionsByGroup();
 
 const route = useRoute();
 
@@ -53,14 +55,19 @@ const sectionPath = (slug: string) => `/reglages/${slug}`;
       class="settings-tabs desk-only"
       aria-label="Sections des réglages"
     >
-      <RouterLink
-        v-for="item in SETTINGS_SECTIONS"
-        :key="item.slug"
-        :to="sectionPath(item.slug)"
-        :aria-current="item.slug === activeSlug ? 'page' : undefined"
-      >
-        {{ item.title }}
-      </RouterLink>
+      <template v-for="group in navGroups" :key="group.id">
+        <p class="settings-tabs-group-title settings-subsection-title">
+          {{ group.title }}
+        </p>
+        <RouterLink
+          v-for="item in group.sections"
+          :key="item.slug"
+          :to="sectionPath(item.slug)"
+          :aria-current="item.slug === activeSlug ? 'page' : undefined"
+        >
+          {{ item.title }}
+        </RouterLink>
+      </template>
     </nav>
 
     <RouterView />

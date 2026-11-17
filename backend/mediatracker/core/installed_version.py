@@ -72,7 +72,14 @@ def _touch_app_version(db: Session, moment: datetime) -> None:
         row.updated_at = moment
 
 
-def _record_updated_event(db: Session, *, payload: dict, dedupe_key: str, moment: datetime) -> Event:
+def _record_updated_event(
+    db: Session,
+    *,
+    payload: dict,
+    dedupe_key: str,
+    moment: datetime,
+    settings: Settings | None = None,
+) -> Event:
     existing = db.scalar(select(Event).where(Event.type == "system.updated", Event.dedupe_key == dedupe_key))
     if existing is not None:
         return existing
@@ -98,7 +105,7 @@ def _record_updated_event(db: Session, *, payload: dict, dedupe_key: str, moment
         try:
             from mediatracker.events.deliver import schedule_deliveries
 
-            schedule_deliveries(db, event, moment)
+            schedule_deliveries(db, event, moment, settings)
         except Exception:
             logger.exception("Planification de la notification de mise à jour installée ignorée.")
     return event
@@ -133,7 +140,13 @@ def observe_installed_version(db: Session, _settings: Settings) -> None:
             "new_build_date": build_date(),
             "level": "info",
         }
-        _record_updated_event(db, payload=payload, dedupe_key=f"system.updated:{current}", moment=moment)
+        _record_updated_event(
+            db,
+            payload=payload,
+            dedupe_key=f"system.updated:{current}",
+            moment=moment,
+            settings=_settings,
+        )
         db.commit()
     except Exception:
         logger.exception("Observation de la version installée ignorée.")

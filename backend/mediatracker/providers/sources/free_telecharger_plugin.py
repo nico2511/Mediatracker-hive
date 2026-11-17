@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from mediatracker.core.hosters import source_ingestion_hosters
+from mediatracker.core.pipeline.jobs import hoster_preference_list
 from mediatracker.core.source_binding import SourceBindingProbe, url_from_path
 from mediatracker.providers.base import SourceFetchError, SourceRef
-from mediatracker.providers.sources.free_telecharger import _KEEP_HOSTERS, FreeTelechargerSource
+from mediatracker.providers.sources.free_telecharger import FreeTelechargerSource
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -103,7 +105,7 @@ class FreeTelechargerSourceEntry:
         try:
             ref = SourceRef(ref=page_url, url=page_url)
             heading, links = source._page(ref)
-            allowed = set(_KEEP_HOSTERS)
+            allowed = set(source_ingestion_hosters(hoster_preference_list(db, settings)))
             counts: Counter[str] = Counter()
             for link in links:
                 if link.hoster in allowed:
@@ -125,6 +127,7 @@ class FreeTelechargerSourceEntry:
         *,
         base_url: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        request_delay_seconds: float | None = None,
     ) -> object | None:
-        del settings, base_url, transport
+        del settings, base_url, transport, request_delay_seconds
         return None

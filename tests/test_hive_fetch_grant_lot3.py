@@ -19,11 +19,7 @@ from tests.test_hive_t5 import NOW, URL_A, URL_B, _join_ruche, _seed_file_on_a
 from tests.test_hive_t6 import _seed_catalogue_row
 
 from mediatracker.db.models import Download, DownloadHiveFetch, HiveMember, Media, MediaItem
-from mediatracker.hive.download_aria2 import (
-    GRANT_RENEW_LEAD,
-    attach_or_refresh_hive_fetch,
-    ensure_mint_for_download,
-)
+from mediatracker.hive.download_aria2 import attach_or_refresh_hive_fetch, ensure_mint_for_download
 from mediatracker.hive.download_pipeline import (
     hive_aria2_options,
     hive_auth_failure_message,
@@ -31,7 +27,7 @@ from mediatracker.hive.download_pipeline import (
     scrub_hive_grant_from_session_text,
     verify_hive_completed_file,
 )
-from mediatracker.hive.fetch_grant import HIVE_FETCH_GRANT_HEADER
+from mediatracker.hive.fetch_grant import GRANT_RENEW_LEAD, HIVE_FETCH_GRANT_HEADER
 from mediatracker.hive.peer_transport import set_peer_asgi_apps_for_tests
 from mediatracker.hive.source_catalog import pick_catalog_match_for_profile_attempt
 from mediatracker.providers.downloaders.aria2 import Aria2Client

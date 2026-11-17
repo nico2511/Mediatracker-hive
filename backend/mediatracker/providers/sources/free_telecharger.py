@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import cast
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from mediatracker.core.hosters import source_ingestion_hosters
 from mediatracker.core.source_select import identity_match, titles_match
 from mediatracker.providers.base import (
     Health,
@@ -40,16 +42,6 @@ from mediatracker.security.ssrf import OutboundUrlRejected, validate_outbound_ur
 logger = logging.getLogger(__name__)
 
 _MAX_BODY = 2_000_000
-_KEEP_HOSTERS = (
-    "rapidgator",
-    "turbobit",
-    "uploady",
-    "dailyuploads",
-    "nitroflare",
-    "katfile",
-    "tezfiles",
-    "1fichier",
-)
 _CHALLENGE = (
     "cf-browser-verification",
     "just a moment",
@@ -239,26 +231,38 @@ class FreeTelechargerSource:
             items.append(SourceItem(season=link.season, episode=link.episode, title=None, ref=ref.ref))
         return items
 
-    def get_links(self, ref: SourceRef) -> list[LinkCandidate]:
+    def get_links(
+        self,
+        ref: SourceRef,
+        *,
+        hoster_preference: Sequence[str] | None = None,
+    ) -> list[LinkCandidate]:
+        keep = source_ingestion_hosters(hoster_preference)
+        keep_set = set(keep)
         heading, links = self._page(ref)
         resolved: list[PageLink] = []
         for link in links:
-            resolved.extend(self._resolve_page_link(link))
+            resolved.extend(self._resolve_page_link(link, keep_set=keep_set))
         candidates = [
             _candidate(link, heading.quality, heading.language)
             for link in resolved
-            if link.hoster in _KEEP_HOSTERS
+            if link.hoster in keep_set
         ]
-        candidates.sort(key=lambda item: (item.episode or 0, _KEEP_HOSTERS.index(item.hoster or ""), item.url))
+        candidates.sort(key=lambda item: (item.episode or 0, keep.index(item.hoster or ""), item.url))
         return candidates
 
-    def _resolve_page_link(self, link: PageLink) -> list[PageLink]:
+    def _resolve_page_link(
+        self,
+        link: PageLink,
+        *,
+        keep_set: set[str],
+    ) -> list[PageLink]:
         if not link.intermediate:
             return [link]
         html = self._get(link.url, referer=self.config.base_url + "/")
         found: list[PageLink] = []
         for url, hoster in parse_intermediate(html, self.config.base_url):
-            if hoster not in _KEEP_HOSTERS and hoster != "unknown":
+            if hoster not in keep_set and hoster != "unknown":
                 continue
             found.append(
                 PageLink(

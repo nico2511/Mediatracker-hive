@@ -1,8 +1,15 @@
 import { api, type SettingRow } from "./api";
+import { sanitizePatchValues } from "./settingsMeta";
 import { invalidateJellyfinWeb } from "./layoutCache";
+
+export interface SourceUrlDefaults {
+  comet_base_urls: string[];
+  torrentio_base_url: string;
+}
 
 export interface SettingsPage {
   settings: SettingRow[];
+  source_defaults?: SourceUrlDefaults;
 }
 
 let cached: SettingsPage | null = null;
@@ -31,9 +38,10 @@ export async function fetchSettings(): Promise<SettingsPage> {
 }
 
 export async function patchSettings(body: { values: Record<string, unknown> }): Promise<void> {
-  await api("/api/v1/settings", { method: "PATCH", body: JSON.stringify(body) });
+  const values = sanitizePatchValues(body.values);
+  await api("/api/v1/settings", { method: "PATCH", body: JSON.stringify({ values }) });
   invalidateSettings();
-  if (Object.keys(body.values).some((key) => key.startsWith("jellyfin_"))) {
+  if (Object.keys(values).some((key) => key.startsWith("jellyfin_"))) {
     invalidateJellyfinWeb();
   }
 }

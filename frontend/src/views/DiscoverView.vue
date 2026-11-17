@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import MediaQuickView from "../components/MediaQuickView.vue";
 import TmdbPosterImg from "../components/TmdbPosterImg.vue";
+import { useDiscoverInactivityHint } from "../composables/useDiscoverInactivityHint";
 import { useDiscoverSwipe } from "../composables/useDiscoverSwipe";
+import {
+  animateDiscoverScalars,
+  type DiscoverRafAnimator,
+  prefersReducedMotion,
+  underCardTransform,
+} from "../discoverMotion";
+import {
+  discoverEdgeReleaseHint,
+  discoverFollowStampVisible,
+  type DiscoverEdgeSide,
+} from "../discoverGestures";
 import { api, userFacingApiError } from "../api";
+import { tmdbPage } from "../labels";
 import {
   markDiscoverPass,
   markGesturesHelpSeen,
   openDiscoverStores,
   readPassKeys,
   removeDiscoverCache,
+  discoverEntryKey,
   gesturesHelpSeen,
   upsertDiscoverCache,
 } from "../discoverCache";
@@ -34,6 +48,11 @@ const loading = ref(false);
 const error = ref("");
 const filterOpen = ref(false);
 const sheetOpen = ref(false);
+const sheetPresent = ref(false);
+const sheetBackdropOpacity = ref(0);
+const sheetInnerOffset = ref(0);
+const sheetPointerDragging = ref(false);
+let sheetMotion: DiscoverRafAnimator | null = null;
 const helpOpen = ref(false);
 const quick = ref<QuickTarget | null>(null);
 const quickFollow = ref(false);
@@ -43,18 +62,136 @@ const cardRoot = ref<HTMLElement | null>(null);
 const overviewScroll = ref<HTMLElement | null>(null);
 const followBusy = ref(false);
 let sheetSwipeStartY = 0;
-let sheetSwipeActive = false;
+let sheetSwipeStartOffset = 0;
 
 const current = computed(() => deck.value[0] ?? null);
+const nextCard = computed(() => deck.value[1] ?? null);
+const currentCardKey = computed(() =>
+  current.value ? discoverEntryKey(current.value.media_type, current.value.tmdb_id) : null,
+);
+const quickOpen = computed(() => quick.value !== null);
 
-const stampVisible = computed(() => swipe.dx.value > 48 && Math.abs(swipe.dx.value) > Math.abs(swipe.dy.value));
+const stampVisible = computed(() =>
+  discoverFollowStampVisible(swipe.dx.value, swipe.dy.value, swipe.gestureThresholds.value),
+);
 
-const cardStyle = computed(() => {
-  const tilt = Math.max(-18, Math.min(18, swipe.dx.value / 12));
+const touchEdgeHint = computed(() => {
+  if (!swipe.touchDrag.value || !swipe.dragging.value) {
+    return null;
+  }
+  return discoverEdgeReleaseHint(swipe.dx.value, swipe.dy.value, swipe.gestureThresholds.value);
+});
+
+const touchEdgeIntensity = computed(() => {
+  const hint = touchEdgeHint.value;
+  if (!hint) {
+    return 0;
+  }
+  return hint.atThreshold ? 1 : swipe.dragProgress.value;
+});
+
+const touchEdgeSides: DiscoverEdgeSide[] = ["left", "right", "top", "bottom"];
+
+const touchEdgeBarStyle = (side: DiscoverEdgeSide): Record<string, string> => {
+  const hint = touchEdgeHint.value;
+  const active = hint?.side === side;
+  const intensity = active ? touchEdgeIntensity.value : 0;
+  const edgeColors: Record<DiscoverEdgeSide, string> = {
+    right: "110, 231, 162",
+    left: "248, 113, 113",
+    top: "147, 197, 253",
+    bottom: "251, 191, 36",
+  };
+  const alpha = 0.12 + intensity * 0.68;
+  const rgb = edgeColors[side];
+  const base: Record<string, string> = {
+    opacity: intensity > 0 ? "1" : "0",
+    pointerEvents: "none",
+  };
+  if (prefersReducedMotion()) {
+    base.transition = "none";
+  }
+  if (side === "left") {
+    base.background = `linear-gradient(90deg, rgb(${rgb} / ${alpha.toFixed(3)}), transparent 70%)`;
+  } else if (side === "right") {
+    base.background = `linear-gradient(270deg, rgb(${rgb} / ${alpha.toFixed(3)}), transparent 70%)`;
+  } else if (side === "top") {
+    base.background = `linear-gradient(180deg, rgb(${rgb} / ${alpha.toFixed(3)}), transparent 70%)`;
+  } else {
+    base.background = `linear-gradient(0deg, rgb(${rgb} / ${alpha.toFixed(3)}), transparent 70%)`;
+  }
+  return base;
+};
+
+const activeCardStyle = computed(() => ({
+  transform: `translate3d(${swipe.dx.value}px, ${swipe.dy.value}px, 0) rotate(${swipe.rotate.value}deg)`,
+  opacity: String(swipe.opacity.value),
+}));
+
+const underCardStyle = computed(() => {
+  const { scale, translateY } = underCardTransform(swipe.exiting.value ? 1 : swipe.dragProgress.value);
   return {
-    transform: `translate(${swipe.dx.value}px, ${swipe.dy.value}px) rotate(${tilt}deg)`,
+    transform: `translate3d(0, ${translateY}px, 0) scale(${scale})`,
+    opacity: String(0.9 + (swipe.exiting.value ? 0.1 : swipe.dragProgress.value * 0.1)),
   };
 });
+
+const sheetRootStyle = computed(() => ({
+  background: `rgb(0 0 0 / ${(sheetBackdropOpacity.value * 0.52).toFixed(3)})`,
+}));
+
+const sheetInnerStyle = computed(() => ({
+  transform: `translate3d(0, ${sheetInnerOffset.value}px, 0)`,
+}));
+
+function stopSheetMotion() {
+  sheetMotion?.cancel();
+  sheetMotion = null;
+}
+
+function runSheetMotion(targetOffset: number, targetBackdrop: number, onDone?: () => void) {
+  stopSheetMotion();
+  const from = { offset: sheetInnerOffset.value, backdrop: sheetBackdropOpacity.value };
+  const to = { offset: targetOffset, backdrop: targetBackdrop };
+  sheetMotion = animateDiscoverScalars(
+    from,
+    to,
+    "sheet",
+    (frame) => {
+      sheetInnerOffset.value = frame.offset ?? 0;
+      sheetBackdropOpacity.value = frame.backdrop ?? 0;
+    },
+    () => {
+      sheetMotion = null;
+      onDone?.();
+    },
+  );
+}
+
+function revealSheet() {
+  sheetOpen.value = true;
+  sheetPresent.value = true;
+  const startOffset = prefersReducedMotion() ? 0 : Math.min(420, typeof window !== "undefined" ? window.innerHeight * 0.45 : 320);
+  sheetInnerOffset.value = startOffset;
+  sheetBackdropOpacity.value = prefersReducedMotion() ? 1 : 0;
+  void nextTick(() => {
+    runSheetMotion(0, 1);
+  });
+}
+
+function closeSheet() {
+  if (!sheetPresent.value) {
+    return;
+  }
+  const offscreen = typeof window !== "undefined" ? Math.max(280, window.innerHeight * 0.55) : 360;
+  runSheetMotion(offscreen, 0, () => {
+    sheetOpen.value = false;
+    sheetPresent.value = false;
+    sheetInnerOffset.value = 0;
+    sheetBackdropOpacity.value = 0;
+    inactivityBump();
+  });
+}
 
 function dismiss() {
   if (window.history.length > 1) {
@@ -65,7 +202,6 @@ function dismiss() {
 }
 
 function cardToQuick(card: DiscoverCard): QuickTarget {
-  const kind = card.media_type === "film" ? "movie" : "tv";
   return {
     title: card.title,
     year: card.year ?? null,
@@ -74,7 +210,7 @@ function cardToQuick(card: DiscoverCard): QuickTarget {
     mediaType: card.media_type,
     followed: Boolean(card.followed),
     tmdbId: card.tmdb_id,
-    tmdbUrl: card.tmdb_url || `https://www.themoviedb.org/${kind}/${card.tmdb_id}`,
+    tmdbUrl: card.tmdb_url || tmdbPage(card.tmdb_id, card.media_type),
   };
 }
 
@@ -112,16 +248,14 @@ function openSeriesFollow(card: DiscoverCard) {
   quick.value = cardToQuick(card);
 }
 
-function closeSheet() {
-  sheetOpen.value = false;
-}
-
 function onSheetBackdropPointerDown(event: PointerEvent) {
   if (event.button !== 0 || event.target !== event.currentTarget) {
     return;
   }
-  sheetSwipeActive = true;
+  sheetPointerDragging.value = true;
   sheetSwipeStartY = event.clientY;
+  sheetSwipeStartOffset = sheetInnerOffset.value;
+  stopSheetMotion();
 }
 
 function onSheetDragStart(event: PointerEvent) {
@@ -130,33 +264,68 @@ function onSheetDragStart(event: PointerEvent) {
   }
   const target = event.target as HTMLElement | null;
   if (target?.closest(".discover-overview") && overviewScroll.value && overviewScroll.value.scrollTop > 0) {
-    sheetSwipeActive = false;
+    sheetPointerDragging.value = false;
     return;
   }
-  sheetSwipeActive = true;
+  sheetPointerDragging.value = true;
   sheetSwipeStartY = event.clientY;
+  sheetSwipeStartOffset = sheetInnerOffset.value;
+  stopSheetMotion();
+}
+
+function onSheetDragMove(event: PointerEvent) {
+  if (!sheetPointerDragging.value) {
+    return;
+  }
+  const delta = event.clientY - sheetSwipeStartY;
+  const offset = Math.max(0, sheetSwipeStartOffset + delta);
+  sheetInnerOffset.value = offset;
+  sheetBackdropOpacity.value = Math.max(0, Math.min(1, 1 - offset / 280));
 }
 
 function onSheetDragEnd(event: PointerEvent) {
-  if (!sheetSwipeActive) {
+  if (!sheetPointerDragging.value) {
     return;
   }
-  sheetSwipeActive = false;
-  if (event.clientY - sheetSwipeStartY > 72) {
+  sheetPointerDragging.value = false;
+  if (event.clientY - sheetSwipeStartY > 72 || sheetInnerOffset.value > 96) {
     closeSheet();
+    return;
+  }
+  runSheetMotion(0, 1);
+}
+
+function recoverParkedIfCurrentUnchanged(keyBefore: string | null) {
+  if (!keyBefore || !swipe.parkedAfterExit.value) {
+    return;
+  }
+  const now = current.value;
+  const keyAfter = now ? discoverEntryKey(now.media_type, now.tmdb_id) : null;
+  if (keyAfter === keyBefore) {
+    swipe.recoverFromParked();
+  }
+}
+
+function recoverParkedIfGestureAborted() {
+  if (swipe.parkedAfterExit.value) {
+    swipe.recoverFromParked();
   }
 }
 
 async function onGesture(gesture: DiscoverGesture) {
+  inactivity.onGesture();
   if (sheetOpen.value || helpOpen.value || filterOpen.value || followBusy.value || quick.value) {
+    recoverParkedIfGestureAborted();
     return;
   }
   const card = current.value;
   if (!card) {
+    recoverParkedIfGestureAborted();
     return;
   }
+  const keyBefore = discoverEntryKey(card.media_type, card.tmdb_id);
   if (gesture === "sheet") {
-    sheetOpen.value = true;
+    revealSheet();
     return;
   }
   if (gesture === "follow") {
@@ -166,6 +335,7 @@ async function onGesture(gesture: DiscoverGesture) {
         evictFollowed(card);
       } catch (err) {
         error.value = userFacingApiError(err, "Suivi impossible.");
+        swipe.recoverFromParked();
       }
       return;
     }
@@ -175,22 +345,65 @@ async function onGesture(gesture: DiscoverGesture) {
   if (gesture === "pass") {
     markDiscoverPass(card);
     deck.value = dropCard(deck.value, card);
+    recoverParkedIfCurrentUnchanged(keyBefore);
     return;
   }
   if (gesture === "later") {
-    const key = `${card.media_type}:${card.tmdb_id}`;
-    laterSession.value.add(key);
+    laterSession.value.add(keyBefore);
     deck.value = moveCardToEnd(deck.value, card);
+    recoverParkedIfCurrentUnchanged(keyBefore);
   }
 }
 
 const swipe = useDiscoverSwipe(onGesture);
+
+const inactivity = useDiscoverInactivityHint({
+  helpOpen,
+  filterOpen,
+  sheetPresent,
+  quickOpen,
+  followBusy,
+  loading,
+  currentCardKey,
+  dragging: swipe.dragging,
+  exiting: swipe.exiting,
+  parkedAfterExit: swipe.parkedAfterExit,
+  motionActive: swipe.motionActive,
+  playIntroDemo: () => swipe.playIntroDemo(),
+});
+
+function inactivityBump() {
+  inactivity.bump();
+}
+
+watch(
+  () => (current.value ? discoverEntryKey(current.value.media_type, current.value.tmdb_id) : null),
+  () => {
+    if (swipe.parkedAfterExit.value) {
+      swipe.clearParkedSilent();
+    }
+  },
+);
 
 watch(cardRoot, (el) => {
   if (el) {
     swipe.bind(el);
   }
 });
+
+function onQuickDismiss() {
+  quick.value = null;
+  quickFollow.value = false;
+  if (swipe.parkedAfterExit.value) {
+    swipe.recoverFromParked();
+  }
+  inactivityBump();
+}
+
+function relancerSuggestions() {
+  laterSession.value = new Set();
+  void loadDeck();
+}
 
 async function loadDeck() {
   loading.value = true;
@@ -256,7 +469,7 @@ async function sheetFollow() {
   if (!card || followBusy.value) {
     return;
   }
-  sheetOpen.value = false;
+  closeSheet();
   if (card.media_type === "film") {
     try {
       await followFilm(card);
@@ -270,7 +483,7 @@ async function sheetFollow() {
 }
 
 function sheetLater() {
-  sheetOpen.value = false;
+  closeSheet();
   const card = current.value;
   if (!card) {
     return;
@@ -279,9 +492,18 @@ function sheetLater() {
   deck.value = moveCardToEnd(deck.value, card);
 }
 
+function openHelp() {
+  helpOpen.value = true;
+}
+
 function closeHelp() {
+  const firstEver = !gesturesHelpSeen();
   helpOpen.value = false;
   markGesturesHelpSeen();
+  inactivityBump();
+  if (firstEver && current.value) {
+    void swipe.playIntroDemo();
+  }
 }
 
 onMounted(() => {
@@ -295,7 +517,10 @@ onMounted(() => {
   <section class="discover-screen">
     <header class="discover-top">
       <button type="button" class="discover-icon" aria-label="Fermer" @click="dismiss">×</button>
-      <button type="button" class="discover-icon" aria-label="Filtres" @click="filterOpen = !filterOpen">☰</button>
+      <div class="discover-top-end">
+        <button type="button" class="discover-icon" aria-label="Aide aux gestes" @click="openHelp">?</button>
+        <button type="button" class="discover-icon" aria-label="Filtres" @click="filterOpen = !filterOpen">☰</button>
+      </div>
     </header>
 
     <div v-if="filterOpen" class="discover-filters">
@@ -313,14 +538,58 @@ onMounted(() => {
         <button type="button" :class="{ active: releaseKind === 'new' }" @click="releaseKind = 'new'">Nouvelles séries</button>
         <button type="button" :class="{ active: releaseKind === 'on_air' }" @click="releaseKind = 'on_air'">En cours</button>
       </div>
-      <button type="button" class="discover-apply" @click="filterOpen = false; void loadDeck()">Appliquer</button>
+      <button type="button" class="discover-apply" @click="filterOpen = false; inactivityBump(); void loadDeck()">Appliquer</button>
     </div>
+
+    <p
+      v-if="touchEdgeHint"
+      class="discover-touch-edge-caption"
+      :class="{ 'discover-touch-edge-caption--ready': touchEdgeHint.atThreshold }"
+      aria-live="polite"
+    >
+      <strong>{{ touchEdgeHint.actionLabel }}</strong>
+      <span>{{ touchEdgeHint.hint }}</span>
+    </p>
+
+    <div
+      v-for="side in touchEdgeSides"
+      :key="side"
+      class="discover-touch-edge"
+      :class="`discover-touch-edge--${side}`"
+      :style="touchEdgeBarStyle(side)"
+      aria-hidden="true"
+    />
 
     <p v-if="error" class="discover-error" role="alert">{{ error }}</p>
     <p v-if="loading" class="discover-hint">Chargement…</p>
-    <p v-else-if="!current" class="discover-hint">Plus de suggestions pour l’instant.</p>
+    <template v-else-if="!current">
+      <p class="discover-hint">Plus de suggestions pour l’instant.</p>
+      <button type="button" class="discover-apply" @click="relancerSuggestions">Relancer</button>
+    </template>
 
-    <article v-if="current" ref="cardRoot" class="discover-card" :style="cardStyle">
+    <article
+      v-if="nextCard && current"
+      :key="discoverEntryKey(nextCard.media_type, nextCard.tmdb_id)"
+      class="discover-card discover-card--under"
+      :style="underCardStyle"
+      aria-hidden="true"
+    >
+      <TmdbPosterImg class="discover-backdrop" :url="nextCard.poster_url" :alt="nextCard.title" :lazy="false" />
+      <footer class="discover-footer">
+        <h1>{{ nextCard.title }}</h1>
+        <p class="discover-meta">{{ discoverInfoLine(nextCard) }}</p>
+      </footer>
+    </article>
+
+    <article
+      v-if="current"
+      :key="discoverEntryKey(current.media_type, current.tmdb_id)"
+      ref="cardRoot"
+      class="discover-card discover-card--top"
+      :class="{ 'discover-card--will-change': swipe.dragging.value || swipe.motionActive.value }"
+      :style="activeCardStyle"
+      @pointerdown.capture="inactivityBump"
+    >
       <TmdbPosterImg class="discover-backdrop" :url="current.poster_url" :alt="current.title" :lazy="false" />
       <div v-if="stampVisible" class="discover-stamp">Suivre</div>
       <footer class="discover-footer">
@@ -330,19 +599,22 @@ onMounted(() => {
     </article>
 
     <div
-      v-if="sheetOpen && current"
+      v-if="sheetPresent && current"
       class="discover-sheet"
       role="dialog"
       aria-modal="true"
+      :style="sheetRootStyle"
       @click.self="closeSheet"
       @pointerdown="onSheetBackdropPointerDown"
+      @pointermove="onSheetDragMove"
       @pointerup="onSheetDragEnd"
       @pointercancel="onSheetDragEnd"
     >
-      <div class="discover-sheet-inner" @click.stop>
+      <div class="discover-sheet-inner" :style="sheetInnerStyle" @click.stop>
         <header
           class="discover-sheet-head"
           @pointerdown="onSheetDragStart"
+          @pointermove="onSheetDragMove"
           @pointerup="onSheetDragEnd"
           @pointercancel="onSheetDragEnd"
         >
@@ -356,6 +628,7 @@ onMounted(() => {
           ref="overviewScroll"
           class="discover-overview"
           @pointerdown="onSheetDragStart"
+          @pointermove="onSheetDragMove"
           @pointerup="onSheetDragEnd"
           @pointercancel="onSheetDragEnd"
         >{{ current.overview }}</p>
@@ -373,16 +646,29 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-if="helpOpen" class="discover-help" role="dialog" aria-modal="true">
+    <div v-if="helpOpen" class="discover-help" role="dialog" aria-modal="true" aria-labelledby="discover-help-title">
       <div class="discover-help-card">
-        <h2>Les gestes</h2>
-        <p>Glissez la carte pour choisir.</p>
-        <ul>
-          <li><strong>→</strong> Suivre</li>
-          <li><strong>←</strong> Passer</li>
-          <li><strong>↑</strong> Voir la fiche</li>
-          <li><strong>↓</strong> Plus tard</li>
+        <h2 id="discover-help-title">Les gestes</h2>
+        <p class="discover-help-lead">Glissez la carte pour choisir.</p>
+        <ul class="discover-help-gestures">
+          <li>
+            <span class="discover-help-arrow discover-help-arrow--follow" aria-hidden="true">→</span>
+            <span><strong>Suivre</strong></span>
+          </li>
+          <li>
+            <span class="discover-help-arrow discover-help-arrow--pass" aria-hidden="true">←</span>
+            <span><strong>Passer</strong></span>
+          </li>
+          <li>
+            <span class="discover-help-arrow discover-help-arrow--sheet" aria-hidden="true">↑</span>
+            <span><strong>Voir la fiche</strong> (synopsis, lien TMDB)</span>
+          </li>
+          <li>
+            <span class="discover-help-arrow discover-help-arrow--later" aria-hidden="true">↓</span>
+            <span><strong>Plus tard</strong> (revient en fin de pile)</span>
+          </li>
         </ul>
+        <p class="discover-help-sheet-hint">Touchez × ou glissez vers le bas pour fermer la fiche.</p>
         <button type="button" class="discover-apply" @click="closeHelp">Compris</button>
       </div>
     </div>
@@ -391,7 +677,7 @@ onMounted(() => {
       :target="quick"
       :follow="quickFollow"
       :stack-on-top="true"
-      @close="quick = null"
+      @close="onQuickDismiss"
       @changed="onQuickChanged"
     />
   </section>
@@ -418,6 +704,11 @@ onMounted(() => {
   padding: 0.75rem 1rem;
 }
 
+.discover-top-end {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .discover-icon {
   width: 2.5rem;
   height: 2.5rem;
@@ -434,6 +725,20 @@ onMounted(() => {
   inset: 0;
   touch-action: none;
   user-select: none;
+  transform-origin: center bottom;
+}
+
+.discover-card--under {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.discover-card--top {
+  z-index: 2;
+}
+
+.discover-card--will-change {
+  will-change: transform, opacity;
 }
 
 .discover-backdrop :deep(img) {
@@ -467,6 +772,74 @@ onMounted(() => {
   opacity: 0.85;
 }
 
+.discover-touch-edge {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.discover-touch-edge--left,
+.discover-touch-edge--right {
+  top: 0;
+  bottom: 0;
+  width: min(42vw, 9rem);
+}
+
+.discover-touch-edge--left {
+  left: 0;
+}
+
+.discover-touch-edge--right {
+  right: 0;
+}
+
+.discover-touch-edge--top,
+.discover-touch-edge--bottom {
+  left: 0;
+  right: 0;
+  height: min(36vh, 8rem);
+}
+
+.discover-touch-edge--top {
+  top: 0;
+}
+
+.discover-touch-edge--bottom {
+  bottom: 0;
+}
+
+.discover-touch-edge-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 6.5rem;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 0.15rem;
+  text-align: center;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.65rem;
+  background: rgb(0 0 0 / 45%);
+  opacity: 0.85;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+
+.discover-touch-edge-caption strong {
+  font-size: 1.05rem;
+}
+
+.discover-touch-edge-caption span {
+  font-size: 0.85rem;
+  opacity: 0.92;
+}
+
+.discover-touch-edge-caption--ready {
+  opacity: 1;
+  background: rgb(0 0 0 / 62%);
+}
+
 .discover-stamp {
   position: absolute;
   top: 35%;
@@ -488,8 +861,11 @@ onMounted(() => {
   z-index: 6;
   display: grid;
   place-items: end center;
-  background: rgb(0 0 0 / 50%);
   padding: 1rem;
+}
+
+.discover-help {
+  background: rgb(0 0 0 / 50%);
 }
 
 .discover-sheet-inner,
@@ -604,6 +980,8 @@ onMounted(() => {
 
 .discover-sheet-inner {
   position: relative;
+  transform-origin: center bottom;
+  will-change: transform;
 }
 
 .discover-sheet-head {
@@ -636,12 +1014,119 @@ onMounted(() => {
   opacity: 0.55;
 }
 
-.discover-help ul {
-  padding-left: 0;
-  list-style: none;
+.discover-help-lead {
+  margin: 0 0 0.75rem;
+  opacity: 0.9;
 }
 
-.discover-help li {
-  margin: 0.35rem 0;
+.discover-help-gestures {
+  padding-left: 0;
+  list-style: none;
+  margin: 0 0 0.75rem;
+}
+
+.discover-help-gestures li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0.5rem 0;
+  line-height: 1.4;
+}
+
+.discover-help-arrow {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.4rem;
+  background: rgb(255 255 255 / 10%);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.discover-help-arrow--follow {
+  animation: discover-hint-follow 1.8s ease-in-out infinite;
+}
+
+.discover-help-arrow--pass {
+  animation: discover-hint-pass 1.8s ease-in-out infinite;
+}
+
+.discover-help-arrow--sheet {
+  animation: discover-hint-sheet 1.8s ease-in-out infinite;
+}
+
+.discover-help-arrow--later {
+  animation: discover-hint-later 1.8s ease-in-out infinite;
+}
+
+@keyframes discover-hint-follow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(7px, 0, 0);
+  }
+}
+
+@keyframes discover-hint-pass {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(-7px, 0, 0);
+  }
+}
+
+@keyframes discover-hint-sheet {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, -7px, 0);
+  }
+}
+
+@keyframes discover-hint-later {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, 7px, 0);
+  }
+}
+
+.discover-help-sheet-hint {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  opacity: 0.82;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .discover-touch-edge,
+  .discover-touch-edge-caption {
+    transition: none !important;
+  }
+
+  .discover-help-arrow {
+    animation: none !important;
+  }
+  .discover-card--will-change {
+    will-change: auto;
+  }
+
+  .discover-sheet-inner {
+    will-change: auto;
+  }
 }
 </style>

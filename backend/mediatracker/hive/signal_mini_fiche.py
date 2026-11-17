@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from mediatracker.db.models import Media, MediaItem
-from mediatracker.hive.catalog import TMDB_POSTER_PREFIX
+from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
 
 MINI_FICHE_TITLE_MAX = 120
 MINI_FICHE_PATH_MAX = 160
@@ -25,8 +25,8 @@ def _bare_poster_path(text: str) -> str | None:
         if not match:
             return None
         path = match.group(1)
-    elif path.startswith(TMDB_POSTER_PREFIX):
-        rest = path[len(TMDB_POSTER_PREFIX) :].lstrip("/")
+    elif path.startswith(f"{TMDB_IMAGE_BASE}/"):
+        rest = path[len(TMDB_IMAGE_BASE) + 1 :].lstrip("/")
         path = f"/{rest}" if rest else ""
     if not path.startswith("/"):
         path = f"/{path}"

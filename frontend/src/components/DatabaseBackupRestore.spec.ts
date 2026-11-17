@@ -13,6 +13,8 @@ describe("DatabaseBackupRestore", () => {
     expect(vue).toContain("/download");
     expect(vue).toContain("Importer une sauvegarde");
     expect(vue).toContain("Télécharger");
+    expect(vue).toContain('data-testid="sqlite-backup-doc"');
+    expect(vue).toContain("https://www.sqlite.org/backup.html");
     expect(vue).toContain("Identité Hive conservée");
     expect(vue).toContain("SECRET_KEY de l'instance");
     expect(css).toContain(".bk-acts");

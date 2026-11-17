@@ -7,6 +7,7 @@ Nothing here solves a captcha, and nothing here logs a fetched URL or a body.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from mediatracker.core.hosters import source_ingestion_hosters
 from mediatracker.core.source_select import identity_match, titles_match
 from mediatracker.providers.base import (
     Health,
@@ -62,16 +64,6 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _MAX_BODY = 2_000_000
-_KEEP_HOSTERS = (
-    "rapidgator",
-    "turbobit",
-    "uploady",
-    "dailyuploads",
-    "nitroflare",
-    "katfile",
-    "tezfiles",
-    "1fichier",
-)
 _CHALLENGE = (
     "cf-browser-verification",
     "just a moment",
@@ -368,7 +360,15 @@ class WawacitySource:
             items.append(SourceItem(season=link.season, episode=link.episode, title=None, ref=ref.ref))
         return items
 
-    def get_links(self, ref: SourceRef, *, profile=None) -> list[LinkCandidate]:
+    def get_links(
+        self,
+        ref: SourceRef,
+        *,
+        profile=None,
+        hoster_preference: Sequence[str] | None = None,
+    ) -> list[LinkCandidate]:
+        keep = source_ingestion_hosters(hoster_preference)
+        keep_set = set(keep)
         heading, links, alternates = self._page(ref)
         if profile is not None and heading.media_type in {None, "film"}:
             sister = _sister_heading_for_profile(heading, alternates, profile)
@@ -376,9 +376,13 @@ class WawacitySource:
                 sister_ref = SourceRef(ref=sister.url, url=sister.url)
                 heading, links, _alts = self._page(sister_ref)
         candidates = [
-            _candidate(link, heading.quality, heading.language) for link in links if link.hoster in _KEEP_HOSTERS
+            _candidate(link, heading.quality, heading.language)
+            for link in links
+            if link.hoster in keep_set
         ]
-        candidates.sort(key=lambda item: (item.episode or 0, _KEEP_HOSTERS.index(item.hoster or ""), item.url))
+        candidates.sort(
+            key=lambda item: (item.episode or 0, keep.index(item.hoster or ""), item.url),
+        )
         return candidates
 
     def _page(self, ref: SourceRef):

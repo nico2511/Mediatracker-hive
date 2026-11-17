@@ -75,6 +75,7 @@ class ManualSourceEntry:
         *,
         base_url: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        request_delay_seconds: float | None = None,
     ) -> object | None:
-        del settings, base_url, transport
+        del settings, base_url, transport, request_delay_seconds
         return None

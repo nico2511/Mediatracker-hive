@@ -40,3 +40,28 @@ export function settingAsLineList(value: unknown): string[] {
     .map((part) => part.trim())
     .filter(Boolean);
 }
+
+/** Réordonne les jetons visibles sans retirer ceux masqués du modelValue. */
+export function mergeCommaOrderPreservingHidden(
+  modelValue: string,
+  visibleIds: Iterable<string>,
+  visibleOrder: string[],
+): string {
+  const full = settingCommaTokens(modelValue);
+  const visible = new Set(visibleIds);
+  const enabled = new Set(full);
+  const visibleReorder = visibleOrder.filter((id) => enabled.has(id));
+  let vi = 0;
+  const merged: string[] = [];
+  for (const id of full) {
+    if (!visible.has(id)) {
+      merged.push(id);
+      continue;
+    }
+    if (vi < visibleReorder.length) {
+      merged.push(visibleReorder[vi++]);
+    }
+  }
+  const missing = visibleReorder.filter((id) => !merged.includes(id));
+  return [...merged, ...missing].join(",");
+}

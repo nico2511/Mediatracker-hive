@@ -5,6 +5,7 @@ import { useRouter } from "vue-router";
 import PosterCard from "../../components/PosterCard.vue";
 import StatusIcon from "../../components/StatusIcon.vue";
 import HiveContextMenuItems from "../../components/HiveContextMenuItems.vue";
+import HiveCatalogueVersionList, { type HiveCatalogueVersionRow } from "../../components/hive/HiveCatalogueVersionList.vue";
 import { useHiveEnabled } from "../../composables/useHive";
 import { api, userFacingApiError } from "../../api";
 import {
@@ -14,11 +15,7 @@ import {
 } from "../../hive/hiveCatalogueCard";
 import { mediaKind } from "../../labels";
 
-interface VersionRow {
-  version_key: string;
-  disponible: boolean;
-  source_count: number;
-}
+type VersionRow = HiveCatalogueVersionRow;
 
 interface WorkRow extends HiveCatalogueCardState {
   work_key: string;
@@ -144,17 +141,8 @@ async function menuFollow(row: WorkRow) {
   }
 }
 
-async function menuRequest(row: WorkRow) {
-  try {
-    const body =
-      row.type === "series" && row.season != null && row.episode != null
-        ? JSON.stringify({ season: row.season, episode: row.episode })
-        : "{}";
-    await api(`/api/v1/hive/catalogue/${row.work_key}/request`, { method: "POST", body });
-    await load();
-  } catch (err) {
-    error.value = userFacingApiError(err, "Transfert Hive indisponible pour le moment.");
-  }
+async function onVersionRequested() {
+  await load();
 }
 </script>
 
@@ -248,14 +236,15 @@ async function menuRequest(row: WorkRow) {
           >
             Ouvrir la fiche
           </button>
-          <button
-            v-else-if="canRequest(row)"
-            type="button"
-            data-testid="hive-card-request"
-            @click="menuRequest(row)"
-          >
-            Télécharger
-          </button>
+          <HiveCatalogueVersionList
+            v-else-if="canRequest(row) && row.versions.length"
+            :work-key="row.work_key"
+            :versions="row.versions"
+            :season="row.season"
+            :episode="row.episode"
+            compact
+            @requested="onVersionRequested"
+          />
           <HiveContextMenuItems
             v-if="row.media_item_id"
             :media-item-id="row.media_item_id"

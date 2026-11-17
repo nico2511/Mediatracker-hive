@@ -19,6 +19,7 @@ from mediatracker.hive.share_policy import item_wants_hive_share
 HIVE_FETCH_GRANT_HEADER = "Hive-Fetch-Grant"
 
 DEFAULT_GRANT_TTL = timedelta(hours=48)
+GRANT_RENEW_LEAD = timedelta(minutes=30)
 MAX_ACTIVE_GRANTS_PER_REQUESTER = 32
 
 

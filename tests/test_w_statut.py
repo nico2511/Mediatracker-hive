@@ -280,7 +280,7 @@ def test_finish_download_unfollows_complete_series(client, app, settings, tmp_pa
         download = Download(media_item_id=second.id, state="running", created_at=NOW)
         db.add(download)
         db.commit()
-        _finish_download(db, download, second, media, dest, dest, NOW, store_release=False)
+        _finish_download(db, download, second, media, dest, dest, NOW, settings, store_release=False)
         db.commit()
         assert media.followed is False
         assert first.watched is True

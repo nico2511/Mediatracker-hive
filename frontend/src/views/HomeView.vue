@@ -11,7 +11,7 @@ import PosterCard from "../components/PosterCard.vue";
 import StatusIcon from "../components/StatusIcon.vue";
 import TmdbPosterImg from "../components/TmdbPosterImg.vue";
 import { api, ApiError, isNetworkError, isTransientHttpStatus, userFacingApiError } from "../api";
-import { mediaKind } from "../labels";
+import { mediaKind, tmdbPage } from "../labels";
 import type { QuickTarget } from "../quick";
 import {
   loadStoredFilters,
@@ -363,7 +363,6 @@ function fromCatalog(card: LatestCard, follow = false) {
 }
 
 function fromUpcoming(card: UpcomingReleaseCard, follow = false) {
-  const kind = card.media_type === "film" ? "movie" : "tv";
   showQuick(
     {
       title: card.title,
@@ -373,7 +372,7 @@ function fromUpcoming(card: UpcomingReleaseCard, follow = false) {
       mediaType: card.media_type === "film" ? "film" : "series",
       followed: false,
       tmdbId: card.tmdb_id,
-      tmdbUrl: card.tmdb_url || `https://www.themoviedb.org/${kind}/${card.tmdb_id}`,
+      tmdbUrl: card.tmdb_url || tmdbPage(card.tmdb_id, card.media_type),
     },
     follow,
   );

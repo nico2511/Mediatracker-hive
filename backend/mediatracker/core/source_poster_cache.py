@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from mediatracker.config import Settings
 from mediatracker.core.outbound_http import borrow_http_client
 from mediatracker.db.models import CatalogEntry
+from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
 from mediatracker.security.ssrf import OutboundUrlRejected, validate_outbound_url_static
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ _FAIL_TTL = timedelta(hours=2)
 _TRANSIENT_FAIL_TTL = timedelta(minutes=5)
 _TRANSIENT_CODES = frozenset({"TRANSPORT", "BAD_RESPONSE"})
 _LOCK_WAIT_SECONDS = 8.0
-_TMDB_IMAGE_HOST = "image.tmdb.org"
+_TMDB_IMAGE_HOST = urlparse(TMDB_IMAGE_BASE).netloc
 
 _STRICT_BLOCKED = (
     ipaddress.ip_network("0.0.0.0/8"),

@@ -335,4 +335,7 @@ export interface SettingRow {
   value: string | number | boolean | null;
   secret: boolean;
   set: boolean;
+  min?: number;
+  max?: number;
+  default?: string | number | boolean | null;
 }

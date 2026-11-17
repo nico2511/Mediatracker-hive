@@ -14,6 +14,7 @@ from mediatracker.maintenance.backup_hive_identity import (
     BackupHiveIdentityIncompleteError,
     embed_hive_identity_in_backup,
 )
+from mediatracker.maintenance.backup_sqlite import SQLITE_BACKUP_BUSY_MS
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,6 @@ def _secure_backup_file_mode(path: Path) -> None:
 
 # Pages per backup() step — avoids loading the whole database into memory.
 _BACKUP_PAGES = 64
-_BUSY_MS = 30_000
 
 
 def copy_sqlite_file(source: Path, dest: Path) -> None:
@@ -112,10 +112,10 @@ def copy_sqlite_file(source: Path, dest: Path) -> None:
 def restore_sqlite_into_live(backup: Path, live: Path) -> None:
     """Overwrite the live database from a backup file via the backup API (WAL-safe)."""
     src = sqlite3.connect(f"file:{backup}?mode=ro", uri=True)
-    src.execute(f"pragma busy_timeout={_BUSY_MS}")
+    src.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         dst = sqlite3.connect(f"file:{live}", uri=True)
-        dst.execute(f"pragma busy_timeout={_BUSY_MS}")
+        dst.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
         try:
             while src.backup(dst, pages=_BACKUP_PAGES):
                 pass
@@ -130,10 +130,10 @@ def restore_sqlite_into_live(backup: Path, live: Path) -> None:
 def _sqlite_backup(source: Path, dest: Path) -> None:
     """Online consistent backup using sqlite3.Connection.backup (not a raw file copy)."""
     src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
-    src.execute(f"pragma busy_timeout={_BUSY_MS}")
+    src.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         dst = sqlite3.connect(dest)
-        dst.execute(f"pragma busy_timeout={_BUSY_MS}")
+        dst.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
         try:
             while src.backup(dst, pages=_BACKUP_PAGES):
                 pass

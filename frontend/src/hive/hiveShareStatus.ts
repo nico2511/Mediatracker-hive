@@ -135,6 +135,6 @@ export function hiveShareFicheStatus(
   };
 }
 
-export const HIVE_SHARE_POLL_INTERVAL_MS = 5000;
+export { HIVE_SHARE_POLL_INTERVAL_MS } from "../constants/uiPollIntervals";
 export const HIVE_SHARE_POLL_MAX_MS = 120_000;
 export const HIVE_SHARE_POLL_MAX_ATTEMPTS = 24;

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
+from mediatracker.core.hosters import PAGE_TEXT_TO_HOSTER
 from mediatracker.core.release_title import split_release_title
 from mediatracker.library.parse import episode_bits_from_text
 
@@ -50,22 +51,6 @@ _LANGUAGE = (
     ("french", "VF"),
     ("vf", "VF"),
     ("vo", "VO"),
-)
-# Longer aliases first. Uptobox is recognised so the caller can drop it.
-_HOSTERS = (
-    ("dailyuploads", "dailyuploads"),
-    ("daily-uploads", "dailyuploads"),
-    ("daily uploads", "dailyuploads"),
-    ("nitroflare", "nitroflare"),
-    ("rapidgator", "rapidgator"),
-    ("turbobit", "turbobit"),
-    ("trbt.cc", "turbobit"),
-    ("rg.to", "rapidgator"),
-    ("1fichier", "1fichier"),
-    ("uptobox", "uptobox"),
-    ("uploady", "uploady"),
-    ("tezfiles", "tezfiles"),
-    ("katfile", "katfile"),
 )
 _PROTECT = ("dl-protect", "dlprotect", "protect-link")
 
@@ -750,7 +735,7 @@ def _hoster(cells: list[str], row_text: str) -> str | None:
 def _one_hoster(text: str) -> str | None:
     folded = text.lower()
     hits: list[str] = []
-    for alias, name in _HOSTERS:
+    for alias, name in PAGE_TEXT_TO_HOSTER:
         if alias in folded and name not in hits:
             hits.append(name)
     if len(hits) == 1:

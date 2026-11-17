@@ -6,7 +6,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DETAIL = ROOT / "frontend" / "src" / "views" / "MediaDetailView.vue"
 LINE_MENU = ROOT / "frontend" / "src" / "components" / "LineMoreActions.vue"
 MAINTENANCE = ROOT / "frontend" / "src" / "components" / "FicheMaintenance.vue"
-CATALOG = ROOT / "frontend" / "src" / "views" / "CatalogView.vue"
 FILM_FILE = ROOT / "frontend" / "src" / "components" / "FilmFileBlock.vue"
 
 
@@ -26,14 +25,6 @@ def test_settings_rows_show_summary_values():
     assert "fiche-setting-summary" in source
     assert "maintenanceSettingSummary" in maintenance
     assert 'class="fiche-setting-summary"' in maintenance
-
-
-def test_catalog_releases_share_catalog_card_chrome():
-    source = CATALOG.read_text(encoding="utf-8")
-    assert "catalog-releases stack" in source
-    assert "catalog-grid" in source
-    assert "card-actions" in source
-    assert ':fallback="mediaKind' in source
 
 
 def test_episode_and_season_actions_use_line_more_menu():

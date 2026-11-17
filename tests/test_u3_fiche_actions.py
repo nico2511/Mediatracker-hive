@@ -21,6 +21,8 @@ def test_delete_fiche_dialog_bulk_labels():
     source = DIALOG.read_text(encoding="utf-8")
     assert "Supprimer les fiches" in source
     assert "Les fiches, leurs épisodes" in source
+    assert "Les fichiers sur le disque ne sont pas touchés." in source
+    assert "et {{ previewTitles.rest }} autre" in source
 
 
 def test_fiche_details_offers_journal_link():

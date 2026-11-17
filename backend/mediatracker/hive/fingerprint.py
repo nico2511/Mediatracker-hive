@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 1024 * 1024
 MAX_CHUNKS_PER_TICK = 32
-HASH_CLAIM_STALE = timedelta(minutes=20)
+HIVE_CLAIM_STALE = timedelta(minutes=20)
+HASH_CLAIM_STALE = HIVE_CLAIM_STALE
 
 
 def _apply_pre_write_barrier() -> None:

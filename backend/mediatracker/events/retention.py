@@ -9,10 +9,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from mediatracker.db.models import Event, Setting
+from mediatracker.retention import EVENT_JOURNAL_DAYS
 
 logger = logging.getLogger(__name__)
 
-RETENTION_DAYS = 30
+RETENTION_DAYS = EVENT_JOURNAL_DAYS
 _BATCH_SIZE = 500
 _STAMP = "event_retention_at"
 

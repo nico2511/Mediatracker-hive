@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { settingAsCommaList, settingAsLineList, settingCommaTokens } from "./settingsCoerce";
+import { mergeCommaOrderPreservingHidden, settingCommaTokens } from "./settingsCoerce";
 
-describe("settingsCoerce", () => {
-  it("convertit un tableau Comet en lignes", () => {
-    expect(settingAsLineList(["https://a.example", 42])).toEqual(["https://a.example", "42"]);
+describe("mergeCommaOrderPreservingHidden", () => {
+  it("ignore un id absent du modelValue (comportement SourceRank)", () => {
+    const merged = mergeCommaOrderPreservingHidden("comet", ["comet", "hive"], ["comet", "hive"]);
+    expect(merged).toBe("comet");
   });
 
-  it("convertit un tableau d’ordre de sources", () => {
-    expect(settingCommaTokens(["Wawacity", "comet"])).toEqual(["wawacity", "comet"]);
-    expect(settingAsCommaList(["hive", "torrentio"])).toBe("hive,torrentio");
+  it("conserve les jetons hors visibleIds", () => {
+    const merged = mergeCommaOrderPreservingHidden(
+      "wawacity,hive,comet",
+      ["wawacity", "comet"],
+      ["comet", "wawacity"],
+    );
+    expect(merged).toBe("comet,hive,wawacity");
+    expect(settingCommaTokens(merged)).toEqual(["comet", "hive", "wawacity"]);
   });
 });

@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from mediatracker.config import Settings
+from mediatracker.config import Settings, get_settings
 from mediatracker.core.public_url import effective_public_base_url
 from mediatracker.db.models import Event, Media, Setting, Webhook, WebhookDelivery
 from mediatracker.events.catalog import GROUPABLE_EVENTS
@@ -42,13 +42,19 @@ def post_request(url: str, body: bytes, headers: dict[str, str]) -> int:
     return response.status_code
 
 
-def schedule_deliveries(db: Session, event: Event, now: datetime) -> None:
+def schedule_deliveries(
+    db: Session,
+    event: Event,
+    now: datetime,
+    settings: Settings | None = None,
+) -> None:
     if event.media_id is not None and event.type != "disk.low":
         media = db.get(Media, event.media_id)
         if media is not None and media.on_hold:
             return
+    cfg = settings or get_settings()
     hooks = list(db.scalars(select(Webhook).where(Webhook.enabled.is_(True))).all())
-    window = _int_setting(db, "notify_group_seconds", 120)
+    window = _int_setting(db, "notify_group_seconds", cfg.notify_group_seconds)
     quiet_start = _text_setting(db, "notify_quiet_start")
     quiet_end = _text_setting(db, "notify_quiet_end")
     zone = _text_setting(db, "notify_timezone") or "Europe/Paris"
@@ -77,6 +83,7 @@ def deliver_due(db: Session, settings: Settings, now: datetime | None = None, *,
     sent = 0
     seen: set[int] = set()
     notified: set[tuple[str, tuple]] = set()
+    notify_window = _int_setting(db, "notify_group_seconds", settings.notify_group_seconds)
     for row in pending:
         if row.id in seen or row.status != "pending":
             continue
@@ -90,8 +97,8 @@ def deliver_due(db: Session, settings: Settings, now: datetime | None = None, *,
             row.last_response = "cible absente"
             continue
         batch = [row]
-        if event.type in GROUPABLE_EVENTS and _int_setting(db, "notify_group_seconds", 120) > 0:
-            batch = _group(db, row, event, moment)
+        if event.type in GROUPABLE_EVENTS and notify_window > 0:
+            batch = _group(db, row, event, moment, notify_window)
         fresh: list[WebhookDelivery] = []
         for item in batch:
             seen.add(item.id)
@@ -323,8 +330,13 @@ def _item_view(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _group(db: Session, anchor: WebhookDelivery, event: Event, now: datetime) -> list[WebhookDelivery]:
-    window = _int_setting(db, "notify_group_seconds", 120)
+def _group(
+    db: Session,
+    anchor: WebhookDelivery,
+    event: Event,
+    now: datetime,
+    window: int,
+) -> list[WebhookDelivery]:
     start = _as_utc(event.ts) or now
     limit = start + timedelta(seconds=window)
     rows = list(

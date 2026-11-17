@@ -15,6 +15,7 @@ from mediatracker.core.storage import ensure_runtime_dirs, log_filesystem_layout
 from mediatracker.db.migrate import run_migrations
 from mediatracker.db.models import Provider, Setting, User
 from mediatracker.db.session import create_session_factory, session_scope
+from mediatracker.providers.downloaders.aria2 import ARIA2_DEFAULT_RPC_URL
 from mediatracker.security.crypto import decrypt_secret, encrypt_secret
 from mediatracker.security.logging import configure_logging
 from mediatracker.security.passwords import hash_password
@@ -98,7 +99,7 @@ def _ensure_aria2(db: Session, settings: Settings) -> None:
             name="aria2",
             enabled=True,
             priority=0,
-            config={"rpc_url": "http://127.0.0.1:6800/jsonrpc", "rpc_secret": stored},
+            config={"rpc_url": ARIA2_DEFAULT_RPC_URL, "rpc_secret": stored},
             builtin=True,
             created_at=datetime.now(timezone.utc),
         )

@@ -32,10 +32,14 @@ Après chaque fichier déposé, MediaTracker demande aussi un **rafraîchissemen
 
 ## Importer l’historique « vu » depuis Jellyfin
 
-MediaTracker peut reprendre ce que vous aviez déjà marqué comme **vu** dans Jellyfin, sans rester connecté au serveur Jellyfin pendant l’import. Deux entrées dans **Bibliothèque → Importer l’historique** :
+MediaTracker peut reprendre ce que vous aviez déjà marqué comme **vu** dans Jellyfin, sans rester connecté au serveur Jellyfin pendant l’import.
 
-- onglet **Bases Jellyfin** (recommandé) ;
-- onglet **Fichier CSV** (export préalable ou archivage).
+**Entrée dans l’application** : **Réglages → Services et jetons**, carte Jellyfin — bouton **Importer l’historique** (après URL et clé API). Voir aussi [Réglages — Jellyfin](reglages/jellyfin.md).
+
+Deux modes sur l’écran d’import :
+
+- **Bases Jellyfin** (recommandé) ;
+- **Fichier CSV** (export préalable ou archivage).
 
 ### Avant de copier des fichiers Jellyfin
 
@@ -50,7 +54,7 @@ Sur le serveur Jellyfin (ou une sauvegarde arrêtée), les données utiles se tr
 
 ### Parcours guidé (onglet Bases Jellyfin)
 
-1. **Bibliothèque → Importer l’historique** → onglet *Bases Jellyfin*.
+1. **Importer l’historique** (depuis la carte Jellyfin des réglages) → mode *Bases Jellyfin*.
 2. Envoyez une copie de **jellyfin.db** **ou** une archive **.zip** de sauvegarde Jellyfin 10.11.
 3. Choisissez le **compte Jellyfin** à importer.
 4. **Prévisualisation** : compteurs par source (bibliothèque, journal d’activité, éléments sans titre) et compteurs d’identification dans MediaTracker. Vous pouvez **télécharger le CSV** généré pour vos archives.
@@ -78,7 +82,7 @@ Colonnes du CSV (UTF-8) : `type`, `title`, `year`, `series_title`, `season`, `ep
 
 ### Import CSV (onglet secondaire)
 
-1. **Bibliothèque → Importer l’historique** → onglet *Fichier CSV*.
+1. **Importer l’historique** → mode *Fichier CSV*.
 2. **Prévisualisation** puis **Confirmer** : même logique idempotente (réimporter le même fichier ne crée pas de doublons).
 3. **Réactiver le suivi** : liste à cocher du **dernier** import uniquement.
 

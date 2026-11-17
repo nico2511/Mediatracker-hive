@@ -5,6 +5,7 @@ from typing import Any
 from mediatracker.db.models import Webhook
 from mediatracker.events.ntfy import format_ntfy
 from mediatracker.events.scrub import scrub_payload
+from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
 from mediatracker.security.crypto import decrypt_secret
 
 
@@ -29,6 +30,6 @@ class NtfyChannel:
         if isinstance(page, str) and page:
             headers["Click"] = page
         poster = safe.get("poster_url")
-        if isinstance(poster, str) and poster.startswith("https://image.tmdb.org/"):
+        if isinstance(poster, str) and poster.startswith(f"{TMDB_IMAGE_BASE}/"):
             headers["Attach"] = poster
         return message.message.encode("utf-8"), {**headers, "Content-Type": "text/plain; charset=utf-8"}

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
 from mediatracker.core.aria2_unreachable import note_reachable, note_unreachable
-from mediatracker.core.disk import enforce_disk_guard
+from mediatracker.core.disk import enforce_disk_guard, launch_free_required
 from mediatracker.core.naming import atomic_move, filing_folder, library_destination
 from mediatracker.core.pipeline.clients import _debrid, _downloader
 from mediatracker.core.pipeline.constants import (
@@ -20,7 +20,6 @@ from mediatracker.core.pipeline.constants import (
     ARIA_CDN_BURY,
     ARIA_CDN_REUNLOCK,
     BACKOFFS,
-    MIN_FREE,
     REDISCOVER,
     REDISCOVER_RESERVED,
     VIDEO_EXT,
@@ -429,7 +428,7 @@ def _keep_best(
     if not kept.is_file():
         _fail(db, row, "FILE_MISSING", "Fichier téléchargé introuvable.", now)
         return
-    _finish_download(db, row, item, media, kept, source, now, store_release=replaced)
+    _finish_download(db, row, item, media, kept, source, now, settings, store_release=replaced)
     _record_hive_received_fingerprint(db, settings, row, item, kept, now)
 
 
@@ -499,6 +498,7 @@ def _finish_download(
     dest: Path,
     source: Path,
     now: datetime,
+    settings: Settings,
     *,
     store_release: bool,
 ) -> None:
@@ -525,7 +525,7 @@ def _finish_download(
     row.error = None
     row.filename = dest.name
     row.finished_at = now
-    if _text_setting(db, "downloads_completed_action", "archive") == "remove":
+    if _text_setting(db, "downloads_completed_action", settings.downloads_completed_action) == "remove":
         row.dismissed = True
     row.progress = 100
     record_event(db, "download.completed", media_id=media.id, item_id=item.id, payload={"download_id": row.id})
@@ -742,7 +742,7 @@ def _import_one(db: Session, row: Download, now: datetime, settings: Settings) -
         else:
             _schedule_retry(db, row, "FILE_MISSING", "Déplacement impossible.", now)
         return
-    _finish_download(db, row, item, media, dest, source, now, store_release=True)
+    _finish_download(db, row, item, media, dest, source, now, settings, store_release=True)
     _record_hive_received_fingerprint(db, settings, row, item, dest, now)
 
 
@@ -934,7 +934,7 @@ def _begin(
     incomplete = incomplete_dir(storage_layout(db, settings))
     incomplete.mkdir(parents=True, exist_ok=True)
     free = disk_free(incomplete) if disk_free else shutil.disk_usage(incomplete).free
-    needed = (size or 0) + 50 * 1024 * 1024 if size else MIN_FREE
+    needed = launch_free_required(db, settings, size)
     if free < needed:
         row.state = "pending"
         row.error_code = "DISK_FULL"

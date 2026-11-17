@@ -77,6 +77,7 @@ const router = createRouter({
             { path: "hive", name: "settings-hive", component: SettingsHiveSection },
             { path: "sources", name: "settings-sources", component: SettingsSourcesSection },
             { path: "comet", redirect: "/reglages/sources" },
+            { path: "nettoyage", redirect: "/reglages/corbeille" },
             { path: ":section", name: "settings-section", component: SettingsSectionView },
           ],
         },

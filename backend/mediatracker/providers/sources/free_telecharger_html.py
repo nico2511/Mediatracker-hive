@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
+from mediatracker.core.hosters import PAGE_TEXT_TO_HOSTER
+
 _VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "wbr"})
 _IGNORED_QUALITIES = frozenset({"cam", "ts", "r5", "dvdscr", "hdcam", "hdts", "telesync", "telecine"})
 _YEAR = re.compile(r"Année\s*:\s*(\d{4})", re.I)
@@ -37,21 +39,6 @@ _LANGUAGE_FIELD_TOKENS = {
     "multi": ("MULTI", "MULTI"),
     "multilangues": ("MULTI", "MULTI"),
 }
-_HOSTERS = (
-    ("dailyuploads", "dailyuploads"),
-    ("nitroflare", "nitroflare"),
-    ("rapidgator", "rapidgator"),
-    ("turbobit", "turbobit"),
-    ("trbt.cc", "turbobit"),
-    ("rg.to", "rapidgator"),
-    ("1fichier", "1fichier"),
-    ("uptobox", "uptobox"),
-    ("uploady", "uploady"),
-    ("tezfiles", "tezfiles"),
-    ("katfile", "katfile"),
-)
-
-
 @dataclass(frozen=True)
 class Heading:
     title: str
@@ -325,7 +312,7 @@ def _canonical_language(text: str) -> str:
 
 def _normalize_hoster(text: str) -> str:
     lowered = (text or "").lower()
-    for needle, name in _HOSTERS:
+    for needle, name in PAGE_TEXT_TO_HOSTER:
         if needle in lowered:
             return name
     return lowered.split()[0] if lowered.split() else "unknown"

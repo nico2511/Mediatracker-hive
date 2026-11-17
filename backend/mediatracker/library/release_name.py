@@ -14,6 +14,25 @@ from sqlalchemy.orm import Session
 from mediatracker.library.parse import _language, _quality
 
 FILE_SOURCES = frozenset({"wawacity", "comet", "torrentio", "library"})
+HIVE_GOSSIP_BASENAME_MAX = 500
+
+
+def hive_gossip_basename(
+    *,
+    original_name: str | None = None,
+    file_path: str | None = None,
+) -> str | None:
+    """Basename only, safe for Hive gossip (never a directory path)."""
+    for raw in (original_name, Path(file_path or "").name if file_path else None):
+        if not raw:
+            continue
+        cleaned = Path(str(raw)).name.strip()
+        if not cleaned or cleaned in {".", ".."}:
+            continue
+        if "/" in cleaned or "\\" in cleaned:
+            continue
+        return cleaned[:HIVE_GOSSIP_BASENAME_MAX]
+    return None
 
 
 def release_tokens(filename: str) -> tuple[str | None, str | None]:

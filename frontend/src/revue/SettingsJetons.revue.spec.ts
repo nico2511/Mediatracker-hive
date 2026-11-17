@@ -73,11 +73,13 @@ beforeEach(() => {
 });
 
 describe("Réglages jetons — secrets distants et Accès API", () => {
-  it("deux blocs distincts avec avertissement Accès API / Watchtower", async () => {
+  it("trois cartes services avec avertissement Accès API / Watchtower", async () => {
     const w = await mountSection("jetons");
-    expect(w.find("[data-testid=outbound-secrets-block]").exists()).toBe(true);
+    expect(w.find("[data-testid=service-card-github]").exists()).toBe(true);
+    expect(w.find("[data-testid=service-card-watchtower]").exists()).toBe(true);
     expect(w.find("[data-testid=api-access-block]").exists()).toBe(true);
-    expect(w.find("[data-testid=outbound-secrets-block]").text()).toContain("Secrets pour services distants");
+    expect(w.text()).toMatch(/GitHub/);
+    expect(w.text()).toMatch(/Watchtower/);
     expect(w.find("[data-testid=api-access-block]").text()).toMatch(/Ne sert pas pour Watchtower/i);
     w.unmount();
   });
@@ -122,7 +124,8 @@ describe("Réglages jetons — secrets distants et Accès API", () => {
     await w.find("[data-testid=outbound-secrets-form]").trigger("submit.prevent");
     await flushPromises();
     expect(patchSettings).toHaveBeenCalled();
-    expect(w.find(".settings-saved").text()).toContain("Enregistré");
+    expect(w.find("[data-testid=service-card-watchtower] .settings-saved").text()).toContain("Enregistré");
+    expect(w.find("[data-testid=service-card-github] .settings-saved").exists()).toBe(false);
     expect(w.find("[data-testid=watchtower-secret-status]").text()).toBe("enregistré");
     expect(w.find("[data-testid=watchtower-url-status]").text()).toContain("http://watchtower:8080");
     expect(apiMock.mock.calls.some((c) => c[0] === "/api/v1/ha/update")).toBe(true);
@@ -147,8 +150,9 @@ describe("Réglages jetons — secrets distants et Accès API", () => {
     await w.find("[data-testid=watchtower-token-input]").setValue("x");
     await w.find("[data-testid=outbound-secrets-form]").trigger("submit.prevent");
     await flushPromises();
-    expect(w.find(".error").exists()).toBe(true);
-    expect(w.find(".settings-saved").exists()).toBe(false);
+    expect(w.find("[data-testid=service-card-watchtower] .error").exists()).toBe(true);
+    expect(w.find("[data-testid=service-card-github] .error").exists()).toBe(false);
+    expect(w.find("[data-testid=service-card-watchtower] .settings-saved").exists()).toBe(false);
     w.unmount();
   });
 });

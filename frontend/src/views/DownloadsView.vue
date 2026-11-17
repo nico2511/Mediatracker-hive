@@ -6,6 +6,7 @@ import StatusIcon from "../components/StatusIcon.vue";
 import {api, userFacingApiError} from "../api";
 import { useProgressStream, type ProgressPayload } from "../composables/useProgressStream";
 import { formatBytes } from "../diskFormat";
+import { DOWNLOAD_ACTIVE_STATES, mergeDownloadJobs, shouldResyncDownloadsFromSnapshot } from "../downloadsProgressMerge";
 import { downloadQueueHint } from "../downloadsQueueHint";
 
 interface Job {
@@ -40,7 +41,7 @@ interface Page {
   queue_message: string | null;
 }
 
-const ACTIVE = new Set(["pending", "resolving", "queued", "downloading", "post_processing"]);
+const ACTIVE = DOWNLOAD_ACTIVE_STATES;
 const RUNNING = new Set(["resolving", "downloading", "post_processing"]);
 const QUEUED = new Set(["pending", "queued"]);
 
@@ -62,11 +63,43 @@ const totalSpeed = computed(() =>
   runningJobs.value.reduce((sum, job) => sum + (job.speed && job.speed > 0 ? job.speed : 0), 0),
 );
 
-function apply(page: Page) {
-  jobs.value = page.items ?? page.downloads ?? [];
+function applyQueueMeta(page: Pick<Page, "queue_paused" | "queue_held" | "queue_message">) {
   paused.value = page.queue_paused;
   held.value = Boolean(page.queue_held);
   pauseMessage.value = page.queue_message;
+}
+
+function apply(page: Page) {
+  jobs.value = page.items ?? page.downloads ?? [];
+  applyQueueMeta(page);
+}
+
+const PROGRESS_RESYNC_MIN_MS = 10_000;
+let progressResync: Promise<void> | null = null;
+let lastProgressResyncAt = 0;
+
+async function resyncDownloadsIfNeeded(incoming: Job[]) {
+  if (!shouldResyncDownloadsFromSnapshot(jobs.value, incoming)) {
+    return;
+  }
+  const now = Date.now();
+  if (now - lastProgressResyncAt < PROGRESS_RESYNC_MIN_MS) {
+    return;
+  }
+  if (progressResync) {
+    return;
+  }
+  lastProgressResyncAt = now;
+  progressResync = (async () => {
+    try {
+      apply(await api<Page>("/api/v1/downloads"));
+    } catch {
+      /* garde la liste fusionnée */
+    } finally {
+      progressResync = null;
+    }
+  })();
+  void progressResync;
 }
 
 function origin(job: Job): string {
@@ -249,7 +282,10 @@ function onProgress(page: ProgressPayload) {
   if (document.visibilityState !== "visible") {
     return;
   }
-  apply(page);
+  applyQueueMeta(page);
+  const incoming = page.items ?? page.downloads ?? [];
+  jobs.value = mergeDownloadJobs(jobs.value, incoming);
+  void resyncDownloadsIfNeeded(incoming);
   error.value = "";
 }
 

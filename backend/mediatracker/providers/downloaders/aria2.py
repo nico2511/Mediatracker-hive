@@ -16,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from mediatracker.providers.base import DownloadStatus, Health
 
 _LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
+ARIA2_RPC_PORT = 6800
+ARIA2_DEFAULT_RPC_URL = f"http://127.0.0.1:{ARIA2_RPC_PORT}/jsonrpc"
 _URL = re.compile(r"https?://\S+")
 _QUEUE_DETAIL_KEYS = ["gid", "status", "files"]
 _TELL_PAGE_SIZE = 1000
@@ -44,7 +46,7 @@ def scrub_url(text: str) -> str:
 class Aria2Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    rpc_url: str = "http://127.0.0.1:6800/jsonrpc"
+    rpc_url: str = ARIA2_DEFAULT_RPC_URL
     rpc_secret: str = Field(default="", json_schema_extra={"secret": True})
 
     @field_validator("rpc_url")

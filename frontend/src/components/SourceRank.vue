@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 
 import { api } from "../api";
 import { sourceDisplayLabel } from "../sourceLabels";
-import { settingCommaTokens } from "../settingsCoerce";
+import { mergeCommaOrderPreservingHidden, settingCommaTokens } from "../settingsCoerce";
 
 const props = defineProps<{
   modelValue: string;
@@ -90,31 +90,11 @@ function hiddenEnabledTokens(): string[] {
   return settingCommaTokens(props.modelValue).filter((id) => !visible.has(id));
 }
 
-function mergeOrderPreservingHidden(visibleOrder: string[]): string {
-  const full = settingCommaTokens(props.modelValue);
-  const visible = allowedIds.value;
-  const enabled = new Set(full);
-  const visibleReorder = visibleOrder.filter((id) => enabled.has(id));
-  let vi = 0;
-  const merged: string[] = [];
-  for (const id of full) {
-    if (!visible.has(id)) {
-      merged.push(id);
-      continue;
-    }
-    if (vi < visibleReorder.length) {
-      merged.push(visibleReorder[vi++]);
-    }
-  }
-  const missing = visibleReorder.filter((id) => !merged.includes(id));
-  return [...merged, ...missing].join(",");
-}
-
 function commit(next: Row[]) {
   const ordered = next.map((row) => row.id);
   const hidden = hiddenEnabledTokens();
   if (props.orderOnly) {
-    emit("update:modelValue", mergeOrderPreservingHidden(ordered));
+    emit("update:modelValue", mergeCommaOrderPreservingHidden(props.modelValue, allowedIds.value, ordered));
     return;
   }
   const visibleEnabled = next

@@ -10,6 +10,9 @@ const props = defineProps<{
 const emit = defineEmits<{ "update:modelValue": [string[]] }>();
 
 const catalog = ref<string[]>([]);
+const blockedHosters = ref<string[]>([]);
+const pickerReady = ref(false);
+const pickerFailed = ref(false);
 const draft = ref("");
 
 const rows = computed(() => props.modelValue);
@@ -45,9 +48,14 @@ function move(index: number, delta: number) {
   commit(next);
 }
 
+const blockedSet = computed(() => new Set(blockedHosters.value.map((item) => item.toLowerCase())));
+
 function addName(name: string) {
+  if (!pickerReady.value) {
+    return;
+  }
   const token = name.trim().toLowerCase();
-  if (!token || token === "uptobox") {
+  if (!token || blockedSet.value.has(token)) {
     return;
   }
   if (rows.value.some((item) => item.toLowerCase() === token)) {
@@ -61,10 +69,17 @@ function addName(name: string) {
 
 onMounted(async () => {
   try {
-    const body = await api<{ hosters: string[] }>("/api/v1/settings/sources/hosters");
+    const body = await api<{ hosters: string[]; blocked_hosters?: string[] }>(
+      "/api/v1/settings/sources/hosters",
+    );
     catalog.value = body.hosters ?? [];
+    blockedHosters.value = body.blocked_hosters ?? [];
+    pickerReady.value = true;
   } catch {
     catalog.value = [];
+    blockedHosters.value = [];
+    pickerReady.value = false;
+    pickerFailed.value = true;
   }
 });
 </script>
@@ -91,9 +106,11 @@ onMounted(async () => {
       </li>
     </ol>
     <p v-else class="hint">Aucun hébergeur sélectionné.</p>
-    <label v-if="addable.length" class="comet-instance-add">
+    <p v-if="pickerFailed" class="hint">Liste des hébergeurs indisponible.</p>
+    <p v-else-if="!pickerReady" class="hint">Chargement des hébergeurs disponibles…</p>
+    <label v-else-if="addable.length" class="comet-instance-add">
       <span>Ajouter un hébergeur</span>
-      <select v-model="draft" @change="addName(draft)">
+      <select v-model="draft" :disabled="!pickerReady" @change="addName(draft)">
         <option value="">Choisir…</option>
         <option v-for="name in addable" :key="name" :value="name">{{ name }}</option>
       </select>

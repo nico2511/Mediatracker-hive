@@ -29,12 +29,12 @@ ARIA_CDN_BURY = 3
 MAX_ATTEMPTS = 3
 # An active job that never leaves 0 bytes is handed to the next hoster.
 ZERO_PROGRESS_LIMIT = timedelta(minutes=30)
+_STALLED_MINUTES = int(ZERO_PROGRESS_LIMIT.total_seconds() // 60)
 ACTIVE = ("resolving", "queued", "downloading", "post_processing")
 TERMINAL = ("done", "failed", "cancelled")
 # A finished episode makes these leftover rows misleading. Active transfers stay put.
 _STALE_WHEN_OBTAINED = frozenset({"failed", "cancelled", "pending", "resolving"})
 VIDEO_EXT = frozenset({".mkv", ".mp4", ".avi", ".m4v", ".ts", ".webm", ".mov"})
-MIN_FREE = 512 * 1024 * 1024
 REDISCOVER = "REDISCOVER"
 # REDISCOVER row whose remote-search slot was taken in redownload_item (do not skip begin_remote_search).
 REDISCOVER_RESERVED = "REDISCOVER_RESERVED"
@@ -68,7 +68,7 @@ _FRENCH = {
     "LINK_NOT_VIDEO": "Le lien débridé n'est pas une vidéo (page d'erreur ou fichier trop petit).",
     "NO_LINK": "Aucun hébergeur utilisable.",
     "LINK_HOST_UNAVAILABLE": "Hébergeur indisponible.",
-    "STALLED": "Aucun progrès depuis 30 minutes.",
+    "STALLED": f"Aucun progrès depuis {_STALLED_MINUTES} minutes.",
     "DISCONTINUED": "Cet aimant a été retiré par AllDebrid (DISCONTINUED).",
     "SIZE_SANITY": "Tous les liens ont une taille incompatible avec la durée attendue.",
     "ARIA2_CDN": "Le lien débridé a échoué (erreur aria2 502). Un autre hébergeur sera essayé.",

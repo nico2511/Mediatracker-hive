@@ -22,6 +22,7 @@ from mediatracker.hive.identity import (
     load_private_key,
     write_private_key,
 )
+from mediatracker.maintenance.backup_sqlite import SQLITE_BACKUP_BUSY_MS
 
 HIVE_SETTINGS_PRESERVE_ON_IMPORT = frozenset(
     {
@@ -36,7 +37,6 @@ HIVE_SETTINGS_PRESERVE_ON_IMPORT = frozenset(
 logger = logging.getLogger(__name__)
 
 _TABLE = "_mediatracker_backup_hive_identity"
-_BUSY_MS = 30_000
 
 
 class BackupHiveIdentityError(Exception):
@@ -74,7 +74,7 @@ def embed_hive_identity_in_backup(backup_path: Path, settings: Settings) -> bool
     digest = hashlib.sha256(pem).hexdigest()
     hive_id = hive_public_id_from_public_key(key.public_key())
     conn = sqlite3.connect(backup_path)
-    conn.execute(f"pragma busy_timeout={_BUSY_MS}")
+    conn.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         if not _signed_identity_in_connection(conn):
             return False
@@ -104,7 +104,7 @@ def embed_hive_identity_in_backup(backup_path: Path, settings: Settings) -> bool
 def read_hive_identity_bundle(backup_path: Path) -> bytes | None:
     """Lit la clé embarquée ou None (sauvegarde legacy sans bundle)."""
     conn = sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True)
-    conn.execute(f"pragma busy_timeout={_BUSY_MS}")
+    conn.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         if not _table_exists(conn, _TABLE):
             return None
@@ -162,7 +162,7 @@ def reapply_receiver_hive_after_import_on_disk(
         raise BackupHiveIdentityError("Base active introuvable.")
     moment = datetime.now(timezone.utc).isoformat()
     conn = sqlite3.connect(live_path)
-    conn.execute(f"pragma busy_timeout={_BUSY_MS}")
+    conn.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         conn.execute("BEGIN IMMEDIATE")
         for key in HIVE_SETTINGS_PRESERVE_ON_IMPORT:
@@ -192,7 +192,7 @@ def copy_hive_tables_from_safety(live_conn: sqlite3.Connection, safety_path: Pat
         raise BackupHiveIdentityError("Copie de sécurité introuvable pour les tables Hive.")
     live_conn.execute("PRAGMA foreign_keys=OFF")
     src = sqlite3.connect(f"file:{safety_path.resolve()}?mode=ro", uri=True)
-    src.execute(f"pragma busy_timeout={_BUSY_MS}")
+    src.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         live_names = {
             row[0]
@@ -235,7 +235,7 @@ def strip_hive_identity_bundle_from_live(live_db: Path) -> None:
     if not live_db.is_file():
         return
     conn = sqlite3.connect(live_db)
-    conn.execute(f"pragma busy_timeout={_BUSY_MS}")
+    conn.execute(f"pragma busy_timeout={SQLITE_BACKUP_BUSY_MS}")
     try:
         if _table_exists(conn, _TABLE):
             conn.execute(f"DROP TABLE {_TABLE}")

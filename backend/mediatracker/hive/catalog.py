@@ -39,13 +39,14 @@ from mediatracker.hive.share_policy import (
     item_wants_hive_share,
     revoke_share_intent,
 )
+from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
+from mediatracker.library.release_name import hive_gossip_basename
 
 TOMBSTONE_RETENTION = timedelta(days=30)
-TMDB_POSTER_PREFIX = "https://image.tmdb.org/"
 
 
 def _gossip_poster_url(url: str | None) -> str | None:
-    if not url or not str(url).startswith(TMDB_POSTER_PREFIX):
+    if not url or not str(url).startswith(f"{TMDB_IMAGE_BASE}/"):
         return None
     return str(url)
 
@@ -200,6 +201,9 @@ def _fiche_document(media: Media, item: MediaItem, *, taille: int | None = None)
         doc["overview"] = overview[:4000]
     if isinstance(taille, int) and taille > 0:
         doc["taille"] = taille
+    nom = hive_gossip_basename(original_name=item.original_name, file_path=item.file_path)
+    if nom:
+        doc["nom_fichier"] = nom
     return doc
 
 
@@ -242,6 +246,9 @@ def build_catalog_payload(
         payload["taille"] = taille
     if isinstance(file_mtime_ns, int) and file_mtime_ns > 0:
         payload["mtime_ns"] = file_mtime_ns
+    nom = fiche.get("nom_fichier")
+    if isinstance(nom, str) and nom.strip():
+        payload["nom_fichier"] = nom.strip()
     return payload
 
 
@@ -327,6 +334,8 @@ def _should_skip_identical_publish(
     if fiche_old.get("poster_url") != fiche_new.get("poster_url"):
         return False
     if fiche_old.get("overview") != fiche_new.get("overview"):
+        return False
+    if fiche_old.get("nom_fichier") != fiche_new.get("nom_fichier"):
         return False
     published_mtime = body.get("mtime_ns")
     if file_mtime_ns is not None and published_mtime != file_mtime_ns:
@@ -741,6 +750,10 @@ def sync_hive_catalog(db: Session, settings: Settings, *, now: datetime | None =
 
     purge_old_tombstones(db, now=moment)
     abandon_orphan_fingerprint_work(db)
+
+    from mediatracker.hive.share_scope_registry import inherit_share_intent_from_scopes
+
+    inherit_share_intent_from_scopes(db, settings, moment=moment)
 
     if hive_catalog_auto_share_enabled(db):
         items = list(db.scalars(select(MediaItem)).all())

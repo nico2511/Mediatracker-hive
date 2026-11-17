@@ -5,7 +5,7 @@ import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
 import StatusIcon from "../components/StatusIcon.vue";
 import { api, userFacingApiError } from "../api";
-import { mediaKind } from "../labels";
+import { mediaKind, tmdbPage } from "../labels";
 import type { QuickTarget } from "../quick";
 import { tmdbTrialRatingLabel } from "../tmdbTrialRating";
 
@@ -81,7 +81,6 @@ function showQuick(target: QuickTarget, follow = false) {
 }
 
 function fromCard(card: TmdbCard, follow = false) {
-  const kind = card.media_type === "film" ? "movie" : "tv";
   showQuick(
     {
       title: card.title,
@@ -91,7 +90,7 @@ function fromCard(card: TmdbCard, follow = false) {
       mediaType: card.media_type,
       followed: Boolean(card.followed),
       tmdbId: card.tmdb_id,
-      tmdbUrl: card.tmdb_url || `https://www.themoviedb.org/${kind}/${card.tmdb_id}`,
+      tmdbUrl: card.tmdb_url || tmdbPage(card.tmdb_id, card.media_type),
       mediaId: card.media_id ?? null,
     },
     follow,

@@ -19,6 +19,7 @@ Image Docker publique : `ghcr.io/nico2511/mediatracker-hive:latest`.
 | Document | Contenu |
 | --- | --- |
 | [Chaîne de téléchargement](telechargements.md) | Sources, ordre, AllDebrid, aria2, rangement, corbeille |
+| [Médias](medias.md) | Liste des fiches, filtres, fiche film/série, suppression en masse |
 | [TMDB](tmdb.md) | Jeton, catalogue, suivi, correction d’identifiant |
 | [Jellyfin](jellyfin.md) | Synchro, webhook, chemins, import historique |
 | [Hive](hive.md) | Ruches, membres, partage, débits, téléchargements entre instances |
@@ -36,13 +37,13 @@ Index : [Réglages](reglages/README.md) — URLs du type `http://<hôte>:8080/re
 | Réglages de scan | [reglages/scan.md](reglages/scan.md) |
 | Jellyfin | [reglages/jellyfin.md](reglages/jellyfin.md) |
 | Notifications | [reglages/notifications.md](reglages/notifications.md) |
-| Nettoyage | [reglages/nettoyage.md](reglages/nettoyage.md) |
+| Corbeille | [reglages/corbeille.md](reglages/corbeille.md) |
 | AllDebrid | [reglages/alldebrid.md](reglages/alldebrid.md) |
 | Disque et sauvegardes | [reglages/disque.md](reglages/disque.md) |
 | Hive | [reglages/hive.md](reglages/hive.md) |
 | Application | [reglages/application.md](reglages/application.md) |
 | Mise à jour et redémarrage | [reglages/maj.md](reglages/maj.md) |
-| Jetons d’API | [reglages/jetons.md](reglages/jetons.md) |
+| Services et jetons | [reglages/jetons.md](reglages/jetons.md) |
 | Réinitialiser la base | [reglages/reset.md](reglages/reset.md) |
 
 ### Maintenance

@@ -20,8 +20,8 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 | **Derniers films** (`/nouveautes/films`) | Parcourir les films (cinéma, streaming, supports physiques) |
 | **Dernières séries** (`/nouveautes/series`) | Séries et diffusions à l’antenne |
 | **Suivre** | Rechercher un titre et l’ajouter à votre liste de suivi |
-| **Médias** (`/medias`) | Liste de vos fiches : chargement progressif, affiches et bannières via le cache local TMDB, badges Hive chargés ensuite (sans bloquer la grille) |
-| Fiche média | Métadonnées, saisons, estimation de disponibilité pour les films ; bloc Hive unifié si Hive est actif |
+| **Médias** (`/medias`) | Liste de vos fiches — voir [medias.md](medias.md) |
+| Fiche média (`/medias/<id>`) | Métadonnées, suivi, saisons et épisodes — voir [medias.md](medias.md) |
 
 Les anciennes URL d’essai `/tmdb`, `/tmdb/films` et `/tmdb/series` redirigent vers les écrans ci-dessus.
 

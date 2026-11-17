@@ -241,7 +241,29 @@ def ensure_settings(db: Session, settings: Settings) -> None:
     write_aria2_secret_file(db, settings)
 
 
-def list_settings(db: Session, secret_key: str) -> list[dict[str, Any]]:
+def _setting_default_for_api(settings: Settings, key: str, spec: SettingSpec) -> Any:
+    if not hasattr(settings, spec.attr):
+        return None
+    raw = _env_value(settings, key, spec)
+    if raw is None:
+        return None
+    if spec.kind == "bool":
+        return bool(raw)
+    if spec.kind == "int":
+        return int(raw)
+    if isinstance(raw, Path):
+        return str(raw)
+    return raw
+
+
+def _setting_bounds_for_api(key: str) -> dict[str, int] | None:
+    if key not in _INT_BOUNDS:
+        return None
+    low, high = _INT_BOUNDS[key]
+    return {"min": low, "max": high}
+
+
+def list_settings(db: Session, settings: Settings, secret_key: str) -> list[dict[str, Any]]:
     rows = {row.key: row for row in db.scalars(select(Setting)).all()}
     items: list[dict[str, Any]] = []
     for key in sorted(_visible_setting_specs()):
@@ -253,14 +275,33 @@ def list_settings(db: Session, secret_key: str) -> list[dict[str, Any]]:
             items.append({"key": key, "value": None, "secret": True, "set": bool(plain)})
             continue
         if key == "auto_delete_enabled" and (row is None or not str(raw).strip()):
-            items.append({"key": key, "value": True, "secret": False, "set": False})
+            item: dict[str, Any] = {"key": key, "value": True, "secret": False, "set": False}
+            bounds = _setting_bounds_for_api(key)
+            if bounds:
+                item.update(bounds)
+            default = _setting_default_for_api(settings, key, spec)
+            if spec.kind == "bool":
+                item["default"] = bool(default) if default is not None else False
+            elif default is not None:
+                item["default"] = default
+            items.append(item)
             continue
         value: Any = raw
         if spec.kind == "bool":
             value = raw == "true"
         elif spec.kind == "int" and value != "":
             value = int(value)
-        items.append({"key": key, "value": value, "secret": False, "set": value not in ("", None)})
+        item = {"key": key, "value": value, "secret": False, "set": value not in ("", None)}
+        bounds = _setting_bounds_for_api(key)
+        if bounds:
+            item.update(bounds)
+        if not spec.secret:
+            default = _setting_default_for_api(settings, key, spec)
+            if spec.kind == "bool":
+                item["default"] = bool(default) if default is not None else False
+            elif default is not None:
+                item["default"] = default
+        items.append(item)
     return items
 
 

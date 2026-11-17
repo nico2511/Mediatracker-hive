@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from tests.conftest import (
     catalog_min_logical_video_bytes,
@@ -17,6 +19,8 @@ from mediatracker.core.worker_schedule import next_deadline
 from mediatracker.db.models import (
     Download,
     DownloadHiveFetch,
+    HiveCatalogue,
+    HiveEntry,
     HiveFileFingerprint,
     HiveShareIntent,
     Media,
@@ -26,7 +30,7 @@ from mediatracker.hive.catalog import _fiche_document, ensure_hive_release_metad
 from mediatracker.hive.fingerprint import has_pending_hive_fingerprint
 from mediatracker.hive.hive_catalogue import _stable_work_key, refresh_hive_catalogue_store
 from mediatracker.hive.peer_gossip import origin_is_reachable
-from mediatracker.hive.source_catalog import catalogue_request_miss_detail
+from mediatracker.hive.source_catalog import catalogue_request_miss_detail, pick_catalog_match_for_profile_attempt
 from mediatracker.hive.source_download import try_enqueue_hive_for_item
 
 pytest_plugins = ["tests.test_hive_t1", "tests.test_hive_profile_attempt"]
@@ -206,7 +210,10 @@ def test_post_catalogue_request_honors_version_key(client):
         db.add(media)
         db.flush()
         db.add(MediaItem(media_id=media.id, state="missing"))
-        for version, sha in (("HD+VFF", "e" * 64), ("HD+VO", "f" * 64)):
+        for version, sha, fid in (
+            ("HD+VFF", "e" * 64, "e0" * 16),
+            ("HD+VO", "f" * 64, "f0" * 16),
+        ):
             _seed_catalogue_row(
                 db,
                 cle={**cle, "version": version},
@@ -214,6 +221,7 @@ def test_post_catalogue_request_honors_version_key(client):
                 sha=sha,
                 joignable=True,
                 ruche_hex=rid.hex(),
+                file_id_hex=fid,
             )
         refresh_hive_catalogue_store(db, now=NOW)
         db.commit()
@@ -698,3 +706,226 @@ def test_publish_records_local_reachability(client, db, ruche_hex):
         assert origin_is_reachable(db, ruche_id=ruche_id, origin_id=origin, now=NOW)
     finally:
         db.rollback()
+
+
+def test_pick_catalog_explicit_skips_profile_filter(db, ruche_hex):
+    media = Media(type="film", title="Film fictif", year=2099, tmdb_id=9930, pref_quality="HD", pref_language="VFF")
+    item = MediaItem(media_id=0, season=None, episode=None, state="missing")
+    db.add(media)
+    db.flush()
+    item.media_id = media.id
+    db.add(item)
+    db.commit()
+    _seed_catalogue_row(
+        db,
+        cle={"type": "film", "tmdb_id": 9930, "version": "4K+VO"},
+        version="4K+VO",
+        sha="9" * 64,
+        joignable=True,
+        ruche_hex=ruche_hex,
+    )
+    profile = _vff_principal()
+    assert pick_catalog_match_for_profile_attempt(db, media, item, profile=profile) is None
+    match = pick_catalog_match_for_profile_attempt(
+        db,
+        media,
+        item,
+        profile=profile,
+        version_key="4K+VO",
+        skip_profile_filter=True,
+    )
+    assert match is not None
+    assert match.row.version_key == "4K+VO"
+
+
+def test_explicit_request_skips_profile_filter_http(client):
+    login(client)
+    _enable(client)
+    rid = _ruche(client)
+    db = client.app.state.session_factory()
+    try:
+        cle = {"type": "film", "tmdb_id": 9931, "version": "4K+VOSTFR"}
+        media = Media(
+            type="film",
+            title="Film fictif",
+            year=2099,
+            tmdb_id=9931,
+            followed=True,
+            pref_quality="HD",
+            pref_language="VFF",
+        )
+        db.add(media)
+        db.flush()
+        item = MediaItem(media_id=media.id, state="missing")
+        db.add(item)
+        _seed_catalogue_row(
+            db,
+            cle=cle,
+            version="4K+VOSTFR",
+            sha="a1" * 32,
+            joignable=True,
+            ruche_hex=rid.hex(),
+        )
+        _ensure_hive_enqueue_prereqs(db, rid.hex())
+        refresh_hive_catalogue_store(db, now=NOW)
+        db.commit()
+        work_key = _stable_work_key(cle)
+    finally:
+        db.close()
+    auto = client.post(f"/api/v1/hive/catalogue/{work_key}/request", json={}, headers=csrf(client))
+    assert auto.status_code == 422
+    assert "profil" in auto.json()["detail"].casefold()
+    explicit = client.post(
+        f"/api/v1/hive/catalogue/{work_key}/request",
+        json={"version_key": "4K+VOSTFR"},
+        headers=csrf(client),
+    )
+    assert explicit.status_code in (200, 409), explicit.text
+    assert explicit.status_code != 422
+
+
+def test_catalogue_profile_compatible_flags(client):
+    login(client)
+    _enable(client)
+    rid = _ruche(client)
+    db = client.app.state.session_factory()
+    try:
+        cle = {"type": "film", "tmdb_id": 9932, "version": "1080p+VFF"}
+        media = Media(
+            type="film",
+            title="Film fictif",
+            year=2099,
+            tmdb_id=9932,
+            followed=True,
+            pref_quality="HD",
+            pref_language="VFF",
+        )
+        db.add(media)
+        db.flush()
+        db.add(MediaItem(media_id=media.id, state="missing"))
+        _seed_catalogue_row(
+            db,
+            cle=cle,
+            version="1080p+VFF",
+            sha="b1" * 32,
+            joignable=True,
+            ruche_hex=rid.hex(),
+            taille=5_000_000,
+            file_id_hex="b1" * 16,
+        )
+        _seed_catalogue_row(
+            db,
+            cle={**cle, "version": "4K+VO"},
+            version="4K+VO",
+            sha="b2" * 32,
+            joignable=True,
+            ruche_hex=rid.hex(),
+            taille=5_000_000,
+            file_id_hex="b2" * 16,
+        )
+        db.commit()
+    finally:
+        db.close()
+    page = client.get("/api/v1/hive/catalogue?tmdb_id=9932&media_type=film").json()
+    work = next(w for w in page["items"] if w["tmdb_id"] == 9932)
+    by_key = {v["version_key"]: v for v in work["versions"]}
+    assert by_key["1080p+VFF"]["profile_compatible"] is True
+    assert by_key["1080p+VFF"]["recommended"] is True
+    assert by_key["4K+VO"]["profile_compatible"] is False
+    assert by_key["4K+VO"]["recommended"] is False
+
+
+def test_catalogue_filter_tmdb_id_requires_media_type_when_ambiguous(client):
+    login(client)
+    _enable(client)
+    rid = _ruche(client)
+    db = client.app.state.session_factory()
+    shared_tmdb = 99901
+    try:
+        seeds = (
+            ({"type": "film", "tmdb_id": shared_tmdb, "version": "HD+VFF"}, "d1" * 32),
+            (
+                {"type": "series", "tmdb_id": shared_tmdb, "saison": 1, "episode": 1, "version": "HD+VFF"},
+                "d2" * 32,
+            ),
+        )
+        for idx, (cle, sha) in enumerate(seeds):
+            sources = [
+                {
+                    "ruche_id_hex": rid.hex(),
+                    "origine": "hv1test-test-test-test-test-test-test",
+                    "file_id_hex": format(idx, "032x"),
+                    "sha256": sha,
+                    "joignable": True,
+                }
+            ]
+            db.add(
+                HiveCatalogue(
+                    work_key=_stable_work_key(cle),
+                    version_key="HD+VFF",
+                    cle_json=json.dumps(cle, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    sources_json=json.dumps(sources, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    disponible=True,
+                    refreshed_at=NOW,
+                )
+            )
+            fiche = {"taille": 5_000_000, "type": cle.get("type"), "tmdb_id": cle.get("tmdb_id")}
+            db.add(
+                HiveEntry(
+                    ruche_id=bytes.fromhex(rid.hex()),
+                    origin_instance_id=sources[0]["origine"],
+                    seq=idx + 1,
+                    cle_json=json.dumps(cle, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    fiche_json=json.dumps(fiche, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    sha256_hex=sha,
+                    file_id=bytes.fromhex(sources[0]["file_id_hex"]),
+                    etat="disponible",
+                    payload_json=json.dumps(
+                        {"taille": 5_000_000, "fiche": fiche},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+            )
+        refresh_hive_catalogue_store(db, now=NOW)
+        db.commit()
+    finally:
+        db.close()
+    res = client.get(f"/api/v1/hive/catalogue?tmdb_id={shared_tmdb}")
+    assert res.status_code == 422
+    assert "media_type" in res.json()["detail"].casefold()
+
+
+def test_catalogue_filter_tmdb_id_unknown_returns_empty(client):
+    login(client)
+    _enable(client)
+    res = client.get("/api/v1/hive/catalogue?tmdb_id=99902")
+    assert res.status_code == 200
+    assert res.json()["items"] == []
+
+
+def test_catalogue_filter_tmdb_id(client):
+    login(client)
+    _enable(client)
+    rid = _ruche(client)
+    db = client.app.state.session_factory()
+    try:
+        for tmdb_id in (9933, 9934):
+            cle = {"type": "film", "tmdb_id": tmdb_id, "version": "HD+VFF"}
+            _seed_catalogue_row(
+                db,
+                cle=cle,
+                version="HD+VFF",
+                sha="c1" * 32,
+                joignable=True,
+                ruche_hex=rid.hex(),
+            )
+        refresh_hive_catalogue_store(db, now=NOW)
+        db.commit()
+    finally:
+        db.close()
+    page = client.get("/api/v1/hive/catalogue?tmdb_id=9933&media_type=film").json()
+    assert page["items"]
+    assert all(row.get("tmdb_id") == 9933 for row in page["items"])
+    assert not any(row.get("tmdb_id") == 9934 for row in page["items"])

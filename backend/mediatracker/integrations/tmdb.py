@@ -20,9 +20,10 @@ _STATUS = {
     "Planned": "planned",
     "In Production": "in_production",
 }
-POSTER_ROOT = "https://image.tmdb.org/t/p/w500"
-THUMB_ROOT = "https://image.tmdb.org/t/p/w92"
-BACKDROP_ROOT = "https://image.tmdb.org/t/p/w1280"
+TMDB_IMAGE_BASE = "https://image.tmdb.org"
+POSTER_ROOT = f"{TMDB_IMAGE_BASE}/t/p/w500"
+THUMB_ROOT = f"{TMDB_IMAGE_BASE}/t/p/w92"
+BACKDROP_ROOT = f"{TMDB_IMAGE_BASE}/t/p/w1280"
 WATCH_MONETIZATION_TYPES_FR = "flatrate|free|ads|rent|buy"
 
 

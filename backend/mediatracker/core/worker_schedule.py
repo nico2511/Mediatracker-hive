@@ -129,7 +129,7 @@ def _future_deadlines(db: Session, settings: Settings, now: datetime) -> list[da
     if last_poll is not None:
         out.append(last_poll + timedelta(minutes=max(poll_minutes, 1)))
 
-    scan_hours = _int_setting(db, "library_scan_interval_hours", 24)
+    scan_hours = _int_setting(db, "library_scan_interval_hours", settings.library_scan_interval_hours)
     last_scan = _parse_setting_time(db, LAST_SCAN_KEY)
     if last_scan is not None:
         out.append(last_scan + timedelta(hours=max(scan_hours, 1)))

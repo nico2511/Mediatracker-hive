@@ -3,6 +3,7 @@ import { nextTick, onUnmounted, ref, watch } from "vue";
 
 import StatusIcon from "./StatusIcon.vue";
 import {
+  ACTION_MENU_VIEWPORT_MARGIN,
   computeHorizontalPosition,
   computeVerticalPosition,
   viewportBottomLimit,
@@ -48,8 +49,6 @@ function menuItems(): HTMLElement[] {
   ).filter((node) => !node.closest("[hidden]"));
 }
 
-const VIEWPORT_MARGIN = 8;
-
 const MENU_ITEM_ESTIMATE_PX = 44;
 const MENU_CHROME_PADDING_PX = 12;
 
@@ -91,7 +90,7 @@ function updatePosition() {
   const viewportHeight = window.innerHeight;
   const cssMinWidth = Math.min(
     props.triggerVariant === "toggle" ? Math.max(rect.width, 250) : Math.max(rect.width, 12 * 16),
-    viewportWidth - VIEWPORT_MARGIN * 2,
+    viewportWidth - ACTION_MENU_VIEWPORT_MARGIN * 2,
   );
   const menuWidth = Math.max(menuRef.value?.offsetWidth ?? 0, cssMinWidth);
   const { left, minWidth } = computeHorizontalPosition(rect, menuWidth, viewportWidth, cssMinWidth);

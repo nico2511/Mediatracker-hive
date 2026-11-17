@@ -98,14 +98,25 @@ class TorrentioProvider:
         )
 
     @classmethod
-    def open_episode(cls, settings, *, base_url: str | None = None, transport=None):
+    def open_episode(
+        cls,
+        settings,
+        *,
+        base_url: str | None = None,
+        transport=None,
+        request_delay_seconds: float | None = None,
+    ):
         if base_url is not None:
             root = base_url.strip().rstrip("/")
         else:
             root = (settings.torrentio_base_url or "").strip().rstrip("/")
         if not root:
             return None
-        delay = float(settings.source_request_delay_seconds)
+        delay = float(
+            settings.source_request_delay_seconds
+            if request_delay_seconds is None
+            else request_delay_seconds
+        )
         return TorrentioSource(root, delay=delay, transport=transport)
 
     def search(self, query: str, media_type: MediaType | None) -> list[SourceResult]:

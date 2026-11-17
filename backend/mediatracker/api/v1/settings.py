@@ -7,8 +7,13 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.config import Settings
 from mediatracker.core.download_sources_status import download_source_statuses
+from mediatracker.core.hosters import blocked_hoster_names
 from mediatracker.core.source_probe import parse_probe_query, probe_download_sources
+from mediatracker.core.source_url_defaults import SourceUrlDefaults, source_url_defaults
+from mediatracker.integrations.alldebrid_public_hosts import list_hoster_picker_options
+from mediatracker.retention import fixed_retention
 from mediatracker.settings_store import SettingsError, list_settings, update_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -19,10 +24,29 @@ class SettingOut(BaseModel):
     value: Any = None
     secret: bool
     set: bool
+    min: int | None = None
+    max: int | None = None
+    default: Any = None
 
 
 class SettingsOut(BaseModel):
     settings: list[SettingOut]
+    source_defaults: SourceUrlDefaults
+
+
+class FixedRetentionOut(BaseModel):
+    event_journal_days: int
+    source_state_days: int
+    metrics_history_days: int
+    incomplete_orphan_keep_days: int
+
+
+def _settings_response(db: Session, app_settings: Settings, secret_key: str) -> SettingsOut:
+    items = list_settings(db, app_settings, secret_key)
+    return SettingsOut(
+        settings=[SettingOut.model_validate(item) for item in items],
+        source_defaults=source_url_defaults(),
+    )
 
 
 class SettingsPatch(BaseModel):
@@ -38,6 +62,7 @@ class SourceProbeIn(BaseModel):
 
 class HosterOptionsOut(BaseModel):
     hosters: list[str]
+    blocked_hosters: list[str] = []
 
 
 class SourceProbeItemOut(BaseModel):
@@ -78,15 +103,27 @@ class DownloadSourcesStatusOut(BaseModel):
     blocked_message: str | None = None
 
 
-@router.get("", response_model=SettingsOut)
+@router.get("/fixed-retention", response_model=FixedRetentionOut)
+def get_fixed_retention(
+    _principal=Depends(require_scope("read")),
+) -> FixedRetentionOut:
+    row = fixed_retention()
+    return FixedRetentionOut(
+        event_journal_days=row.event_journal_days,
+        source_state_days=row.source_state_days,
+        metrics_history_days=row.metrics_history_days,
+        incomplete_orphan_keep_days=row.incomplete_orphan_keep_days,
+    )
+
+
+@router.get("", response_model=SettingsOut, response_model_exclude_unset=True)
 def get_settings_route(
     request: Request,
     db: Session = Depends(get_db),
     _principal=Depends(require_scope("read")),
 ) -> SettingsOut:
     del _principal
-    items = list_settings(db, request.app.state.settings.secret_key)
-    return SettingsOut(settings=[SettingOut.model_validate(item) for item in items])
+    return _settings_response(db, request.app.state.settings, request.app.state.settings.secret_key)
 
 
 @router.get("/sources/status", response_model=DownloadSourcesStatusOut)
@@ -112,9 +149,10 @@ def list_hoster_options(
     _principal=Depends(require_scope("read")),
 ) -> HosterOptionsOut:
     del _request, _db, _principal
-    from mediatracker.integrations.alldebrid_public_hosts import list_hoster_picker_options
-
-    return HosterOptionsOut(hosters=list_hoster_picker_options())
+    return HosterOptionsOut(
+        hosters=list_hoster_picker_options(),
+        blocked_hosters=blocked_hoster_names(),
+    )
 
 
 @router.post("/sources/probe", response_model=SourceProbeOut)
@@ -152,7 +190,7 @@ def probe_sources(
     )
 
 
-@router.patch("", response_model=SettingsOut)
+@router.patch("", response_model=SettingsOut, response_model_exclude_unset=True)
 def patch_settings(
     body: SettingsPatch,
     request: Request,
@@ -168,5 +206,4 @@ def patch_settings(
 
     after_hive_transfer_settings_patch(request, db, set(body.values))
     db.commit()
-    items = list_settings(db, request.app.state.settings.secret_key)
-    return SettingsOut(settings=[SettingOut.model_validate(item) for item in items])
+    return _settings_response(db, request.app.state.settings, request.app.state.settings.secret_key)

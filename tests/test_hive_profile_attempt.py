@@ -46,17 +46,19 @@ def _seed_catalogue_row(
     joignable: bool,
     ruche_hex: str,
     taille: int | None = None,
+    file_id_hex: str = "bb" * 16,
 ) -> None:
     from tests.conftest import PLAUSIBLE_VIDEO_BYTES
 
     if taille is None:
         taille = PLAUSIBLE_VIDEO_BYTES
     from mediatracker.hive.hive_catalogue import _stable_work_key
+    fid = str(file_id_hex).strip() or ("bb" * 16)
     sources = [
         {
             "ruche_id_hex": ruche_hex,
             "origine": "hv1test-test-test-test-test-test-test",
-            "file_id_hex": "bb" * 16,
+            "file_id_hex": fid,
             "sha256": sha,
             "joignable": joignable,
         }
@@ -123,6 +125,7 @@ def test_principal_profile_picks_vff_not_vostfr(db, ruche_hex):
         sha="a" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="a1" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -131,6 +134,7 @@ def test_principal_profile_picks_vff_not_vostfr(db, ruche_hex):
         sha="b" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="b1" * 16,
     )
     principal = _vff_principal()
     match = pick_catalog_match_for_profile_attempt(db, media, item, profile=principal, prefer_available=True)
@@ -175,6 +179,7 @@ def test_explicit_profile_ignores_pinned_and_default_on_media(db, ruche_hex):
         sha="c" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="c1" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -183,6 +188,7 @@ def test_explicit_profile_ignores_pinned_and_default_on_media(db, ruche_hex):
         sha="d" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="d1" * 16,
     )
     explicit = _vff_principal()
     match = pick_catalog_match_for_profile_attempt(db, media, item, profile=explicit, prefer_available=True)
@@ -260,6 +266,7 @@ def test_unavailable_penalty_preserved(db, ruche_hex):
         sha="1" * 64,
         joignable=False,
         ruche_hex=ruche_hex,
+        file_id_hex="11" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -268,6 +275,7 @@ def test_unavailable_penalty_preserved(db, ruche_hex):
         sha="2" * 64,
         joignable=True,
         ruche_hex=ruche_hex,
+        file_id_hex="22" * 16,
     )
     principal = Profile(
         name="VF large",
@@ -432,6 +440,7 @@ def test_pick_filters_by_stored_size_bounds(db, ruche_hex):
         joignable=True,
         ruche_hex=ruche_hex,
         taille=small_mb * 1024 * 1024,
+        file_id_hex="71" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -441,6 +450,7 @@ def test_pick_filters_by_stored_size_bounds(db, ruche_hex):
         joignable=True,
         ruche_hex=ruche_hex,
         taille=ok_mb * 1024 * 1024,
+        file_id_hex="61" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -450,6 +460,7 @@ def test_pick_filters_by_stored_size_bounds(db, ruche_hex):
         joignable=True,
         ruche_hex=ruche_hex,
         taille=large_mb * 1024 * 1024,
+        file_id_hex="51" * 16,
     )
     profile = _hd_vff_profile(min_size_mb=100, max_size_mb=500)
     match = pick_catalog_match_for_profile_attempt(db, media, item, profile=profile)

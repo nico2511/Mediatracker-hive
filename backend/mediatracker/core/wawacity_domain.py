@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from mediatracker.db.models import Setting
 from mediatracker.events import record_event
 from mediatracker.providers.sources.loading import apply_source_base_urls, source_base_url
-from mediatracker.providers.sources.manual import _HOSTERS
+from mediatracker.core.hosters import URL_DOMAIN_TO_HOSTER
 from mediatracker.providers.sources.wawacity import DEFAULT_USER_AGENT
 from mediatracker.security.ssrf import OutboundUrlRejected, httpx_request_event_hooks, validate_outbound_url_static
 from mediatracker.security.wawacity_redirect import (
@@ -42,7 +42,7 @@ PROPOSE_ONLY_KEY = "wawacity_domain_propose_only"
 AUTO_BLOCKED_HOST_KEY = "wawacity_domain_auto_blocked_host"
 LAST_MIGRATION_KEY = "wawacity_domain_last_migration"
 _REDIRECT_CODES = frozenset({301, 302, 308})
-_FILE_HOST_SUFFIXES = frozenset({host for host, _name in _HOSTERS})
+_FILE_HOST_SUFFIXES = frozenset({host for host, _name in URL_DOMAIN_TO_HOSTER})
 _AUTO_REASON = "redirection constatée lors d'une requête Wawacity"
 
 

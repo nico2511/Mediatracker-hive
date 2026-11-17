@@ -15,7 +15,11 @@ from mediatracker.config import Settings
 from mediatracker.core.pipeline.download_guard import DOWNLOAD_TERMINAL_STATES
 from mediatracker.db.models import Download, DownloadHiveFetch, Media, MediaItem
 from mediatracker.db.session import release_sqlite_before_network
-from mediatracker.hive.fetch_grant import HIVE_FETCH_GRANT_HEADER, MintedFetchGrant
+from mediatracker.hive.fetch_grant import (
+    GRANT_RENEW_LEAD,
+    HIVE_FETCH_GRANT_HEADER,
+    MintedFetchGrant,
+)
 from mediatracker.hive.identity import (
     load_private_key,
 )
@@ -27,7 +31,6 @@ from mediatracker.hive.source_catalog import HiveCatalogMatch
 from mediatracker.hive.transfer_sources import rank_sources
 from mediatracker.security.crypto import decrypt_secret, encrypt_secret
 
-GRANT_RENEW_LEAD = timedelta(minutes=30)
 HIVE_PEER_BUSY_MESSAGE = "Source Hive occupée."
 logger = logging.getLogger(__name__)
 

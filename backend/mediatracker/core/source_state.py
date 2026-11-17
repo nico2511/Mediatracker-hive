@@ -13,11 +13,10 @@ from sqlalchemy.orm import Session
 
 from mediatracker.db.models import Download, Link, SourceState, SourceStateChange
 from mediatracker.events import record_event
+from mediatracker.retention import SOURCE_STATE_DAYS as RETENTION_DAYS
 from mediatracker.security.logging import redact
 
 logger = logging.getLogger(__name__)
-
-RETENTION_DAYS = 30
 TRACKED_SOURCES = frozenset({"wawacity", "free_telecharger", "comet", "torrentio", "stremio_addons"})
 DOWNLOAD_SOURCE_TYPES = frozenset(
     {"wawacity", "free_telecharger", "hive", "comet", "torrentio", "stremio_addons"}

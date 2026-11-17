@@ -1,9 +1,8 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import {ApiError, api, userFacingApiError} from "../api";
+import { LIBRARY_VERIFY_POLL_INTERVAL_MS } from "../constants/uiPollIntervals";
 import { formatParisClock, parisDayKey, parseInstant } from "../time";
-
-const POLL_MS = 3000;
 
 export interface VerifyAllProgress {
   running: boolean;
@@ -166,7 +165,7 @@ export function useLibraryVerifyAll(onFinished?: () => void) {
       }
       await refresh();
       schedulePoll();
-    }, POLL_MS);
+    }, LIBRARY_VERIFY_POLL_INTERVAL_MS);
   }
 
   async function refresh(): Promise<void> {

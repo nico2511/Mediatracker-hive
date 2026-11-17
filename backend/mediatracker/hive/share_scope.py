@@ -90,6 +90,12 @@ def apply_sharing_to_scope(
     moment,
 ) -> list[int]:
     """Applique intent + exclusions + sync catalogue sur chaque fichier local du périmètre."""
+    from mediatracker.hive.share_scope_registry import clear_share_scope, persist_share_scope
+
+    if exclude_all:
+        clear_share_scope(db, media_id, season=season)
+    else:
+        persist_share_scope(db, media_id, season=season, ruche_ids=ruche_ids)
     touched: list[int] = []
     for item in scope_media_items(db, media_id, season=season):
         assert item.id is not None

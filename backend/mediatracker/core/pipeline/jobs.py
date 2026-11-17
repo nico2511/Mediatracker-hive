@@ -10,7 +10,13 @@ from mediatracker.config import Settings
 from mediatracker.core.naming import sanitize
 from mediatracker.core.pipeline.constants import BACKOFFS, MAX_ATTEMPTS, VIDEO_EXT, french_error, logger
 from mediatracker.core.precheck import PRESENT
-from mediatracker.core.selection import BLOCKED_SOURCE_HOSTERS, hoster_allowed, hoster_rank, parse_hoster_preference
+from mediatracker.core.selection import (
+    BLOCKED_SOURCE_HOSTERS,
+    DEFAULT_HOSTER_PREFERENCE,
+    hoster_allowed,
+    hoster_rank,
+    parse_hoster_preference,
+)
 from mediatracker.core.source_state import _source_label as _download_source_label
 from mediatracker.db.models import Download, Link, Media, MediaItem, Provider
 from mediatracker.db.session import commit_retry
@@ -738,12 +744,15 @@ def _output_name(filename: str | None, link: Link | None, item: MediaItem, media
     return f"{stem}{suffix}"
 
 
-def _hosters(db: Session, settings: Settings) -> list[str]:
+def hoster_preference_list(db: Session, settings: Settings) -> list[str]:
     raw = _text_setting(db, "hoster_preference", settings.hoster_preference)
     try:
         return parse_hoster_preference(raw)
     except ValueError:
-        return parse_hoster_preference(settings.hoster_preference)
+        return parse_hoster_preference(",".join(DEFAULT_HOSTER_PREFERENCE))
+
+
+_hosters = hoster_preference_list
 
 
 def _int_setting(db: Session, key: str, default: int) -> int:

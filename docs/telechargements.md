@@ -93,7 +93,7 @@ Après téléchargement réussi :
 ## Corbeille et suppression automatique
 
 - Fichiers supprimés ou auto-nettoyés vont dans `trash_dir` (même volume que la bibliothèque).
-- **Nettoyage** : suppression auto après visionnage, préavis, rétention corbeille — voir [reglages/nettoyage.md](reglages/nettoyage.md).
+- **Corbeille** : suppression auto après visionnage, préavis, rétention, conservation — voir [reglages/corbeille.md](reglages/corbeille.md).
 - **Disque** : pause des téléchargements si espace libre sous le seuil (`disk_min_free_gb`, `0` désactive).
 
 ## Nouveautés catalogue

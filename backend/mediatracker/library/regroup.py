@@ -17,7 +17,8 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mediatracker.core.cleanup import format_bytes
+from mediatracker.config import Settings, get_settings
+from mediatracker.core.cleanup import _int_setting, format_bytes
 from mediatracker.core.library_plan import LibraryPlanError, _folder_title, _prune_empty, _rollback_paths, _tag
 from mediatracker.core.naming import atomic_move, different_tmdb_ids, filing_folder, library_destination
 from mediatracker.core.quality_profile import RESOLUTION_RANK, normalize_resolution
@@ -170,6 +171,7 @@ def apply_regroup(
     trash: Path | None = None,
     include_loose: bool = False,
     skip: tuple[Path, ...] = (),
+    settings: Settings | None = None,
 ) -> tuple[bool, int | None, RegroupReport]:
     """Move only the chosen fiches, and only after an explicit validation."""
     report = plan_regroup(db, movies, series, protected=protected, skip=skip)
@@ -177,6 +179,7 @@ def apply_regroup(
     chosen = [group for group in report.groups if group.media_id in wanted]
     if not validated:
         return False, None, report
+    resolved = settings or get_settings()
     moment = now or datetime.now(timezone.utc)
     trash_dir = trash if trash is not None else series.parent / ".trash"
     applied: list[dict[str, str]] = []
@@ -187,7 +190,9 @@ def apply_regroup(
             for move in pending:
                 if move.action != "trash":
                     continue
-                dest = _send_to_trash(db, Path(move.src), trash_dir, moment, group.media_id, group.title)
+                dest = _send_to_trash(
+                    db, Path(move.src), trash_dir, moment, group.media_id, group.title, settings=resolved
+                )
                 applied.append({"src": move.src, "dest": str(dest), "original_name": move.original_name})
             for move in pending:
                 if move.action == "trash":
@@ -213,7 +218,9 @@ def apply_regroup(
                 for move in group.moves:
                     if move.blocked or move.action != "trash":
                         continue
-                    dest = _send_to_trash(db, Path(move.src), trash_dir, moment, group.media_id, group.title)
+                    dest = _send_to_trash(
+                        db, Path(move.src), trash_dir, moment, group.media_id, group.title, settings=resolved
+                    )
                     applied.append({"src": move.src, "dest": str(dest), "original_name": move.original_name})
     except OSError as exc:
         _rollback_paths(applied)
@@ -509,6 +516,10 @@ def _only_sidecars(folder: Path) -> bool:
     return bool(files) and all(_sidecarish(path) for path in files)
 
 
+def _retention_days(db: Session, settings: Settings) -> int:
+    return _int_setting(db, "trash_retention_days", settings.trash_retention_days)
+
+
 def _send_to_trash(
     db: Session,
     src: Path,
@@ -517,6 +528,8 @@ def _send_to_trash(
     media_id: int | None,
     title: str,
     reason: str = "regroup",
+    *,
+    settings: Settings,
 ) -> Path:
     if not src.is_file():
         raise OSError("FILE_MISSING")
@@ -536,7 +549,7 @@ def _send_to_trash(
             label=(title or src.name)[:300],
             reason=(reason or "regroup")[:16],
             deleted_at=now,
-            purge_after=now + timedelta(days=7),
+            purge_after=now + timedelta(days=_retention_days(db, settings)),
         )
     )
     row = db.scalar(select(LibraryFile).where(LibraryFile.path == original))

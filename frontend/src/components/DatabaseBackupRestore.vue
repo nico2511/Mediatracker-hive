@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import { api, userFacingApiError, ApiError } from "../api";
+import DocLink from "./settings/DocLink.vue";
 import { formatBytes } from "../diskFormat";
 import {
   formatParis,
@@ -41,6 +42,8 @@ interface RestoreReport {
 type DialogPhase = "preview" | "running" | "success" | "error-worker" | "error-schema";
 
 const router = useRouter();
+
+const SQLITE_BACKUP_DOCS_URL = "https://www.sqlite.org/backup.html";
 
 const backups = ref<BackupRow[]>([]);
 const safetyBackups = ref<BackupRow[]>([]);
@@ -380,6 +383,13 @@ onBeforeUnmount(() => {
     <p class="hint">
       Restaurer remplace la base actuelle. Celle-ci est d'abord mise de côté dans
       <code>backups/safety/</code>, jamais supprimée.
+    </p>
+    <p class="settings-inline-docs">
+      <DocLink
+        :href="SQLITE_BACKUP_DOCS_URL"
+        label="Sauvegarde SQLite"
+        data-testid="sqlite-backup-doc"
+      />
     </p>
     <div class="import-row">
       <button type="button" class="primary" :disabled="importBusy" @click="triggerImport">

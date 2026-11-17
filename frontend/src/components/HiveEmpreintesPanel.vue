@@ -2,13 +2,12 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 
 import { api, userFacingApiError } from "../api";
+import { PANEL_POLL_INTERVAL_MS } from "../constants/uiPollIntervals";
 import {
   empreintePhaseClass,
   empreintePhaseLabel,
   type EmpreintesPage,
 } from "../hive/hiveEmpreintes";
-
-const POLL_MS = 5000;
 
 const props = defineProps<{
   mediaId: number;
@@ -59,7 +58,7 @@ function startPoll() {
   if (!pollAllowed()) {
     return;
   }
-  pollTimer = setInterval(() => void load({ quiet: true }), POLL_MS);
+  pollTimer = setInterval(() => void load({ quiet: true }), PANEL_POLL_INTERVAL_MS);
 }
 
 async function load(opts?: { quiet?: boolean }) {

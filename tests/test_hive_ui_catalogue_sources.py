@@ -170,6 +170,7 @@ def test_catalogue_multiple_sources_and_versions(client):
             joignable=True,
             ruche_hex=rid.hex(),
             taille=0,
+            file_id_hex="d0" * 16,
         )
         _seed_catalogue_row(
             db,
@@ -179,6 +180,7 @@ def test_catalogue_multiple_sources_and_versions(client):
             joignable=False,
             ruche_hex=rid.hex(),
             taille=0,
+            file_id_hex="e0" * 16,
         )
         row = db.scalar(select(HiveCatalogue).where(HiveCatalogue.version_key == "HD+VFF").limit(1))
         assert row is not None

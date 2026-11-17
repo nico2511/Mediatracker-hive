@@ -308,11 +308,13 @@ def episode_source(
     entry = for_type(name)
     if entry is None or "episode" not in getattr(entry, "capabilities", frozenset()):
         return None
+    delay = _int_setting(db, "source_request_delay_seconds", settings.source_request_delay_seconds)
+    kwargs: dict = {"transport": transport, "request_delay_seconds": delay}
     if addons is not None:
-        return entry.open_episode(settings, addons=addons, transport=transport)
+        return entry.open_episode(settings, addons=addons, **kwargs)
     if base_urls is not None:
-        return entry.open_episode(settings, base_urls=base_urls, transport=transport)
-    return entry.open_episode(settings, base_url=base_url, transport=transport)
+        return entry.open_episode(settings, base_urls=base_urls, **kwargs)
+    return entry.open_episode(settings, base_url=base_url, **kwargs)
 
 
 def _int_setting(db: Session, key: str, default: int) -> int:

@@ -1433,6 +1433,45 @@
         "title": "CatalogueRequestIn",
         "type": "object"
       },
+      "CatalogueSourceOut": {
+        "properties": {
+          "joignable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Joignable"
+          },
+          "nom_fichier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nom Fichier"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          }
+        },
+        "title": "CatalogueSourceOut",
+        "type": "object"
+      },
       "CatalogueVersionOut": {
         "properties": {
           "disponible": {
@@ -1449,6 +1488,11 @@
               }
             ],
             "title": "Language"
+          },
+          "profile_compatible": {
+            "default": false,
+            "title": "Profile Compatible",
+            "type": "boolean"
           },
           "quality": {
             "anyOf": [
@@ -1491,6 +1535,14 @@
           "source_count": {
             "title": "Source Count",
             "type": "integer"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CatalogueSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
           },
           "version_key": {
             "title": "Version Key",
@@ -16831,6 +16883,22 @@
                 }
               ],
               "title": "Media Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tmdb_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tmdb Id"
             }
           },
           {

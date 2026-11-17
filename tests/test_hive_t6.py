@@ -39,6 +39,7 @@ def _seed_catalogue_row(
     joignable: bool,
     ruche_hex: str = "aa" * 16,
     taille: int | None = None,
+    file_id_hex: str = "bb" * 16,
 ) -> None:
     from tests.conftest import PLAUSIBLE_VIDEO_BYTES
 
@@ -46,11 +47,12 @@ def _seed_catalogue_row(
         taille = PLAUSIBLE_VIDEO_BYTES
     from mediatracker.hive.hive_catalogue import _stable_work_key
 
+    fid = str(file_id_hex).strip() or ("bb" * 16)
     sources = [
         {
             "ruche_id_hex": ruche_hex,
             "origine": "hv1test-test-test-test-test-test-test",
-            "file_id_hex": "bb" * 16,
+            "file_id_hex": fid,
             "sha256": sha,
             "joignable": joignable,
         }
@@ -257,6 +259,7 @@ def test_version_priority_profile_then_fallback(client):
         sha="d" * 64,
         joignable=True,
         ruche_hex=rid.hex(),
+        file_id_hex="d0" * 16,
     )
     _seed_catalogue_row(
         db,
@@ -265,6 +268,7 @@ def test_version_priority_profile_then_fallback(client):
         sha="e" * 64,
         joignable=True,
         ruche_hex=rid.hex(),
+        file_id_hex="e0" * 16,
     )
     match = pick_catalog_match(
         db,

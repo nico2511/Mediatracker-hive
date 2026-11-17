@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.core.public_source_urls import DEFAULT_COMET_INSTANCE_URLS, DEFAULT_COMET_PRIMARY
 from mediatracker.db.models import Provider, Setting
 from mediatracker.providers.sources.comet import normalize_comet_url
 from mediatracker.security.ssrf import OutboundUrlRejected, validate_outbound_url_static
@@ -18,11 +19,6 @@ if TYPE_CHECKING:
 _SETTING_KEY = "comet_base_urls"
 _LEGACY_KEY = "comet_base_url"
 _MIGRATED_KEY = "comet_urls_migrated"
-DEFAULT_COMET_PRIMARY = "https://comet.feels.legal"
-DEFAULT_COMET_INSTANCE_URLS: tuple[str, ...] = (
-    DEFAULT_COMET_PRIMARY,
-    "https://cometfortheweebs.midnightignite.me",
-)
 
 
 def normalize_comet_url_list(values: list[str]) -> list[str]:

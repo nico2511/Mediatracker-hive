@@ -2,6 +2,14 @@
 
 from collections.abc import Sequence
 
+from mediatracker.core.hosters import (
+    BLOCKED_SOURCE_HOSTERS,
+    EXCLUDED_HOSTERS,
+    HOSTER_LAST,
+    KNOWN_HOSTERS,
+    hoster_is_blocked,
+)
+
 DEFAULT_QUALITY = "HD"
 DEFAULT_LANGUAGE = "VFF"
 # Historical pair. The allow-list is the registry (links or episode). This
@@ -19,24 +27,6 @@ DEFAULT_HOSTER_PREFERENCE: tuple[str, ...] = (
     "dailyuploads",
     "1fichier",
 )
-# Still recognised if the person adds them to the order in Réglages.
-KNOWN_HOSTERS = frozenset(
-    {
-        "rapidgator",
-        "turbobit",
-        "uploady",
-        "dailyuploads",
-        "nitroflare",
-        "katfile",
-        "tezfiles",
-        "1fichier",
-    }
-)
-# Closed or forbidden hosters (single block list for ingestion and settings).
-BLOCKED_SOURCE_HOSTERS = frozenset({"uptobox"})
-EXCLUDED_HOSTERS = BLOCKED_SOURCE_HOSTERS
-HOSTER_LAST = "1fichier"
-
 QUALITY_OPTIONS = ("HD", "1080p", "4K", "HDLight", "SD")
 LANGUAGE_OPTIONS = ("VFF", "VFQ", "VF", "MULTI", "VOSTFR", "VO")
 QUALITIES = frozenset(QUALITY_OPTIONS)
@@ -85,7 +75,7 @@ def parse_hoster_preference(raw: str, *, allowed: frozenset[str] | None = None) 
         name = part.strip().lower()
         if not name:
             continue
-        if name in EXCLUDED_HOSTERS or name in BLOCKED_SOURCE_HOSTERS:
+        if name in EXCLUDED_HOSTERS or hoster_is_blocked(name):
             raise ValueError(f"L'hébergeur « {name} » est exclu.")
         if name not in known:
             raise ValueError(f"Hébergeur inconnu : {name}.")

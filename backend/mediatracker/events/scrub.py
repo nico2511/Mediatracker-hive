@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from mediatracker.core.hosters import SCRUB_URL_HOSTER_MARKERS
 from mediatracker.providers.downloaders.aria2 import scrub_url
 
 _DROP_KEYS = frozenset(
@@ -17,16 +18,6 @@ _DROP_KEYS = frozenset(
         "cdn",
         "cdn_url",
     }
-)
-_HOSTERS = (
-    "alldebrid",
-    "rapidgator",
-    "turbobit",
-    "nitroflare",
-    "katfile",
-    "tezfiles",
-    "1fichier",
-    "uptobox",
 )
 _SAFE_URL_KEYS = frozenset({"poster_url", "page_url", "url", "backdrop_url"})
 
@@ -56,4 +47,4 @@ def _public_url(value: str) -> bool:
     if not (value.startswith("http://") or value.startswith("https://")):
         return False
     lowered = value.lower()
-    return not any(host in lowered for host in _HOSTERS)
+    return not any(host in lowered for host in SCRUB_URL_HOSTER_MARKERS)

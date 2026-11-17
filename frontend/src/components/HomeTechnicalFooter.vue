@@ -119,7 +119,7 @@ async function loadMeta() {
       const free = volume.total_bytes - volume.used_bytes;
       const pct = Math.round((volume.used_bytes / volume.total_bytes) * 100);
       const gb = Math.max(0, Math.round(free / (1024 ** 3)));
-      diskFreeLabel.value = `disque ${gb} Go libres (${pct} %)`;
+      diskFreeLabel.value = `disque ${gb} Gio libres (${pct} %)`;
     }
   } catch {
     diskFreeLabel.value = "";

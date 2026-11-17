@@ -46,6 +46,8 @@ from mediatracker.integrations.jellyfin_history_jobs import (
     start_db_preview_job,
 )
 
+JELLYFIN_HISTORY_CSV_MAX_BYTES = 5_000_000
+
 router = APIRouter(prefix="/library/jellyfin-history", tags=["library"])
 
 
@@ -155,7 +157,7 @@ async def _read_csv(upload: UploadFile) -> str:
     raw = await upload.read()
     if not raw:
         raise Problem(422, "Requête invalide", "Fichier vide.")
-    if len(raw) > 5_000_000:
+    if len(raw) > JELLYFIN_HISTORY_CSV_MAX_BYTES:
         raise Problem(413, "Fichier trop volumineux", "Le CSV dépasse la taille maximale (5 Mo).")
     try:
         return raw.decode("utf-8-sig")

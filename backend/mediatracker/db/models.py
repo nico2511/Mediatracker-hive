@@ -1007,6 +1007,31 @@ class HiveFetchGrant(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class HiveShareScope(Base):
+    """Périmètre partagé (fiche entière ou une saison) pour hériter l'intention sur nouveaux fichiers."""
+
+    __tablename__ = "hive_share_scope"
+    __table_args__ = (Index("ix_hive_share_scope_media", "media_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    media_id: Mapped[int] = mapped_column(ForeignKey("media.id", ondelete="CASCADE"), nullable=False)
+    season: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class HiveShareScopeExclusion(Base):
+    """Exclusions de ruches pour un périmètre (même sémantique que ``HiveShareExclusion``)."""
+
+    __tablename__ = "hive_share_scope_exclusion"
+    __table_args__ = (
+        UniqueConstraint("scope_id", "ruche_id", name="uq_hive_share_scope_exclusion_scope_ruche"),
+        Index("ix_hive_share_scope_exclusion_scope", "scope_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope_id: Mapped[int] = mapped_column(ForeignKey("hive_share_scope.id", ondelete="CASCADE"), nullable=False)
+    ruche_id: Mapped[bytes] = mapped_column(LargeBinary(16), nullable=False)
+
+
 class HiveShareExclusion(Base):
     """Ne plus partager cet épisode : ruche précise ou 16 octets nuls (toutes les ruches)."""
 

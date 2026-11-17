@@ -29,14 +29,15 @@ Ce fichier est généré automatiquement à partir de `docs/` (hors interne, arc
 - [Réglages de scan](#docs-reglages-scan) — `docs/reglages/scan.md`
 - [Jellyfin](#docs-reglages-jellyfin) — `docs/reglages/jellyfin.md`
 - [Notifications](#docs-reglages-notifications) — `docs/reglages/notifications.md`
-- [Nettoyage](#docs-reglages-nettoyage) — `docs/reglages/nettoyage.md`
+- [Corbeille](#docs-reglages-corbeille) — `docs/reglages/corbeille.md`
 - [AllDebrid](#docs-reglages-alldebrid) — `docs/reglages/alldebrid.md`
 - [Disque et sauvegardes](#docs-reglages-disque) — `docs/reglages/disque.md`
 - [Hive](#docs-reglages-hive) — `docs/reglages/hive.md`
 - [Application](#docs-reglages-application) — `docs/reglages/application.md`
 - [Mise à jour et redémarrage](#docs-reglages-maj) — `docs/reglages/maj.md`
-- [Jetons d'API](#docs-reglages-jetons) — `docs/reglages/jetons.md`
+- [Services et jetons](#docs-reglages-jetons) — `docs/reglages/jetons.md`
 - [Réinitialiser la base](#docs-reglages-reset) — `docs/reglages/reset.md`
+- [Médias](#docs-medias) — `docs/medias.md`
 - [TMDB](#docs-tmdb) — `docs/tmdb.md`
 - [Jellyfin](#docs-jellyfin) — `docs/jellyfin.md`
 - [Hive](#docs-hive) — `docs/hive.md`
@@ -291,7 +292,7 @@ Après téléchargement réussi :
 ### Corbeille et suppression automatique
 
 - Fichiers supprimés ou auto-nettoyés vont dans `trash_dir` (même volume que la bibliothèque).
-- **Nettoyage** : suppression auto après visionnage, préavis, rétention corbeille — voir [reglages/nettoyage.md](#docs-reglages-nettoyage).
+- **Corbeille** : suppression auto après visionnage, préavis, rétention, conservation — voir [reglages/corbeille.md](#docs-reglages-corbeille).
 - **Disque** : pause des téléchargements si espace libre sous le seuil (`disk_min_free_gb`, `0` désactive).
 
 ### Nouveautés catalogue
@@ -306,28 +307,61 @@ Chemin source : `docs/reglages/README.md`
 
 <a id="docs-reglages-README"></a>
 
-Dans l’application : **Réglages** → choisir une section, ou URL directe `http://<hôte>:8080/reglages/<slug>`.
+Dans l’application : **Réglages** (`/reglages`), puis une section du menu. Chaque section a une URL directe du type `/reglages/<slug>`.
 
-Les clés listées correspondent à `SETTING_SPECS` dans le code (`backend/mediatracker/settings_store.py`). Les valeurs affichées en UI priment sur l’environnement après le premier enregistrement.
+L’index est regroupé en cinq blocs (Général, Services et jetons, Téléchargement, Médiathèque, Stockage), comme dans l’interface.
+
+Les clés listées dans les pages ci-dessous correspondent aux réglages persistés en base. Après le premier enregistrement dans l’interface, **les valeurs affichées en UI remplacent** les variables d’environnement de départ.
+
+### Général
 
 | Slug | Titre dans l’UI | Documentation |
 | --- | --- | --- |
 | `compte` | Compte | [compte.md](#docs-reglages-compte) |
-| `qualite` | Profils de qualité | [qualite.md](#docs-reglages-qualite) |
-| `sources` | Sources | [sources.md](#docs-reglages-sources) |
-| `scan` | Réglages de scan | [scan.md](#docs-reglages-scan) |
-| `jellyfin` | Jellyfin | [jellyfin.md](#docs-reglages-jellyfin) |
-| `notifications` | Notifications | [notifications.md](#docs-reglages-notifications) |
-| `nettoyage` | Nettoyage | [nettoyage.md](#docs-reglages-nettoyage) |
-| `alldebrid` | AllDebrid | [alldebrid.md](#docs-reglages-alldebrid) |
-| `disque` | Disque et sauvegardes | [disque.md](#docs-reglages-disque) |
-| `hive` | Hive | [hive.md](#docs-reglages-hive) |
 | `application` | Application | [application.md](#docs-reglages-application) |
 | `maj` | Mise à jour et redémarrage | [maj.md](#docs-reglages-maj) |
-| `jetons` | Jetons d'API | [jetons.md](#docs-reglages-jetons) |
+
+### Services et jetons
+
+| Slug | Titre dans l’UI | Documentation |
+| --- | --- | --- |
+| `jetons` | Services et jetons | [jetons.md](#docs-reglages-jetons) |
+
+### Téléchargement
+
+| Slug | Titre dans l’UI | Documentation |
+| --- | --- | --- |
+| `sources` | Sources | [sources.md](#docs-reglages-sources) |
+| `qualite` | Profils de qualité | [qualite.md](#docs-reglages-qualite) |
+| `scan` | Réglages de scan | [scan.md](#docs-reglages-scan) |
+| `alldebrid` | AllDebrid | [alldebrid.md](#docs-reglages-alldebrid) |
+| `hive` | Hive | [hive.md](#docs-reglages-hive) |
+
+Guide Hive (usage des ruches) : [../hive.md](#docs-hive).
+
+### Médiathèque
+
+| Slug | Titre dans l’UI | Documentation |
+| --- | --- | --- |
+| `jellyfin` | Jellyfin | [jellyfin.md](#docs-reglages-jellyfin) |
+| `notifications` | Notifications | [notifications.md](#docs-reglages-notifications) |
+
+Guide Jellyfin (webhook, import d’historique détaillé) : [../jellyfin.md](#docs-jellyfin).
+
+### Stockage
+
+| Slug | Titre dans l’UI | Documentation |
+| --- | --- | --- |
+| `disque` | Disque et sauvegardes | [disque.md](#docs-reglages-disque) |
+| `corbeille` | Corbeille | [corbeille.md](#docs-reglages-corbeille) |
 | `reset` | Réinitialiser la base | [reset.md](#docs-reglages-reset) |
 
-Réglages Hive détaillés côté usage : [../hive.md](#docs-hive).
+### Hors menu Réglages (liés aux réglages)
+
+- **Bibliothèque** (`/bibliotheque`) : trois onglets *À traiter*, *Nettoyage*, *Contenu* — voir [scan.md](#docs-reglages-scan).
+- **Médias** (`/medias`) : liste des fiches, filtres et suppression en masse — voir [medias.md](#docs-medias).
+
+L’URL `/reglages/nettoyage` redirige vers `/reglages/corbeille`.
 
 ## Compte
 
@@ -386,26 +420,26 @@ Chemin source : `docs/reglages/sources.md`
 
 URL : `/reglages/sources`
 
-Les mêmes URLs peuvent être préremplies à l’**étape Sources** de l’assistant (`/configuration`) ; voir [Premier démarrage — Sources](#docs-premier-demarrage).
+Page dédiée (composant séparé de l’écran générique). Les mêmes URL peuvent être préremplies à l’étape **Sources** de l’assistant (`/configuration`) — voir [Premier démarrage](#docs-premier-demarrage).
 
-### Présentation de la page
+Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la page et renvoie vers [Services et jetons](#docs-reglages-jetons) ou [Hive](#docs-reglages-hive).
 
-- Chaque source est une **carte** avec un interrupteur **Activée** / **Désactivée**, un libellé lisible (plus d’identifiant technique en titre) et un fil d’Ariane court (rôle de la source).
-- Dans **Ordre des sources**, seules les sources **activées** se réordonnent ; les sources désactivées restent visibles en bas, grisées, avec la mention **désactivée**.
-- Les URL longues (instances Comet, addons Stremio) sont **tronquées** avec boutons **Voir** et **Copier**.
+### Présentation
+
+- Chaque source est une **carte** : interrupteur Activée / Désactivée, libellé lisible, courte description du rôle.
+- Dans **Ordre des sources**, seules les sources **disponibles** (selon AllDebrid / Hive) se réordonnent ; les autres peuvent être masquées avec un message *Disponible après connexion d’AllDebrid*.
+- Les URL longues (instances Comet, addons Stremio) sont tronquées avec **Voir** et **Copier**.
 
 ### Ordre et activation
 
-- **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester cochée.
-- État en ligne / panne : API `GET /api/v1/settings/sources/status` (affiché dans la page).
+- Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré.
+- État en ligne / panne : affiché sur chaque carte ; API `GET /api/v1/settings/sources/status`.
 
-### Addons Stremio
+### Sans clé AllDebrid
 
-Source `stremio_addons` : liste ordonnée d’addons `{ url, enabled }`, même ergonomie que les instances Comet (ajout, suppression, ordre).
-
-- Une requête `…/stream/movie|series/…json` par addon activé ; cache et délai par domaine.
-- Les segments d’URL contenant des clés de débrid ou de tracker sont **retirés** à la saisie ; une URL encore garnie d’un secret est refusée à l’appel.
-- Les flux manifestement informatifs ou lecteurs seuls sont ignorés ; la sélection suit les **profils de qualité** (torrents, aimants, liens débridables).
+- Sources **qui passent par AllDebrid** (Wawacity, Free-Télécharger, Comet, Torrentio, Stremio) : cartes et réglages détaillés masqués ou indisponibles ; elles ne sont pas proposées dans l’ordre affiché.
+- **Hive** : reste configurable si Hive est activé dans [Hive](#docs-reglages-hive).
+- Panneau **Rythme des requêtes** et **ordre des hébergeurs** : visible seulement si AllDebrid est connecté.
 
 ### Rythme et cache
 
@@ -414,15 +448,16 @@ Source `stremio_addons` : liste ordonnée d’addons `{ url, enabled }`, même e
 | `source_request_delay_seconds` | 5 | 2–60 | Pause entre requêtes HTTP vers les sources |
 | `source_cache_seconds` | 900 | 0–3600 | Cache des résultats de recherche |
 | `source_error_backoff_min` | 180 | 30–1440 | Repousse après erreur source |
-| `remote_search_cooldown_hours` | 6 | 1–72 | Délai entre deux recherches distantes d'une même fiche |
+| `remote_search_cooldown_hours` | 6 | 1–72 | Délai entre deux recherches distantes d’une même fiche |
 
-`remote_search_cooldown_hours` est réglable dans **Réglages → Sources**, section **Rythme des requêtes** (1 à 72 h, défaut 6). Il s’applique **par fiche** via `last_remote_search_at` : une nouvelle recherche distante n’est acceptée qu’après ce délai depuis la dernière qui a consommé le quota. Concernent notamment le **retéléchargement** sans lien vivant, les passages **REDISCOVER**, le **repli de version** et la **relecture source** d’une réparation lorsqu’une recherche réseau est nécessaire — **y compris si l’action est déclenchée à la main** (pas de dérogation). Un sondage qui se contente des pages déjà liées en base n’écrit pas ce quota.
+`remote_search_cooldown_hours` s’applique **par fiche** : retéléchargement, repli de profil, relecture source, y compris actions manuelles (pas de dérogation si une recherche réseau est nécessaire).
 
-### Hébergeurs (liens débrid)
+### Hébergeurs (liens HTML)
 
-- **`hoster_preference`** : ordre des hébergeurs acceptés pour les liens HTML, via une liste réordonnable dans l’interface.
-- Les noms proposés combinent une liste **statique** connue de l’application et la liste **publique AllDebrid** (`/v4/hosts`, mise en cache côté serveur).
-- Certains hébergeurs restent **refusés** par le serveur sans réglage utilisateur. Les erreurs de saisie affichent le **détail** renvoyé par l’API (par ex. hébergeur inconnu).
+- Clé **`hoster_preference`** : ordre des hébergeurs acceptés, liste réordonnable dans **Rythme des requêtes**.
+- Noms proposés : liste statique de l’application **plus** hôtes publics AllDebrid (mis en cache côté serveur).
+- **`uptobox`** : **hébergeur interdit** — absent des listes, refusé à l’enregistrement et ignoré à la sélection de liens, même s’il apparaît encore sur une page source.
+- **`1fichier`** est placé en dernier par défaut.
 
 ### URLs par source
 
@@ -435,23 +470,30 @@ Source `stremio_addons` : liste ordonnée d’addons `{ url, enabled }`, même e
 | `comet_base_urls` | Liste d’instances Comet (une par ligne) ; `comet_base_url` garde la première |
 | `stremio_addons` | JSON ou liste d’addons Stremio |
 
-Migration de domaine Wawacity : bannière et actions **Accepter / Rétablir** si une redirection est proposée (`wawacity_domain_propose_only` en env au premier boot).
+Migration de domaine Wawacity : bannière et actions **Accepter / Rétablir** si une redirection est proposée.
+
+### Addons Stremio
+
+Source `stremio_addons` : liste ordonnée `{ url, enabled }`, même ergonomie que Comet.
+
+- Une requête stream par addon activé ; cache et délai partagés avec les autres sources.
+- Segments d’URL contenant clés débrid ou tracker **retirés** à la saisie.
+- Flux informatifs ou lecteurs seuls ignorés ; sélection selon [Profils de qualité](#docs-reglages-qualite).
 
 ### Test de source
 
 Bloc **Tester les sources** :
 
-- **Titre** obligatoire (film, ou épisode avec suffixe `S01E02`). Année optionnelle entre parenthèses dans le titre.
-- **Identifiant TMDB** optionnel : le serveur récupère titre, année et identifiant IMDb associé pour la sonde (sans modifier la base).
-- **Tester** (sur une carte) ou **Tester toutes** : une requête témoin par source (ou **une ligne par addon Stremio activé**) ; aucun téléchargement.
-- Les résultats reprennent les **messages exacts** du moteur (trouvé, aucun résultat, refus profil, erreur, etc.), la **durée** et le **profil de qualité** utilisé.
-- Chaque carte affiche aussi le **dernier test** enregistré (horodatage, issue, motif, durée). Un test manuel « aucun résultat » remet la source **en ligne** et efface un ancien état de panne lié à ce test.
+- **Titre** obligatoire (film, ou épisode avec suffixe `S01E02`). Année optionnelle entre parenthèses.
+- **Identifiant TMDB** optionnel pour enrichir la sonde sans modifier la base.
+- **Tester** (carte) ou **Tester toutes** : une requête témoin par source (ou une par addon Stremio activé) ; **aucun téléchargement**.
+- Résultats : messages du moteur, durée, profil utilisé ; dernier test mémorisé par carte.
 
 ### Hive
 
-Si Hive est activé et que vous appartenez à des ruches, la ligne d’état Hive affiche le nombre de ruches.
+Si Hive est activé et que vous appartenez à des ruches, l’interface peut afficher le nombre de ruches.
 
-Voir [Chaîne de téléchargement](#docs-telechargements).
+Voir [Chaîne de téléchargement](#docs-telechargements) et [Hive](#docs-hive).
 
 ## Réglages de scan
 
@@ -472,6 +514,8 @@ URL : `/reglages/scan`
 
 L’ordre des sources se règle dans [Sources](#docs-reglages-sources).
 
+Sans téléchargement disponible (AllDebrid absent et Hive inutilisable), l’option **Séries en cours seulement** et le bloc **Téléchargement automatique pour les nouveaux suivis** sont masqués avec un renvoi vers [Services et jetons](#docs-reglages-jetons).
+
 ### Chemins (absolus dans le conteneur)
 
 | Clé | Défaut si vide (`DATA_DIR=/data`) |
@@ -480,7 +524,8 @@ L’ordre des sources se règle dans [Sources](#docs-reglages-sources).
 | `library_movies_path` | `/data/media/Films` (surcharge env `MOVIES_DIR`) |
 | `library_series_path` | `/data/media/Series` (surcharge env `SERIES_DIR`) |
 | `downloads_dir` | `/data/downloads` |
-| `trash_dir` | `/data/.trash` |
+
+Le dossier corbeille (`trash_dir`) se règle dans [Corbeille](#docs-reglages-corbeille).
 
 L’UI affiche les chemins **en vigueur** et un **warning** si les volumes ne permettent pas les renommages atomiques.
 
@@ -491,8 +536,21 @@ L’UI affiche les chemins **en vigueur** et un **warning** si les volumes ne pe
 | `library_scan_interval_hours` | 24 | Repasse planifiée (1–168 h) |
 | `library_scan_enabled` | true | Active la repasse automatique |
 | `library_auto_follow` | false | Suivre automatiquement après identification TMDB |
-| `downloads_completed_action` | `archive` | `archive` ou `remove` dans la liste Téléchargements (fichier conservé) |
-| `auto_download_default` | true | Téléchargement auto pour les nouveaux suivis |
+| `auto_download_default` | true | Téléchargement auto pour les nouveaux suivis (masqué sans source de téléchargement) |
+
+Une repasse a aussi lieu après chaque fichier déposé. L’action après téléchargement terminé (`downloads_completed_action`) se règle dans [Corbeille](#docs-reglages-corbeille).
+
+### Bibliothèque (onglets)
+
+Écran **Bibliothèque** (`/bibliotheque`) : trois onglets (compteurs dans l’interface).
+
+| Onglet | Rôle |
+| --- | --- |
+| **À traiter** | Dossiers à ranger (films / séries), fichiers suspects, regroupements, alignement Jellyfin si connecté, renommages en attente |
+| **Nettoyage** | Dossiers vides, téléchargements incomplets (aperçu avant envoi à la corbeille si l’option est activée dans [Corbeille](#docs-reglages-corbeille)) |
+| **Contenu** | Films et séries déjà conformes, avec filtres et tri |
+
+L’URL peut mémoriser l’onglet (`?onglet=nettoyage`, etc.). Le paramètre `incomplets=corbeille` ouvre directement *Nettoyage*.
 
 ## Jellyfin
 
@@ -502,7 +560,37 @@ Chemin source : `docs/reglages/jellyfin.md`
 
 URL : `/reglages/jellyfin`
 
-Voir le guide [Jellyfin](#docs-jellyfin). Clés : `jellyfin_url`, `jellyfin_api_key`, `jellyfin_user_id`, `jellyfin_path_map`, `jellyfin_path_prefix`, `jellyfin_auto_rename`, `jellyfin_push_watched`, `jellyfin_poll_interval_min`, `jellyfin_webhook_secret` (généré, affiché pour plugin webhook).
+**URL** et **clé API** se renseignent sur **Réglages → Services et jetons**, carte Jellyfin. Tant que Jellyfin n’est pas « connecté » (URL + clé enregistrées), cette page n’affiche que le renvoi vers la carte.
+
+Guide détaillé (webhook, chemins Docker, dépannage) : [../jellyfin.md](#docs-jellyfin).
+
+### Contenu de la page (Jellyfin connecté)
+
+- **Utilisateur Jellyfin** : compte dont l’état « vu » est synchronisé avec MediaTracker (liste chargée depuis le serveur).
+- **Correspondance des chemins** (`jellyfin_path_map`) : paires `préfixe_côté_Jellyfin=chemin_MediaTracker`, séparées par `;`.
+- **Ancien préfixe** (`jellyfin_path_prefix`) : repli si la correspondance ne couvre pas un chemin.
+- **Renommage automatique** (`jellyfin_auto_rename`) : désactivé par défaut.
+- **Pousser un vu manuel** (`jellyfin_push_watched`) : désactivé par défaut ; un vu posé à la main n’est pas effacé par la synchro entrante.
+- **Synchro « vu » (minutes)** (`jellyfin_poll_interval_min`) : passage périodique ; le **webhook** met à jour plus vite s’il est configuré.
+- **Webhook** : URL et jeton affichés pour le plugin Jellyfin (en-tête `X-MediaTracker-Token` prioritaire sur `?token=`).
+- Boutons **Tester la connexion** et **Synchroniser les vus**.
+
+Après chaque fichier déposé, MediaTracker demande aussi un rafraîchissement des bibliothèques Jellyfin (environ une minute).
+
+### Import d’historique « vu »
+
+L’import hors ligne (copie de base Jellyfin ou CSV) ne figure plus dans le menu principal **Bibliothèque**. Il est regroupé avec la configuration Jellyfin :
+
+1. Renseigner URL et clé sur **Services et jetons**, carte Jellyfin.
+2. Sur la même carte, **Importer l’historique** ouvre l’écran d’import (route dédiée sous `/bibliotheque/…`).
+
+Deux modes sur cet écran : **Bases Jellyfin** (recommandé) et **Fichier CSV**. Le suivi reste désactivé tant que vous ne le réactivez pas après l’import.
+
+Étapes, formats et limites : section *Importer l’historique « vu » depuis Jellyfin* dans [../jellyfin.md](#docs-jellyfin).
+
+### Bibliothèque
+
+Avec Jellyfin connecté, l’onglet **À traiter** de la **Bibliothèque** peut proposer l’**alignement Jellyfin** (fusion ou rattachement de fiches selon l’état vu côté serveur). Voir [scan.md](#docs-reglages-scan).
 
 ## Notifications
 
@@ -520,23 +608,72 @@ URL : `/reglages/notifications`
 
 Cibles : **Home Assistant** (webhook sans HMAC), **ntfy**, **webhook signé** HMAC-SHA256. Événements sélectionnables par cible (nouveautés décoché par défaut à la création).
 
-## Nettoyage
+## Corbeille
 
-Chemin source : `docs/reglages/nettoyage.md`
+Chemin source : `docs/reglages/corbeille.md`
 
-<a id="docs-reglages-nettoyage"></a>
+<a id="docs-reglages-corbeille"></a>
 
-URL : `/reglages/nettoyage`
+URL : `/reglages/corbeille`. L’URL `/reglages/nettoyage` redirige vers cette page.
+
+Section **Stockage** : contenu de la corbeille, rétention, suppression automatique du vu, incomplets, conservation des sauvegardes et de la liste des téléchargements, renvoi vers la purge AllDebrid si le compte est connecté.
+
+### Contenu
+
+Liste des fichiers en corbeille : **Restaurer**, **Supprimer** (définitif), **Vider la corbeille** (avec confirmation).
+
+### Durée en corbeille
 
 | Clé | Défaut | Plage | Rôle |
 | --- | --- | --- | --- |
-| `incomplete_cleanup_enabled` | false | bool | Corbeille pour incomplets / orphelins (après aperçu Bibliothèque) |
+| `trash_retention_days` | 7 | 1–90 | Jours avant purge définitive des fichiers en corbeille |
+| `trash_dir` | `/data/.trash` | chemin | Dossier corbeille (même volume que les bibliothèques) |
+
+L’interface affiche le chemin **en vigueur** et un avertissement si les volumes empêchent les renommages atomiques.
+
+### Suppression automatique du vu
+
+| Clé | Défaut | Plage | Rôle |
+| --- | --- | --- | --- |
 | `auto_delete_enabled` | true | bool | Suppression auto du contenu vu |
 | `auto_delete_days` | 14 | 1–365 | Délai après visionnage |
 | `cleanup_notice_hours` | 24 | 1–168 | Préavis notification |
-| `trash_retention_days` | 7 | 1–90 | Rétention en corbeille avant purge |
 
-UI : aperçu prochain passage, liste corbeille (restaurer / supprimer définitif).
+Comportement affiché : le contenu vu part à la corbeille après le délai et le préavis ; le suivi n’est pas requis ; une saison n’est retirée que si elle est entièrement vue. Une fiche peut imposer son propre délai ou être marquée **Garder**.
+
+Bouton **Aperçu du prochain passage** : listes *Sera supprimé* et *Annoncé, pas encore supprimé*.
+
+### Téléchargements incomplets
+
+| Clé | Défaut | Rôle |
+| --- | --- | --- |
+| `incomplete_cleanup_enabled` | false | Après aperçu dans **Bibliothèque** (onglet *Nettoyage*) |
+
+Quand c’est activé : orphelins déjà en bibliothèque, fichiers minuscules et contrôles aria2 peuvent partir à la corbeille ; les autres incomplets restent le nombre de jours indiqué dans **Durées fixes** ci-dessous.
+
+### Conservation
+
+| Clé | Défaut | Plage | Rôle |
+| --- | --- | --- | --- |
+| `backup_keep` | 7 | 1–90 | Sauvegardes SQLite quotidiennes conservées (`/config/backups`) |
+| `downloads_completed_action` | `archive` | `archive` / `remove` | Entrée dans la liste Téléchargements après dépôt (fichier conservé en bibliothèque) |
+
+### Durées fixes
+
+Conservation automatique **côté serveur**, affichée en lecture seule dans le bloc **Durées fixes** (non modifiable dans l’interface). API : `GET /api/v1/settings/fixed-retention`.
+
+| Élément (libellé UI) | Rôle |
+| --- | --- |
+| Journal des événements | Purge des entrées du journal au-delà de la fenêtre affichée |
+| Historique des états des sources | Purge des changements d’état Wawacity, Comet, hébergeurs, etc. |
+| Métriques de performance | Purge des points d’historique CPU/RSS |
+| Téléchargements incomplets (avant nettoyage) | Délai avant proposition de corbeille pour un incomplet sans téléchargement actif |
+
+Les valeurs exactes (en jours) sont celles affichées sur la page.
+
+### AllDebrid
+
+Bloc **AllDebrid** : lien vers [AllDebrid](#docs-reglages-alldebrid) pour la purge manuelle — **uniquement si le compte AllDebrid est connecté** (sinon bloc absent).
 
 ## AllDebrid
 
@@ -546,11 +683,19 @@ Chemin source : `docs/reglages/alldebrid.md`
 
 URL : `/reglages/alldebrid`
 
-- Bloc **compte** : clé API, état PIN si utilisé (`alldebrid_pin_session` côté serveur).
-- **`alldebrid_auto_purge`** : après rangement réussi, retire lien / historique / aimant lié au job (défaut activé).
-- Boutons **Purger AllDebrid** (liens des jobs terminés) et **Tout purger** (historique récent entier, avec confirmation).
+La **clé API** ou la liaison **PIN** se configurent sur **Réglages → Services et jetons**, carte AllDebrid.
 
-La clé peut être préfixée via env `ALLDEBRID_API_KEY` au premier boot.
+Tant qu’AllDebrid n’est pas connecté, cette page n’affiche que le renvoi vers la carte.
+
+### Réglages (compte connecté)
+
+- **`alldebrid_auto_purge`** : après un rangement réussi, retire le lien enregistré, l’entrée d’historique correspondante et l’aimant du téléchargement sur le compte (activé par défaut).
+- **Purger AllDebrid** : ne retire que les liens des téléchargements terminés par MediaTracker.
+- **Tout purger** : confirmation requise — vide l’historique récent du compte, y compris les aimants que MediaTracker n’a pas créés.
+
+La clé peut être préfixée via env `ALLDEBRID_API_KEY` au premier démarrage.
+
+Voir aussi le bloc **AllDebrid** dans [Corbeille](#docs-reglages-corbeille) (lien rapide vers cette page).
 
 ## Disque et sauvegardes
 
@@ -560,12 +705,25 @@ Chemin source : `docs/reglages/disque.md`
 
 URL : `/reglages/disque`
 
+### Espace disque
+
+Carte **espace disque** (volumes données et configuration).
+
 | Clé | Défaut | Plage | Rôle |
 | --- | --- | --- | --- |
-| `disk_min_free_gb` | 5 | 0–1024 | Pause téléchargements si espace libre insuffisant (`0` = off) |
-| `backup_keep` | 7 | 1–90 | Sauvegardes SQLite quotidiennes dans `/config/backups` |
+| `disk_min_free_gb` | 5 | 0–1024 | Garde-fou espace libre sur le volume des téléchargements (`0` = désactivé) |
 
-Carte espace disque (données et config). Bloc **Sauvegarde / restauration** : liste des copies, téléchargement, import d’un fichier `.db`, restauration avec aperçu et confirmation.
+Comportement :
+
+- **Sous le seuil** : téléchargements en **pause**, notification « Espace disque » ; les jobs actifs passent en erreur `DISK_LOW` jusqu’au retour au-dessus du seuil.
+- **Avant de lancer un nouveau téléchargement** (aria2) : le serveur exige l’espace libre **minimum réglé**, plus la taille estimée du fichier (avec une marge fixe), sinon le job reste en attente (`DISK_FULL`) sans démarrer aria2.
+- Quand l’espace redevient suffisant, les téléchargements en pause pour cause de disque sont repris.
+
+Le nombre de sauvegardes quotidiennes conservées se règle dans [Corbeille](#docs-reglages-corbeille) (`backup_keep`).
+
+### Sauvegarde / restauration
+
+Bloc **Sauvegarde / restauration** : liste des copies dans `/config/backups`, téléchargement d’un fichier `.db`, import avec aperçu et confirmation.
 
 Voir [Sauvegarde](#docs-sauvegarde).
 
@@ -601,15 +759,15 @@ Chemin source : `docs/reglages/maj.md`
 
 URL : `/reglages/maj`
 
-- Affiche version, SHA image, date de build, dernière vérification GHCR/GitHub.
-- **Vérifier la mise à jour** : compare au registre (jetons dans [Jetons](#docs-reglages-jetons)).
-- **Mettre à jour maintenant** : délègue à Watchtower si `watchtower_url` + `watchtower_token` sont configurés.
+- **Version installée** : version, image, date de build, dernière vérification.
+- **Vérifier la mise à jour** : comparaison registre / GitHub (jetons sur [Services et jetons](#docs-reglages-jetons), carte GitHub).
+- **Mettre à jour maintenant** : délègue à Watchtower si URL et jeton Watchtower sont configurés (même carte **Services et jetons**).
 - **Redémarrer** : redémarrage applicatif.
-- **`notify_on_update`** : notification après mise à jour automatique Watchtower.
+- **Me notifier quand Watchtower installe une nouvelle version** (`notify_on_update`) : notification via les canaux définis dans [Notifications](#docs-reglages-notifications) — interrupteur masqué si Watchtower n’est pas configuré.
 
 Voir [Mises à jour](#docs-mises-a-jour).
 
-## Jetons d'API
+## Services et jetons
 
 Chemin source : `docs/reglages/jetons.md`
 
@@ -617,20 +775,52 @@ Chemin source : `docs/reglages/jetons.md`
 
 URL : `/reglages/jetons`
 
-### Secrets sortants (services distants)
+Un **service par carte**. Les secrets sortants (TMDB, AllDebrid, Jellyfin, GitHub, Watchtower) ne sont **jamais réaffichés** après enregistrement (chiffrement en base). Pour Watchtower, utilisez le jeton du conteneur (`WATCHTOWER_HTTP_API_TOKEN`), pas un jeton **Accès API** MediaTracker.
 
-| Clé | Usage |
-| --- | --- |
-| `ghcr_read_token` | Lecture métadonnées image GHCR (comparaison de version) |
-| `github_update_token` | Repli : dernier commit sur `main` si GHCR absent |
-| `watchtower_url` | Base URL API Watchtower (`http://watchtower:8080`) |
-| `watchtower_token` | Bearer identique à `WATCHTOWER_HTTP_API_TOKEN` |
+### TMDB
 
-Secrets jamais réaffichés après enregistrement (chiffrement en base).
+- **Jeton de lecture** (`tmdb_read_token`).
+- **Déverrouille** : écrans Découvrir et Nouveautés, identification TMDB des médias et de la bibliothèque disque.
+- Sans jeton : pas de recherche catalogue ni d’identification distante TMDB.
 
-### Accès API (entrants)
+### AllDebrid
 
-Jetons `mt_…` créés dans l’UI : portées `read`, `write`, `admin`. Secret visible **une seule fois** à la création. Usage typique : Home Assistant, scripts LAN.
+- Connexion via **clé API** ou flux **PIN** (bloc compte sur la carte).
+- **Déverrouille** :
+  - page [Sources](#docs-reglages-sources) : ordre des sources, cartes Wawacity / Free-Télécharger / Comet / Torrentio / addons Stremio, **rythme des requêtes** et **ordre des hébergeurs** ;
+  - page [AllDebrid](#docs-reglages-alldebrid) : purge automatique après dépôt, purges manuelles ;
+  - dans [Réglages de scan](#docs-reglages-scan) : options de téléchargement automatique des nouveaux suivis.
+- **Masqué sans clé AllDebrid connectée** : les sources qui passent par AllDebrid n’apparaissent pas dans l’ordre ni dans les réglages détaillés ; un message oriente vers cette carte ou vers [Hive](#docs-reglages-hive). **Hive** reste visible si Hive est activé.
+- Sans AllDebrid **ni** Hive utilisable, le téléchargement depuis les sources est bloqué (`download_ready` faux).
+
+### Jellyfin
+
+- **URL** et **clé API** (`jellyfin_url`, `jellyfin_api_key`).
+- **Déverrouille** :
+  - section [Jellyfin](#docs-reglages-jellyfin) : utilisateur, correspondance des chemins, webhook, synchro des vus, tests ;
+  - bloc *Alignement Jellyfin* dans la **Bibliothèque** (onglet *À traiter*) ;
+  - bouton **Importer l’historique** sur la carte (parcours détaillé dans [jellyfin.md](#docs-reglages-jellyfin) et [../jellyfin.md](#docs-jellyfin)).
+- Tant que l’URL ou la clé manquent, la section Jellyfin n’affiche que le renvoi vers cette carte.
+
+### GitHub
+
+- **Jeton GHCR (lecture)** (`ghcr_read_token`) : métadonnées de l’image pour comparer les versions.
+- **Jeton GitHub (repli)** (`github_update_token`) : dernier commit sur la branche suivie si GHCR est indisponible.
+- **Déverrouille** : comparaison de version et badge « nouvelle image » dans [Mise à jour](#docs-reglages-maj).
+
+### Watchtower
+
+- **URL** (`watchtower_url`) et **jeton** (`watchtower_token`), alignés sur l’API HTTP de Watchtower.
+- **Déverrouille** : bouton **Mettre à jour maintenant** et interrupteur de notification après mise à jour automatique dans [Mise à jour](#docs-reglages-maj).
+- Sans URL et jeton valides, la mise à jour immédiate reste indisponible (message dans l’interface).
+
+### Accès API (entrant)
+
+Jetons `mt_…` **créés dans MediaTracker** pour scripts et intégrations sur le LAN (Home Assistant, etc.).
+
+- Portées : `read`, `write`, `admin`.
+- Le secret n’est montré **qu’une fois** à la création.
+- Ne sert **pas** pour Watchtower ni pour Jellyfin.
 
 ## Réinitialiser la base
 
@@ -643,6 +833,186 @@ URL : `/reglages/reset`
 Efface fiches, téléchargements et index bibliothèque. Une copie SQLite est écrite dans `/config/backups` avant suppression. Les fichiers sur `/data` **ne sont pas** supprimés.
 
 Confirmation textuelle : saisir `RESET`.
+
+## Médias
+
+Chemin source : `docs/medias.md`
+
+<a id="docs-medias"></a>
+
+**Médias** (`/medias`) est l’écran qui réunit toutes vos **fiches** films et séries suivies ou conservées dans MediaTracker : affiches, état de téléchargement, progression de visionnage et raccourcis vers la fiche détaillée ou Jellyfin.
+
+Pour le jeton TMDB, le suivi depuis **Suivre** et la correction d’identifiant, voir [TMDB](#docs-tmdb). Pour le partage entre instances, voir [Hive](#docs-hive).
+
+### À la une
+
+En haut de la page, un bandeau **À la une** met en avant une fiche parmi celles **actuellement affichées** (filtres et recherche pris en compte) :
+
+- priorité à une **série en cours** (épisodes vus, mais pas tous) ;
+- sinon la première carte de la liste filtrée.
+
+Le bandeau propose **Fiche** (vers `/medias/<id>`) et, si Jellyfin est lié, **Lire sur Jellyfin**.
+
+### Chargement de la liste
+
+La grille charge l’intégralité de votre collection par **pages** via `GET /api/v1/media` (200 fiches par page, curseur de pagination). Le compteur **Chargement… N titres reçus** augmente au fur et à mesure.
+
+- Hors ligne (mode PWA), l’application peut afficher la **dernière visite** en cache ; les affiches ne sont pas conservées hors ligne.
+- Si **Hive** est activé, des pastilles Hive sur les cartes se chargent **après** la grille, sans bloquer l’affichage des affiches.
+
+Les statistiques sous le titre indiquent le nombre total de titres, de séries et de films. Lorsqu’un filtre ou une recherche est actif, une ligne **N affichés** précise le sous-ensemble visible.
+
+### Filtres d’état (boutons)
+
+Une rangée de boutons restreint la liste côté interface (sans nouvel appel API) :
+
+| Bouton | Effet |
+| --- | --- |
+| **Tous** | Aucun filtre d’état |
+| **Disponibles** | Fiches dont la disponibilité est « disponible » (fichier obtenu via le suivi) |
+| **En attente** | En attente de téléchargement, pas encore vues |
+| **Sur le disque** | Fichier présent sur le NAS (y compris partiel pour une série) |
+| **En pause** | Suivi en pause |
+| **Suivi par Jellyfin** | Fiches issues de l’identification bibliothèque (`follow_origin` identification) |
+
+Sur **Suivi par Jellyfin**, l’action **Ne plus suivre ces fiches** appelle `POST /api/v1/media/unfollow-identified` : les fiches identifiées passent en non suivies, les fichiers restent en place.
+
+### Recherche, filtres avancés et tri
+
+**Recherche** : filtre instantané sur le **titre** (insensible à la casse, locale française).
+
+**Tri** :
+
+- **Alphabétique** (défaut) ;
+- **Récents** (date d’ajout décroissante).
+
+**Filtres avancés** (menus **Suivi**, **Vu**, **Type**, **Origine**) :
+
+| Filtre | Valeurs |
+| --- | --- |
+| Suivi | Tous, Suivis, Non suivis |
+| Vu | Tous, Vus, En cours (progression > 0 sans « vu » global), Non vus |
+| Type | Tous, Séries, Films |
+| Origine | Toutes, Ajout manuel, Import Jellyfin, Identifiés bibliothèque, À identifier TMDB |
+
+Sur mobile, le panneau **Filtres** regroupe ces réglages ; des **pastilles** rappellent les filtres actifs, avec **Réinitialiser** pour tout effacer.
+
+### Densité de la grille
+
+**Aérée** ou **Dense** : le choix est mémorisé dans le navigateur. En mode dense, l’année et le type sur chaque carte sont allégés.
+
+### Cartes et pastilles
+
+Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / Série), l’année (sauf en dense), puis :
+
+**Pastille d’état** (priorité dans cet ordre) :
+
+| Pastille | Signification |
+| --- | --- |
+| En pause | Suivi suspendu |
+| Vu | Marqué comme vu |
+| Sur le disque | Fichier présent |
+| Partiel | Série incomplète sur disque (libellé personnalisé possible) |
+| Disponible | Fichier obtenu via le suivi |
+| Pas encore disponible | Aucune source trouvée pour l’instant |
+| En attente | En attente de téléchargement |
+
+**Icônes** complémentaires : **Suivi**, **Sur le disque**.
+
+**Pastilles Hive** (si Hive actif, sur les fiches visibles) : par exemple **Partagé**, **Préparation au partage**, **En transfert**, **Mode tirage**, etc.
+
+Un clic sur la carte ouvre l’**aperçu rapide** (voir ci-dessous). Le lien **Fiche** sur la carte mène à `/medias/<id>`.
+
+### Menu de carte
+
+Chaque carte expose un menu d’actions :
+
+- **Appui long** (tactile) ou **clic droit** sur l’affiche ;
+- touche **Menu** au clavier (indication d’accessibilité sur la carte).
+
+Entrées typiques sur la liste Médias :
+
+- **Fiche** ;
+- **Lire sur Jellyfin** (si une URL Jellyfin est connue).
+
+En mode **Sélectionner**, le lien **Fiche** sur la carte est masqué ; un clic sur la carte coche ou décoche la fiche.
+
+### Aperçu rapide
+
+Un clic sur l’affiche (hors sélection multiple) ouvre un panneau **aperçu** :
+
+- synopsis, année, type ;
+- pour une fiche **non suivie** : **Suivre** (avec choix des saisons et politique des nouveaux épisodes pour une série), lien **TMDB**, **Fiche** ;
+- pour une fiche **suivie** : **Fiche**, **Lire sur Jellyfin**, **Source** (si applicable), **Fermer**.
+
+Données complétées via `GET /api/v1/media/<id>` lorsque l’aperçu s’ouvre.
+
+**Échap** ferme l’aperçu (ou le sous-dialogue de suivi).
+
+### Fiche média (`/medias/<id>`)
+
+La fiche charge `GET /api/v1/media/<id>` et, pour une série, `GET /api/v1/media/<id>/items` (saisons et épisodes).
+
+#### En-tête commun
+
+- Affiche, titre, année, synopsis ;
+- pour une série : statut TMDB, nombre de saisons, barre **X vu sur Y**, prochain épisode ;
+- pastilles **Suivi**, état fichier ou **Pas encore disponible** (film) ;
+- liens **TMDB** / **Jellyfin**, **Bande-annonce** (si TMDB fournit une clé YouTube).
+
+#### Actions principales (fiche suivie)
+
+Le bloc **Suivi** / **Actions** (composant partagé film et série) regroupe :
+
+- **Action principale** selon l’état : *Vérifier maintenant*, *Rechercher maintenant*, *Retélécharger*, *Restaurer* (fichier en corbeille), etc. ;
+- **Mettre en pause** / **Reprendre** ;
+- menu **Plus d’actions** : vérification manuelle, pour une série *Marquer la série comme vue / non vue*, **Ne plus suivre…** ;
+- interrupteurs **Garder** (film ou série), **Téléchargement automatique** (série) ;
+- section **État** repliable : progression, fichier, dernière et prochaine vérification, message du moteur de recherche.
+
+Fiche **série** : mise en page dédiée (carte Suivi mobile, barre d’actions bureau).
+
+#### Fiche film — fichier
+
+Hors « pas encore disponible », le panneau **Film** détaille le fichier unique : statut, nom, actions **Garder**, marquer vu, retélécharger, forcer le téléchargement, suppression vers corbeille, partage Hive si applicable.
+
+#### Fiche série — saisons et épisodes
+
+Section **Saisons et épisodes** (série suivie ou fiches avec fichiers restants) :
+
+- chaque saison se **déplie** ; compteurs vus, fichiers sur disque, épisodes au catalogue ;
+- par saison : **Garder**, menu (marquer saison vue/non vue, supprimer la saison, forcer la saison, partage Hive en masse) ;
+- par épisode : code SxxExx, statut (téléchargé, en cours, absent…), nom de fichier, date de diffusion, puce Hive ;
+- **Garder** par épisode (désactivé si la série ou la saison est déjà en « Garder ») ;
+- menu épisode : vu/non vu, vu jusqu’à cet épisode, restaurer, retélécharger, télécharger, forcer, supprimer, partage Hive, etc.
+
+#### Réglages de la fiche
+
+Le repli **Réglages de cette fiche** (`?reglages=ouverts` dans l’URL l’ouvre) contient notamment : profil de qualité et repli, ordre des sources, identification TMDB, association dossier bibliothèque, Jellyfin (séries), maintenance (liens morts, réparation). Voir [Profils de qualité](#docs-reglages-qualite) et [TMDB — Corriger l’identifiant](#docs-tmdb-corriger-lidentifiant-tmdb-dune-serie).
+
+#### Fiche non suivie
+
+Bandeau **Suivre à nouveau** à la place des actions de suivi actif. Les opérations avancées sont sous **Plus d’actions** (garder, réglages, TMDB, changement d’identifiant, suppression fichiers ou fiche). La zone **Suppression et fin du suivi** en bas n’apparaît pas sur l’écran épuré non suivi — détail dans [TMDB — Fiche non suivie](#docs-tmdb-fiche-non-suivie).
+
+#### Zone danger (fiche suivie)
+
+Repli **Suppression et fin du suivi** :
+
+- **Ne plus suivre** (option corbeille pour les fichiers) ;
+- **Supprimer tous les fichiers** / **le film** (corbeille, fiche conservée) ;
+- **Supprimer la fiche…** : dialogue avec choix **corbeille** ou **conserver sur le disque** (`DELETE /api/v1/media/<id>?trash=true|false`).
+
+### Sélection multiple et suppression en masse
+
+Sur **Médias** (`/medias`), le bouton **Sélectionner** permet de cocher plusieurs fiches **parmi celles affichées** (filtres et recherche respectés), puis **Supprimer les fiches**.
+
+- Barre d’outils : compteur, **Tout sélectionner** (visible uniquement), **Annuler**, **Supprimer les fiches** ;
+- **Échap** quitte le mode sélection ou ferme le dialogue de confirmation ;
+- la confirmation appelle `DELETE /api/v1/media/bulk` avec `trash: false` : les fiches, épisodes, liens et historique associés sont retirés ; les téléchargements en cours sont **annulés** ; le journal des renommages est **conservé** ;
+- en sélection multiple, l’interface précise que **les fichiers sur le disque ne sont pas touchés** (aucun envoi à la corbeille). Les dossiers restent dans la bibliothèque physique ;
+- depuis **une seule fiche**, le dialogue de suppression propose le choix entre corbeille et conservation sur disque.
+
+Le mode sélection est indisponible hors ligne lorsque les actions serveur sont désactivées.
 
 ## TMDB
 
@@ -670,8 +1040,8 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 | **Derniers films** (`/nouveautes/films`) | Parcourir les films (cinéma, streaming, supports physiques) |
 | **Dernières séries** (`/nouveautes/series`) | Séries et diffusions à l’antenne |
 | **Suivre** | Rechercher un titre et l’ajouter à votre liste de suivi |
-| **Médias** (`/medias`) | Liste de vos fiches : chargement progressif, affiches et bannières via le cache local TMDB, badges Hive chargés ensuite (sans bloquer la grille) |
-| Fiche média | Métadonnées, saisons, estimation de disponibilité pour les films ; bloc Hive unifié si Hive est actif |
+| **Médias** (`/medias`) | Liste de vos fiches — voir [medias.md](#docs-medias) |
+| Fiche média (`/medias/<id>`) | Métadonnées, suivi, saisons et épisodes — voir [medias.md](#docs-medias) |
 
 Les anciennes URL d’essai `/tmdb`, `/tmdb/films` et `/tmdb/series` redirigent vers les écrans ci-dessus.
 
@@ -755,10 +1125,14 @@ Après chaque fichier déposé, MediaTracker demande aussi un **rafraîchissemen
 
 ### Importer l’historique « vu » depuis Jellyfin
 
-MediaTracker peut reprendre ce que vous aviez déjà marqué comme **vu** dans Jellyfin, sans rester connecté au serveur Jellyfin pendant l’import. Deux entrées dans **Bibliothèque → Importer l’historique** :
+MediaTracker peut reprendre ce que vous aviez déjà marqué comme **vu** dans Jellyfin, sans rester connecté au serveur Jellyfin pendant l’import.
 
-- onglet **Bases Jellyfin** (recommandé) ;
-- onglet **Fichier CSV** (export préalable ou archivage).
+**Entrée dans l’application** : **Réglages → Services et jetons**, carte Jellyfin — bouton **Importer l’historique** (après URL et clé API). Voir aussi [Réglages — Jellyfin](#docs-reglages-jellyfin).
+
+Deux modes sur l’écran d’import :
+
+- **Bases Jellyfin** (recommandé) ;
+- **Fichier CSV** (export préalable ou archivage).
 
 #### Avant de copier des fichiers Jellyfin
 
@@ -773,7 +1147,7 @@ Sur le serveur Jellyfin (ou une sauvegarde arrêtée), les données utiles se tr
 
 #### Parcours guidé (onglet Bases Jellyfin)
 
-1. **Bibliothèque → Importer l’historique** → onglet *Bases Jellyfin*.
+1. **Importer l’historique** (depuis la carte Jellyfin des réglages) → mode *Bases Jellyfin*.
 2. Envoyez une copie de **jellyfin.db** **ou** une archive **.zip** de sauvegarde Jellyfin 10.11.
 3. Choisissez le **compte Jellyfin** à importer.
 4. **Prévisualisation** : compteurs par source (bibliothèque, journal d’activité, éléments sans titre) et compteurs d’identification dans MediaTracker. Vous pouvez **télécharger le CSV** généré pour vos archives.
@@ -801,7 +1175,7 @@ Colonnes du CSV (UTF-8) : `type`, `title`, `year`, `series_title`, `season`, `ep
 
 #### Import CSV (onglet secondaire)
 
-1. **Bibliothèque → Importer l’historique** → onglet *Fichier CSV*.
+1. **Importer l’historique** → mode *Fichier CSV*.
 2. **Prévisualisation** puis **Confirmer** : même logique idempotente (réimporter le même fichier ne crée pas de doublons).
 3. **Réactiver le suivi** : liste à cocher du **dernier** import uniquement.
 

@@ -50,6 +50,7 @@ def test_defaults_follow_the_data_directory(client, app):
         body = client.get("/api/v1/storage")
         assert body.status_code == 200, body.text
         assert body.json()["movies_dir"] == str(layout.movies_dir)
+        assert body.json()["backups_dir"] == str(Path(app.state.settings.config_dir) / "backups")
         assert body.json()["same_filesystem"] is True
     finally:
         db.close()

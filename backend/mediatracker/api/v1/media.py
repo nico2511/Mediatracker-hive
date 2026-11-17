@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.config import get_settings
 from mediatracker.core.display_title import clean_display_title
 from mediatracker.core.fiche_check import fiche_last_check_at, touch_fiche_checked
 from mediatracker.core.file_status import FileStatusCounts, FileStatusIndex, aggregate_file_status
@@ -741,9 +742,10 @@ def _poll(
         ),
     )
     if poll_defaults is None:
-        interval_min = _setting_int(db, "scan_interval_min", 720)
-        ongoing_only = _setting_bool(db, "scan_ongoing_only", True)
-        window_days = _setting_int(db, "scan_air_window_days", 3)
+        defaults = get_settings()
+        interval_min = _setting_int(db, "scan_interval_min", defaults.scan_interval_min)
+        ongoing_only = _setting_bool(db, "scan_ongoing_only", defaults.scan_ongoing_only)
+        window_days = _setting_int(db, "scan_air_window_days", defaults.scan_air_window_days)
     else:
         interval_min, ongoing_only, window_days = poll_defaults
     allowed, reason = should_poll_source(
@@ -950,10 +952,11 @@ def list_media(
         rows = rows[:limit]
         next_cursor = str(rows[-1].id)
     grouped = _load_items(db, [row.id for row in rows])
+    defaults = get_settings()
     poll_defaults = (
-        _setting_int(db, "scan_interval_min", 720),
-        _setting_bool(db, "scan_ongoing_only", True),
-        _setting_int(db, "scan_air_window_days", 3),
+        _setting_int(db, "scan_interval_min", defaults.scan_interval_min),
+        _setting_bool(db, "scan_ongoing_only", defaults.scan_ongoing_only),
+        _setting_int(db, "scan_air_window_days", defaults.scan_air_window_days),
     )
     item_ids = [item.id for episodes in grouped.values() for item in episodes]
     all_items = [item for episodes in grouped.values() for item in episodes]

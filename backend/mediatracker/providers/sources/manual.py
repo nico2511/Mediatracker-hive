@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict
 
+from mediatracker.core.hosters import hoster_from_url
 from mediatracker.providers.base import (
     CapabilityNotSupported,
     Health,
@@ -17,35 +18,6 @@ from mediatracker.providers.base import (
     SourceRef,
     SourceResult,
     SourceTitle,
-)
-
-# Host suffixes checked against the URL hostname. Uptobox stays blocked at unlock time.
-_HOSTERS: tuple[tuple[str, str], ...] = (
-    ("rapidgator.net", "rapidgator"),
-    ("rapidgator.asia", "rapidgator"),
-    ("rg.to", "rapidgator"),
-    ("turbobit.net", "turbobit"),
-    ("turbobit.cloud", "turbobit"),
-    ("turbobit.cc", "turbobit"),
-    ("turbo.to", "turbobit"),
-    ("turb.cc", "turbobit"),
-    ("turb.pw", "turbobit"),
-    ("trbbt.net", "turbobit"),
-    ("trbt.cc", "turbobit"),
-    ("wayupload.com", "turbobit"),
-    ("htfl.net", "turbobit"),
-    ("hitf.cc", "turbobit"),
-    ("hitf.to", "turbobit"),
-    ("uploady.io", "uploady"),
-    ("dailyuploads.net", "dailyuploads"),
-    ("nitroflare.com", "nitroflare"),
-    ("katfile.com", "katfile"),
-    ("katfile.cloud", "katfile"),
-    ("tezfiles.com", "tezfiles"),
-    ("1fichier.com", "1fichier"),
-    ("ddownload.com", "ddownload"),
-    ("uploaded.net", "uploaded"),
-    ("uptobox.com", "uptobox"),
 )
 
 _PROTECTORS = (
@@ -140,13 +112,7 @@ def classify_url(url: str) -> LinkKind:
 
 
 def hoster_of(url: str) -> str | None:
-    host = (urlparse(url.strip()).hostname or "").lower()
-    if host.startswith("www."):
-        host = host[4:]
-    for suffix, name in _HOSTERS:
-        if host == suffix or host.endswith("." + suffix):
-            return name
-    return None
+    return hoster_from_url(url)
 
 
 def filename_of(url: str) -> str | None:

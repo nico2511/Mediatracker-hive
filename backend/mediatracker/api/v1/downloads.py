@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.core.hosters import hoster_is_blocked
 from mediatracker.core.pipeline import cancel_job, french_error, queue_pause, retry_job, schedule_full_retries
 from mediatracker.core.pipeline.download_guard import (
     DOWNLOAD_TERMINAL_STATES,
@@ -45,7 +46,7 @@ def _step_label(state: str) -> str | None:
 
 
 def _public_hoster(hoster: str | None) -> str | None:
-    if not hoster or hoster.casefold() == "uptobox":
+    if not hoster or hoster_is_blocked(hoster):
         return None
     return hoster
 

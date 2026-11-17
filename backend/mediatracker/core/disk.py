@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 DISK_LOW_KEY = "system.disk_low"
 GIB = 1024 * 1024 * 1024
+LAUNCH_SIZE_MARGIN = 50 * 1024 * 1024
+LAUNCH_UNKNOWN_SIZE_FALLBACK = 512 * 1024 * 1024
 
 
 def threshold_bytes(db: Session, settings: Settings) -> int:
@@ -25,6 +27,19 @@ def threshold_bytes(db: Session, settings: Settings) -> int:
     if gb <= 0:
         return 0
     return gb * GIB
+
+
+def launch_free_required(db: Session, settings: Settings, size: int | None) -> int:
+    """Bytes that must be free on the download volume before aria2 starts a job."""
+    reserve = threshold_bytes(db, settings)
+    if size:
+        needed = size + LAUNCH_SIZE_MARGIN
+        if reserve > 0:
+            needed += reserve
+        return needed
+    if reserve > 0:
+        return reserve
+    return LAUNCH_UNKNOWN_SIZE_FALLBACK
 
 
 def free_bytes(path: Path, disk_free: Callable[[Path], int] | None) -> int | None:

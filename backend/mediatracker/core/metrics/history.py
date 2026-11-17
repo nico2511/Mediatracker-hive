@@ -14,11 +14,12 @@ from mediatracker.core.metrics.collector import MetricsCollector
 from mediatracker.core.metrics.worker_counters import public_snapshot
 from mediatracker.core.worker_wake import wake_counts
 from mediatracker.db.models import MetricsHistory, Setting
+from mediatracker.retention import METRICS_HISTORY_DAYS
 
 logger = logging.getLogger(__name__)
 
 BUCKET_MINUTES = 5
-RETENTION_DAYS = 7
+RETENTION_DAYS = METRICS_HISTORY_DAYS
 _LAST_AT_KEY = "metrics.history_last_at"
 _PURGE_AT_KEY = "metrics.history_purge_at"
 

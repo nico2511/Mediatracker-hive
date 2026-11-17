@@ -5,21 +5,20 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from mediatracker.db.models import HiveFileFingerprint, HiveShareIntent
 from mediatracker.hive.chunk_digest import TRANSFER_CHUNK_SIZE, parse_chunk_digests_header
+from mediatracker.hive.fingerprint import HIVE_CLAIM_STALE
 from mediatracker.hive.share_policy import item_wants_hive_share
 
 logger = logging.getLogger(__name__)
 
 # LOT4+ : seul aria2 + fetch-grant consomme GET /hive/files ; pas de morceaux requis.
 HIVE_CHUNK_DIGESTS_REQUIRED = False
-
-CHUNK_DIGEST_CLAIM_STALE = timedelta(minutes=20)
 
 HIVE_CHUNKS_PENDING_HEADER = "Hive-Chunks-Pending"
 
@@ -351,7 +350,7 @@ def chunk_digest_claim_is_stale(claimed_at: datetime | None, *, now: datetime) -
     claimed = claimed_at
     if claimed.tzinfo is None:
         claimed = claimed.replace(tzinfo=timezone.utc)
-    return claimed < (now - CHUNK_DIGEST_CLAIM_STALE)
+    return claimed < (now - HIVE_CLAIM_STALE)
 
 
 def recover_stale_chunk_claim_for_item(db: Session, media_item_id: int, *, now: datetime) -> bool:

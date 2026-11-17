@@ -64,5 +64,6 @@ class SourceEntry(Protocol):
         *,
         base_url: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        request_delay_seconds: float | None = None,
     ) -> object | None:
         """Live client for episode downloads. ``None`` when not configured or unsupported."""

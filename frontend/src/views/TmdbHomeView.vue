@@ -9,7 +9,7 @@ import StatusIcon from "../components/StatusIcon.vue";
 import { api, userFacingApiError } from "../api";
 import type { HomePersonalDashboardSlice } from "../homeDashboardTypes";
 import type { HomeSectionKey } from "../homeFilters";
-import { mediaKind } from "../labels";
+import { mediaKind, tmdbPage } from "../labels";
 import type { QuickTarget } from "../quick";
 import { tmdbTrialRatingLabel } from "../tmdbTrialRating";
 
@@ -82,7 +82,6 @@ function showQuick(target: QuickTarget, follow = false) {
 }
 
 function fromTmdb(card: TmdbCard, follow = false) {
-  const kind = card.media_type === "film" ? "movie" : "tv";
   showQuick(
     {
       title: card.title,
@@ -92,7 +91,7 @@ function fromTmdb(card: TmdbCard, follow = false) {
       mediaType: card.media_type,
       followed: Boolean(card.followed),
       tmdbId: card.tmdb_id,
-      tmdbUrl: card.tmdb_url || `https://www.themoviedb.org/${kind}/${card.tmdb_id}`,
+      tmdbUrl: card.tmdb_url || tmdbPage(card.tmdb_id, card.media_type),
       mediaId: card.media_id ?? null,
     },
     follow,

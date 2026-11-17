@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
-import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
-import PosterCard from "../components/PosterCard.vue";
 import StatusIcon from "../components/StatusIcon.vue";
 import TmdbPosterImg from "../components/TmdbPosterImg.vue";
 import { useLibraryVerifyAll } from "../composables/useLibraryVerifyAll";
+import { useServiceStatus } from "../composables/useServiceStatus";
 import {api, userFacingApiError} from "../api";
 import { candidateFacts, mediaKind, tmdbPage, tmdbSearch } from "../labels";
-import { mediaBadge, mediaOnDisk, mediaWaiting } from "../mediaDisplay";
 import type { QuickTarget } from "../quick";
 import { fileSizeLine, formatBytes, jobLine } from "../diskFormat";
 import { cleanDisplayTitle } from "../titles";
@@ -241,6 +239,18 @@ interface ManualPanel {
 const review = ref<ReviewReport | null>(null);
 const regroup = ref<RegroupReport | null>(null);
 const route = useRoute();
+const router = useRouter();
+const { jellyfinConfigured, serviceStatusLoaded } = useServiceStatus();
+const jellyfinAlignVisible = computed(() => serviceStatusLoaded.value && jellyfinConfigured.value);
+
+type LibraryTab = "a-traiter" | "nettoyage" | "contenu";
+const LIBRARY_TABS: { id: LibraryTab; label: string }[] = [
+  { id: "a-traiter", label: "À traiter" },
+  { id: "nettoyage", label: "Nettoyage" },
+  { id: "contenu", label: "Contenu" },
+];
+
+const activeTab = ref<LibraryTab>("a-traiter");
 const incomplete = ref<IncompleteReport | null>(null);
 const incompleteStatus = ref("");
 const incompleteStep = ref<"list" | "preview" | "done">("list");
@@ -263,12 +273,26 @@ interface EmptyFolder {
 }
 
 const manual = ref<ManualPanel | null>(null);
-const selectedFiches = ref<number[]>([]);
-const deleteOpen = ref(false);
 const quick = ref<QuickTarget | null>(null);
 const quickFollow = ref(false);
-const problemSeries = computed(() => (review.value?.series ?? []).filter((row) => row.problem));
-const calmSeries = computed(() => (review.value?.series ?? []).filter((row) => !row.problem));
+const reviewGroups = computed(() => review.value?.series ?? []);
+const isFilmGroup = (row: ReviewSeries) => row.media_type === "film";
+const problemFilms = computed(() => reviewGroups.value.filter((row) => row.problem && isFilmGroup(row)));
+const problemSeries = computed(() => reviewGroups.value.filter((row) => row.problem && !isFilmGroup(row)));
+const calmFilms = computed(() => reviewGroups.value.filter((row) => !row.problem && isFilmGroup(row)));
+const calmSeries = computed(() => reviewGroups.value.filter((row) => !row.problem && !isFilmGroup(row)));
+
+const problemSections = computed(() =>
+  [
+    { id: "problems-series", label: "Séries à ranger", groups: problemSeries.value },
+    { id: "problems-films", label: "Films à ranger", groups: problemFilms.value },
+  ].filter((block) => block.groups.length),
+);
+
+const contentSections = computed(() => [
+  { id: "content-films", label: "Films OK", emptyFilter: "Aucun film dans ce filtre.", groups: calmFilms.value },
+  { id: "content-series", label: "Séries OK", emptyFilter: "Aucune série dans ce filtre.", groups: calmSeries.value },
+]);
 
 const SECTION_STORAGE_KEY = "mediatracker.library.sections.v2";
 const sectionOpen = ref<Record<string, boolean>>({});
@@ -282,12 +306,14 @@ interface CalmMediaMeta {
   disk_label?: string | null;
   follow_origin?: string;
   created_at?: string;
+  file_absent?: boolean;
+  tmdb_id?: number | null;
 }
 
 const calmMediaById = ref<Record<number, CalmMediaMeta>>({});
-const calmQuery = ref("");
-const calmSort = ref<"alpha" | "added">("alpha");
-const calmFilter = ref<"all" | "available" | "waiting" | "disk" | "paused" | "identified">("all");
+const contentQuery = ref("");
+const contentSort = ref<"alpha" | "added">("alpha");
+const contentFilter = ref<"all" | "verified" | "missing" | "unidentified">("all");
 
 function sectionExpanded(id: string, fallback = false): boolean {
   const stored = sectionOpen.value[id];
@@ -346,39 +372,84 @@ const regroupCount = computed(() => {
 
 const cleanupCount = computed(() => review.value?.empty.length ?? 0);
 const suspectFiles = computed(() => review.value?.suspect_files ?? []);
-const problemsCount = computed(() => problemSeries.value.length);
+const problemsCount = computed(() => problemFilms.value.length + problemSeries.value.length);
 
-function calmMatchesFilter(group: ReviewSeries, key: typeof calmFilter.value): boolean {
+const aTraiterCount = computed(() => {
+  let total = problemsCount.value + suspectFiles.value.length + regroupCount.value;
+  if (jellyfinAlignVisible.value && align.value && alignPendingCount.value) {
+    total += alignPendingCount.value;
+  }
+  if (renameId.value != null) {
+    total += 1;
+  }
+  return total;
+});
+
+const nettoyageCount = computed(() => (incomplete.value?.files.length ?? 0) + cleanupCount.value);
+
+const contenuCount = computed(() => calmFilms.value.length + calmSeries.value.length);
+
+function tabCount(tab: LibraryTab): number {
+  if (tab === "a-traiter") {
+    return aTraiterCount.value;
+  }
+  if (tab === "nettoyage") {
+    return nettoyageCount.value;
+  }
+  return contenuCount.value;
+}
+
+function readLibraryTabFromRoute(): void {
+  const raw = typeof route.query.onglet === "string" ? route.query.onglet : "";
+  activeTab.value = LIBRARY_TABS.some((row) => row.id === raw) ? (raw as LibraryTab) : "a-traiter";
+  if (route.query.incomplets === "corbeille") {
+    activeTab.value = "nettoyage";
+  }
+}
+
+function syncLibraryTabQuery(): void {
+  const query = { ...route.query } as Record<string, string | string[] | undefined>;
+  if (activeTab.value === "a-traiter") {
+    delete query.onglet;
+  } else {
+    query.onglet = activeTab.value;
+  }
+  void router.replace({ query });
+}
+
+function setLibraryTab(tab: LibraryTab): void {
+  if (activeTab.value === tab) {
+    return;
+  }
+  activeTab.value = tab;
+  syncLibraryTabQuery();
+}
+
+function contentMatchesFilter(group: ReviewSeries, key: typeof contentFilter.value): boolean {
   const media = group.media_id != null ? calmMediaById.value[group.media_id] : null;
-  if (key === "paused") {
-    return Boolean(media?.on_hold);
+  if (key === "unidentified") {
+    return group.tmdb_id == null || group.media_id == null;
   }
-  if (key === "available") {
-    return media?.availability === "available";
+  if (key === "missing") {
+    return Boolean(media?.file_absent);
   }
-  if (key === "waiting") {
-    return media != null && mediaWaiting(media);
-  }
-  if (key === "disk") {
-    return media != null && mediaOnDisk(media);
-  }
-  if (key === "identified") {
-    return media?.follow_origin === "identification";
+  if (key === "verified") {
+    return group.media_id != null && group.tmdb_id != null && !media?.file_absent;
   }
   return true;
 }
 
-const visibleCalmSeries = computed(() => {
-  const needle = calmQuery.value.trim().toLocaleLowerCase("fr");
-  const rows = calmSeries.value.filter((group) => {
+function visibleContentGroups(source: ReviewSeries[]): ReviewSeries[] {
+  const needle = contentQuery.value.trim().toLocaleLowerCase("fr");
+  const rows = source.filter((group) => {
     const title = (cleanDisplayTitle(group.title) || group.title).toLocaleLowerCase("fr");
     if (needle && !title.includes(needle)) {
       return false;
     }
-    return calmMatchesFilter(group, calmFilter.value);
+    return contentMatchesFilter(group, contentFilter.value);
   });
   return [...rows].sort((left, right) => {
-    if (calmSort.value === "added") {
+    if (contentSort.value === "added") {
       const leftAt = left.media_id != null ? calmMediaById.value[left.media_id]?.created_at || "" : "";
       const rightAt = right.media_id != null ? calmMediaById.value[right.media_id]?.created_at || "" : "";
       return rightAt.localeCompare(leftAt);
@@ -387,11 +458,14 @@ const visibleCalmSeries = computed(() => {
     const rightTitle = cleanDisplayTitle(right.title) || right.title;
     return leftTitle.localeCompare(rightTitle, "fr");
   });
-});
+}
 
-const selectableCalmIds = computed(() =>
-  visibleCalmSeries.value.map((group) => group.media_id).filter((id): id is number => id != null),
-);
+function countContentForFilter(key: typeof contentFilter.value, groups: ReviewSeries[]): number {
+  if (key === "all") {
+    return groups.length;
+  }
+  return groups.filter((group) => contentMatchesFilter(group, key)).length;
+}
 
 function mismatchSeriesLabel(count: number): string {
   if (count === 1) {
@@ -400,31 +474,12 @@ function mismatchSeriesLabel(count: number): string {
   return `${count} fichiers dans la mauvaise série`;
 }
 
-function calmBadge(group: ReviewSeries): { name: string; label: string } {
-  const media = group.media_id != null ? calmMediaById.value[group.media_id] : null;
-  if (!media) {
-    return { name: "waiting", label: "En attente" };
-  }
-  return mediaBadge(media);
-}
-
-function countCalmForFilter(key: typeof calmFilter.value): number {
-  if (key === "all") {
-    return calmSeries.value.length;
-  }
-  return calmSeries.value.filter((group) => calmMatchesFilter(group, key)).length;
-}
-
-function selectAllCalmFiches() {
-  const ids = new Set(selectedFiches.value);
-  for (const id of selectableCalmIds.value) {
-    ids.add(id);
-  }
-  selectedFiches.value = [...ids];
-}
-
 async function loadCalmMedia() {
-  const ids = new Set(calmSeries.value.map((group) => group.media_id).filter((id): id is number => id != null));
+  const ids = new Set(
+    [...calmFilms.value, ...calmSeries.value]
+      .map((group) => group.media_id)
+      .filter((id): id is number => id != null),
+  );
   if (!ids.size) {
     calmMediaById.value = {};
     return;
@@ -438,6 +493,11 @@ async function loadCalmMedia() {
         disk_label?: string | null;
         follow_origin?: string;
         created_at?: string;
+        followed?: boolean;
+        watched?: boolean;
+        on_disk?: boolean;
+        file_absent?: boolean;
+        tmdb_id?: number | null;
       }[];
     }>("/api/v1/media");
     const map: Record<number, CalmMediaMeta> = {};
@@ -452,6 +512,8 @@ async function loadCalmMedia() {
           disk_label: item.disk_label,
           follow_origin: item.follow_origin,
           created_at: item.created_at,
+          file_absent: item.file_absent,
+          tmdb_id: item.tmdb_id,
         };
       }
     }
@@ -478,12 +540,12 @@ const {
 });
 
 const libraryHeadStats = computed(() => {
-  const toSort =
-    (regroup.value?.groups ?? []).filter((group) => group.moves.some((move) => !move.blocked)).length +
-    problemSeries.value.length;
-  const incompleteCount = incomplete.value?.files.length ?? 0;
-  const calm = calmSeries.value.length;
-  return `${toSort} à ranger · ${incompleteCount} incomplet${incompleteCount > 1 ? "s" : ""} · ${calm} série${calm > 1 ? "s" : ""} sans problème`;
+  if (!review.value) {
+    return "";
+  }
+  const films = reviewGroups.value.filter(isFilmGroup).length;
+  const series = reviewGroups.value.filter((row) => !isFilmGroup(row)).length;
+  return `${films} film${films > 1 ? "s" : ""} · ${series} série${series > 1 ? "s" : ""} · ${aTraiterCount.value} à traiter`;
 });
 
 function openSeries(group: ReviewSeries, follow = false) {
@@ -560,6 +622,7 @@ function openIncompleteFromRoute() {
   if (route.query.incomplets !== "corbeille") {
     return;
   }
+  activeTab.value = "nettoyage";
   if (!incomplete.value?.files.length) {
     return;
   }
@@ -955,19 +1018,6 @@ function regroupSummary(groups: RegroupGroup[]): string {
   return `${tally.fiches} fiche(s) : ${tally.moves} fichier(s) vers Title (Year) [tmdbid], ${tally.trash} doublon(s) vers la corbeille, ${tally.blocked} bloqué(s), ${tally.emptied} dossier(s) vidé(s) ensuite.`;
 }
 
-const deletableFiches = computed(() =>
-  (review.value?.series ?? []).filter((group) => group.media_id != null),
-);
-
-function toggleFiche(id: number | null) {
-  if (id == null) {
-    return;
-  }
-  selectedFiches.value = selectedFiches.value.includes(id)
-    ? selectedFiches.value.filter((item) => item !== id)
-    : [...selectedFiches.value, id];
-}
-
 function matchLabel(match: string): string {
   if (match === "tmdb") {
     return "Correspondance";
@@ -1006,29 +1056,6 @@ async function applyRegroup(groups: RegroupGroup[], loose = false) {
     await analyze();
   } catch (err) {
     error.value = userFacingApiError(err, "Regroupement impossible.");
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function deleteSelected(trash: boolean) {
-  const ids = selectedFiches.value.filter((id) => deletableFiches.value.some((group) => group.media_id === id));
-  deleteOpen.value = false;
-  if (!ids.length) {
-    return;
-  }
-  busy.value = true;
-  error.value = "";
-  try {
-    const result = await api<{ deleted: number[] }>("/api/v1/media/bulk", {
-      method: "DELETE",
-      body: JSON.stringify({ ids, trash }),
-    });
-    selectedFiches.value = [];
-    message.value = `${result.deleted.length} fiche(s) supprimée(s).`;
-    await analyze();
-  } catch (err) {
-    error.value = userFacingApiError(err, "Suppression des fiches impossible.");
   } finally {
     busy.value = false;
   }
@@ -1121,8 +1148,16 @@ watch(
   },
 );
 
+watch(
+  () => route.query.onglet,
+  () => {
+    readLibraryTabFromRoute();
+  },
+);
+
 onMounted(async () => {
   loadSectionPrefs();
+  readLibraryTabFromRoute();
   await analyze();
   if (incomplete.value?.files.length && sectionOpen.value.incomplete === undefined) {
     setSectionOpen("incomplete", true);
@@ -1135,16 +1170,15 @@ onMounted(async () => {
     <header class="library-head">
       <div class="library-head-copy">
         <h1>Bibliothèque</h1>
-        <p v-if="review" class="hint library-head-stats">{{ libraryHeadStats }}</p>
         <p class="hint library-head-intro">
-          Un clic relit les fiches suivies, corrige ce qui est sûr et liste le reste. Rien n'est déplacé tant que vous
-          n'appliquez pas les actions ci-dessous.
+          Fichiers sur le disque uniquement. Rien n'est déplacé sans confirmation.
         </p>
+        <p v-if="review" class="hint library-head-stats">{{ libraryHeadStats }}</p>
       </div>
       <div class="actions library-head-actions library-verify-toolbar" aria-label="Actions bibliothèque">
-        <RouterLink class="button" to="/bibliotheque/importer-historique">
-          Importer l'historique
-        </RouterLink>
+        <button type="button" class="primary" :disabled="busy" data-library-analyze @click="analyze">
+          <StatusIcon name="search" label="Analyser" /> Analyser
+        </button>
         <button
           type="button"
           data-verify-all-start
@@ -1159,13 +1193,25 @@ onMounted(async () => {
           {{ verifyAllButtonLabel }}
         </button>
         <button type="button" :disabled="busy || incompleteBusy" data-library-rescan @click="loadIncomplete">
-          Relancer le scan
-        </button>
-        <button type="button" class="primary" :disabled="busy" data-library-analyze @click="analyze">
-          <StatusIcon name="search" label="Analyser" /> Analyser la bibliothèque
+          Relire les incomplets
         </button>
       </div>
     </header>
+
+    <nav class="library-tabs" role="tablist" aria-label="Segments bibliothèque">
+      <button
+        v-for="entry in LIBRARY_TABS"
+        :key="entry.id"
+        type="button"
+        role="tab"
+        :class="{ active: activeTab === entry.id }"
+        :aria-selected="activeTab === entry.id"
+        :data-library-tab="entry.id"
+        @click="setLibraryTab(entry.id)"
+      >
+        {{ entry.label }} · {{ tabCount(entry.id) }}
+      </button>
+    </nav>
 
     <article
       v-if="verifyAllRunning || verifyAllSummary"
@@ -1226,59 +1272,53 @@ onMounted(async () => {
     </article>
     <p v-if="verifyAllFetchError" class="error">{{ verifyAllFetchError }}</p>
 
-    <article
-      v-if="suspectFiles.length"
-      class="panel stack library-verify"
-      data-library-suspect-files
-    >
-      <p class="library-verify-status icon-line">
-        <span class="health-dot health-dot-warn" aria-hidden="true" />
-        <strong>Fichier suspect</strong>
-      </p>
-      <ul class="entry-list library-verify-problems">
-        <li v-for="file in suspectFiles" :key="file.path">
-          <div class="entry-main">
-            <span class="entry-copy">
-              <strong>{{ file.name }}</strong>
-              <span class="hint">{{ file.message }}</span>
-            </span>
-          </div>
-          <div v-if="file.media_id" class="entry-actions">
-            <router-link class="button" :to="`/medias/${file.media_id}`">Ouvrir la fiche</router-link>
-          </div>
-        </li>
-      </ul>
-    </article>
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="message" class="hint">{{ message }}</p>
 
-    <p v-if="renameId != null" class="actions">
-      <button type="button" :disabled="busy" @click="undoRename">Annuler le dernier déplacement</button>
-    </p>
-    <div v-if="deletableFiches.length" class="library-danger-zone actions">
-      <button
-        type="button"
-        class="danger"
-        :disabled="busy || !selectedFiches.length"
-        @click="deleteOpen = true"
-      >
-        Supprimer les fiches sélectionnées
-      </button>
-    </div>
-    <DeleteFicheDialog
-      :open="deleteOpen"
-      :count="selectedFiches.length"
-      @cancel="deleteOpen = false"
-      @confirm="deleteSelected"
-    />
-    <p v-if="review" class="hint">
+    <p v-if="review && activeTab === 'a-traiter'" class="hint">
       {{ mismatchSeriesLabel(review.mismatch) }},
       {{ review.duplicate_folders }} série(s) avec des dossiers en double,
       {{ review.unmatched }} dossier(s) non reconnu(s),
       {{ review.empty_count }} dossier(s) vide(s).
     </p>
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="message" class="hint">{{ message }}</p>
 
-    <section v-if="align" class="library-section panel stack" data-library-section="align">
+    <section
+      v-if="suspectFiles.length"
+      v-show="activeTab === 'a-traiter'"
+      class="library-section panel stack"
+      data-library-section="suspect"
+      data-library-suspect-files
+    >
+      <h2 class="library-section-heading">
+        <button
+          type="button"
+          class="library-section-toggle"
+          :aria-expanded="sectionExpanded('suspect', true)"
+          @click="toggleSection('suspect', true)"
+        >
+          <span class="library-section-chevron" aria-hidden="true" />
+          <span class="library-section-label">Fichiers suspects</span>
+          <span class="library-section-count">{{ suspectFiles.length }}</span>
+        </button>
+      </h2>
+      <div v-show="sectionExpanded('suspect', true)" class="library-section-body stack">
+        <ul class="entry-list library-verify-problems">
+          <li v-for="file in suspectFiles" :key="file.path">
+            <div class="entry-main">
+              <span class="entry-copy">
+                <strong>{{ file.name }}</strong>
+                <span class="hint">{{ file.message }}</span>
+              </span>
+            </div>
+            <div v-if="file.media_id" class="entry-actions">
+              <router-link class="button" :to="`/medias/${file.media_id}`">Ouvrir la fiche</router-link>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section v-if="align && jellyfinAlignVisible" v-show="activeTab === 'a-traiter'" class="library-section panel stack" data-library-section="align">
       <h2 class="library-section-heading">
         <button
           type="button"
@@ -1385,6 +1425,7 @@ onMounted(async () => {
 
     <section
       v-if="incomplete && (incomplete.files.length || incomplete.auto_message || incompleteStep === 'done')"
+      v-show="activeTab === 'nettoyage'"
       class="library-section panel stack"
       data-incomplete-panel
       data-library-section="incomplete"
@@ -1437,7 +1478,10 @@ onMounted(async () => {
             </div>
           </li>
         </ul>
-        <p class="hint">Les fichiers restent récupérables dans la corbeille pendant 30 jours.</p>
+        <p class="hint">
+          Durée de conservation :
+          <RouterLink to="/reglages/corbeille">Réglages > Corbeille</RouterLink>.
+        </p>
         <p class="actions">
           <button type="button" class="danger" :disabled="busy" data-incomplete-apply @click="applyIncomplete">
             Appliquer : déplacer {{ incompleteSelected.length }} fichier(s)
@@ -1457,7 +1501,7 @@ onMounted(async () => {
           </span>
         </p>
         <p class="actions">
-          <button type="button" :disabled="incompleteBusy" @click="loadIncomplete">Relancer le scan</button>
+          <button type="button" :disabled="incompleteBusy" @click="loadIncomplete">Relire les incomplets</button>
           <button type="button" :disabled="busy" @click="selectAllIncomplete">Tout sélectionner</button>
           <span class="hint">{{ incompleteSelection.length }} sélectionné(s)</span>
         </p>
@@ -1495,6 +1539,7 @@ onMounted(async () => {
 
     <section
       v-if="regroup && (regroup.groups.length || regroup.loose?.length || regroup.unmatched.length || regroup.ambiguous.length)"
+      v-show="activeTab === 'a-traiter'"
       class="library-section panel stack"
       data-library-section="regroup"
     >
@@ -1602,21 +1647,27 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section v-if="problemsCount" class="library-section panel stack" data-library-section="problems">
+    <section
+      v-for="block in problemSections"
+      v-show="activeTab === 'a-traiter'"
+      :key="block.id"
+      class="library-section panel stack"
+      :data-library-section="block.id"
+    >
       <h2 class="library-section-heading">
         <button
           type="button"
           class="library-section-toggle"
-          :aria-expanded="sectionExpanded('problems', true)"
-          @click="toggleSection('problems', true)"
+          :aria-expanded="sectionExpanded(block.id, true)"
+          @click="toggleSection(block.id, true)"
         >
           <span class="library-section-chevron" aria-hidden="true" />
-          <span class="library-section-label">Séries avec problème</span>
-          <span class="library-section-count">{{ problemsCount }}</span>
+          <span class="library-section-label">{{ block.label }}</span>
+          <span class="library-section-count">{{ block.groups.length }}</span>
         </button>
       </h2>
-      <div v-show="sectionExpanded('problems', true)" class="library-section-body stack">
-    <article v-for="group in problemSeries" :key="group.key" class="panel stack library-problem-card">
+      <div v-show="sectionExpanded(block.id, true)" class="library-section-body stack">
+    <article v-for="group in block.groups" :key="group.key" class="panel stack library-problem-card">
       <div class="entry-row">
         <div class="entry-main">
           <button type="button" class="entry-poster-button" @click="openSeries(group)">
@@ -1641,14 +1692,6 @@ onMounted(async () => {
           </span>
         </div>
         <div class="entry-actions">
-          <label v-if="group.media_id != null" class="check">
-            <input
-              type="checkbox"
-              :checked="selectedFiches.includes(group.media_id)"
-              @change="toggleFiche(group.media_id)"
-            />
-            <span>Sélection</span>
-          </label>
           <router-link v-if="group.media_id != null" class="button" :to="`/medias/${group.media_id}`">Fiche</router-link>
           <button
             v-if="group.folders[0]"
@@ -1819,109 +1862,92 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section v-if="calmSeries.length" class="library-section panel stack library-calm-section" data-library-section="calm">
-      <h2 class="library-section-heading">
-        <button
-          type="button"
-          class="library-section-toggle"
-          :aria-expanded="sectionExpanded('calm', true)"
-          @click="toggleSection('calm', true)"
-        >
-          <span class="library-section-chevron" aria-hidden="true" />
-          <span class="library-section-label">Séries sans problème</span>
-          <span class="library-section-count">{{ calmSeries.length }}</span>
-        </button>
-      </h2>
-      <div v-show="sectionExpanded('calm', true)" class="library-section-body stack">
+    <p v-if="renameId != null && activeTab === 'a-traiter'" class="actions">
+      <button type="button" :disabled="busy" @click="undoRename">Annuler le dernier déplacement</button>
+    </p>
+
+    <div v-show="activeTab === 'contenu'" class="library-tab-panel stack" data-library-tab-panel="contenu">
+      <p class="hint library-content-head">
+        <strong>{{ calmFilms.length }} Films OK</strong>
+        <span aria-hidden="true"> · </span>
+        <strong>{{ calmSeries.length }} Séries OK</strong>
+      </p>
+      <p class="hint">
+        États de suivi (disponible, en attente, en pause) :
+        <RouterLink to="/medias">page Médias</RouterLink>.
+      </p>
       <p class="actions library-calm-filters">
-        <button type="button" :class="{ active: calmFilter === 'all' }" @click="calmFilter = 'all'">
-          Tous ({{ countCalmForFilter('all') }})
+        <button type="button" :class="{ active: contentFilter === 'all' }" @click="contentFilter = 'all'">
+          Tous ({{ countContentForFilter('all', [...calmFilms, ...calmSeries]) }})
         </button>
-        <button type="button" :class="{ active: calmFilter === 'available' }" @click="calmFilter = 'available'">
-          Disponibles ({{ countCalmForFilter('available') }})
+        <button type="button" :class="{ active: contentFilter === 'verified' }" @click="contentFilter = 'verified'">
+          Vérifiés ({{ countContentForFilter('verified', [...calmFilms, ...calmSeries]) }})
         </button>
-        <button type="button" :class="{ active: calmFilter === 'waiting' }" @click="calmFilter = 'waiting'">
-          En attente ({{ countCalmForFilter('waiting') }})
+        <button type="button" :class="{ active: contentFilter === 'missing' }" @click="contentFilter = 'missing'">
+          Fichier manquant ({{ countContentForFilter('missing', [...calmFilms, ...calmSeries]) }})
         </button>
-        <button type="button" :class="{ active: calmFilter === 'disk' }" @click="calmFilter = 'disk'">
-          Sur le disque ({{ countCalmForFilter('disk') }})
-        </button>
-        <button type="button" :class="{ active: calmFilter === 'paused' }" @click="calmFilter = 'paused'">
-          En pause ({{ countCalmForFilter('paused') }})
-        </button>
-        <button type="button" :class="{ active: calmFilter === 'identified' }" @click="calmFilter = 'identified'">
-          Suivi par Jellyfin ({{ countCalmForFilter('identified') }})
+        <button type="button" :class="{ active: contentFilter === 'unidentified' }" @click="contentFilter = 'unidentified'">
+          Non identifié ({{ countContentForFilter('unidentified', [...calmFilms, ...calmSeries]) }})
         </button>
       </p>
       <form class="filters library-calm-toolbar" @submit.prevent>
         <label>
           <span>Recherche</span>
-          <input v-model="calmQuery" type="search" placeholder="Titre" />
+          <input v-model="contentQuery" type="search" placeholder="Titre ou dossier" />
         </label>
         <label>
           <span>Tri</span>
-          <select v-model="calmSort">
+          <select v-model="contentSort">
             <option value="alpha">Alphabétique</option>
             <option value="added">Date d'ajout</option>
           </select>
         </label>
       </form>
-      <p class="actions library-calm-select">
-        <button type="button" :disabled="!selectableCalmIds.length" @click="selectAllCalmFiches">Tout sélectionner</button>
-        <span class="hint">{{ selectedFiches.length }} sélectionnée(s)</span>
-      </p>
-      <p v-if="!visibleCalmSeries.length" class="hint">Aucune série dans ce filtre.</p>
-      <div v-else class="poster-grid pc-grid library-calm-grid">
-        <PosterCard
-          v-for="group in visibleCalmSeries"
-          :key="group.key"
-          class="library-calm-card"
-          :poster-url="group.poster_url"
-          :title="cleanDisplayTitle(group.title) || group.title"
-          :kind-label="mediaKind(group.media_type)"
-          :fiche-to="group.media_id != null ? `/medias/${group.media_id}` : null"
-          :fallback="mediaKind(group.media_type)"
-          @open="openSeries(group)"
-        >
-          <template #shell-extra>
-            <label v-if="group.media_id != null" class="library-calm-check check">
-              <input
-                type="checkbox"
-                aria-label="Sélection"
-                :checked="selectedFiches.includes(group.media_id)"
-                @change="toggleFiche(group.media_id)"
-              />
-            </label>
-          </template>
-          <template #meta>
-            <span class="hint media-library-kind">{{ mediaKind(group.media_type) }}</span>
-            <strong>{{ cleanDisplayTitle(group.title) || group.title }}</strong>
-            <span v-if="group.year" class="hint media-library-year">
-              {{ group.year }} · {{ mediaKind(group.media_type) }}
-            </span>
-            <span class="media-library-status icon-line" :class="`tone-${calmBadge(group).name}`">
-              <span class="media-library-status-dot" aria-hidden="true"></span>
-              {{ calmBadge(group).label }}
-            </span>
-            <span v-if="group.media_id != null" class="hint icon-line pc-card-icons">
-              <StatusIcon
-                v-if="calmMediaById[group.media_id]?.followed !== false"
-                name="followed"
-                label="Suivi"
-              />
-              <StatusIcon
-                v-if="mediaOnDisk(calmMediaById[group.media_id] || {})"
-                name="disk"
-                label="Sur le disque"
-              />
-            </span>
-          </template>
-        </PosterCard>
-      </div>
-      </div>
-    </section>
+      <section
+        v-for="block in contentSections"
+        :key="block.id"
+        class="library-section panel stack library-calm-section"
+        :data-library-section="block.id"
+      >
+        <h2 class="library-section-heading">
+          <button
+            type="button"
+            class="library-section-toggle"
+            :aria-expanded="sectionExpanded(block.id, true)"
+            @click="toggleSection(block.id, true)"
+          >
+            <span class="library-section-chevron" aria-hidden="true" />
+            <span class="library-section-label">{{ block.label }}</span>
+            <span class="library-section-count">{{ block.groups.length }}</span>
+          </button>
+        </h2>
+        <div v-show="sectionExpanded(block.id, true)" class="library-section-body stack">
+          <p v-if="!visibleContentGroups(block.groups).length" class="hint">{{ block.emptyFilter }}</p>
+          <ul v-else class="entry-list library-content-folders">
+            <template v-for="group in visibleContentGroups(block.groups)" :key="group.key">
+              <li v-for="folder in group.folders" :key="folder.path" class="library-content-row">
+                <div class="entry-main">
+                  <span class="entry-copy">
+                    <strong>
+                      <router-link v-if="group.media_id != null" :to="`/medias/${group.media_id}`">
+                        {{ cleanDisplayTitle(group.title) || group.title }}
+                      </router-link>
+                      <template v-else>{{ cleanDisplayTitle(group.title) || group.title }}</template>
+                    </strong>
+                    <span class="hint">{{ folder.path }}</span>
+                  </span>
+                </div>
+                <div v-if="group.media_id != null" class="entry-actions">
+                  <router-link class="button" :to="`/medias/${group.media_id}`">Fiche</router-link>
+                </div>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </section>
+    </div>
 
-    <section v-if="review" class="library-section panel stack" data-library-section="cleanup">
+    <section v-if="review" v-show="activeTab === 'nettoyage'" class="library-section panel stack" data-library-section="cleanup">
       <h2 class="library-section-heading">
         <button
           type="button"
@@ -1930,7 +1956,7 @@ onMounted(async () => {
           @click="toggleSection('cleanup', false)"
         >
           <span class="library-section-chevron" aria-hidden="true" />
-          <span class="library-section-label">Suggestions de nettoyage</span>
+          <span class="library-section-label">Dossiers vides</span>
           <span class="library-section-count">{{ cleanupCount }}</span>
         </button>
       </h2>

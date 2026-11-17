@@ -49,12 +49,19 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "errors", label: "Erreurs" },
 ];
 
-const PERIODS = [
-  { id: "7d", label: "7 derniers jours", days: 7 },
-  { id: "1d", label: "24 heures", days: 1 },
-  { id: "30d", label: "30 derniers jours", days: 30 },
-  { id: "all", label: "Tout l'historique", days: null as number | null },
-];
+const eventJournalRetentionDays = ref<number | null>(null);
+
+const periods = computed(() => {
+  const retained = eventJournalRetentionDays.value;
+  const allLabel =
+    retained != null ? `Tout (${retained} jours conservés)` : "Tout (conservation serveur)";
+  return [
+    { id: "7d", label: "7 derniers jours", days: 7 },
+    { id: "1d", label: "24 heures", days: 1 },
+    { id: "30d", label: "30 derniers jours", days: 30 },
+    { id: "all", label: allLabel, days: null as number | null },
+  ];
+});
 
 const LEVELS = [
   { id: "", label: "Tous les niveaux" },
@@ -119,7 +126,7 @@ function readQuery(): void {
   const hasEntityFilter =
     (typeof query.media_id === "string" && query.media_id) ||
     (typeof query.download_id === "string" && query.download_id);
-  if (rawPeriod && PERIODS.some((row) => row.id === rawPeriod)) {
+  if (rawPeriod && periods.value.some((row) => row.id === rawPeriod)) {
     period.value = rawPeriod;
   } else if (hasEntityFilter) {
     period.value = "all";
@@ -132,7 +139,7 @@ function readQuery(): void {
 }
 
 function sinceIso(): string | undefined {
-  const row = PERIODS.find((entry) => entry.id === period.value);
+  const row = periods.value.find((entry) => entry.id === period.value);
   if (!row || row.days === null) {
     return undefined;
   }
@@ -218,6 +225,15 @@ async function loadStatus(): Promise<void> {
     }
   } catch {
     diskPercent.value = null;
+  }
+}
+
+async function loadEventRetentionDays(): Promise<void> {
+  try {
+    const body = await api<{ event_journal_days: number }>("/api/v1/settings/fixed-retention");
+    eventJournalRetentionDays.value = body.event_journal_days;
+  } catch {
+    eventJournalRetentionDays.value = null;
   }
 }
 
@@ -339,7 +355,7 @@ watch(search, () => {
 
 onMounted(async () => {
   readQuery();
-  await Promise.all([loadStatus(), loadMediaOptions()]);
+  await Promise.all([loadStatus(), loadMediaOptions(), loadEventRetentionDays()]);
   await reload();
   ready = true;
 });
@@ -379,7 +395,7 @@ onMounted(async () => {
       <label>
         <span>Période</span>
         <select v-model="period">
-          <option v-for="entry in PERIODS" :key="entry.id" :value="entry.id">{{ entry.label }}</option>
+          <option v-for="entry in periods" :key="entry.id" :value="entry.id">{{ entry.label }}</option>
         </select>
       </label>
       <label>

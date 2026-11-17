@@ -6,7 +6,10 @@ from typing import Annotated, Literal
 from pydantic import AliasChoices, BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from mediatracker.core.public_source_urls import DEFAULT_COMET_PRIMARY, DEFAULT_TORRENTIO_BASE_URL
 from mediatracker.core.public_url import coerce_public_url
+from mediatracker.core.selection import DEFAULT_DOWNLOAD_SOURCE_ORDER, DEFAULT_HOSTER_PREFERENCE
+from mediatracker.security.log_defaults import LOG_BACKUP_COUNT_DEFAULT, LOG_MAX_BYTES_DEFAULT
 
 
 def _coerce_cookie_secure(value: object) -> bool | Literal["auto"]:
@@ -78,19 +81,19 @@ class Settings(BaseSettings):
     watchtower_token: str | None = None
     wawacity_base_url: str | None = None
     # Comet is a download source only. Empty disables it. Default is the public keyless instance.
-    comet_base_url: str = "https://comet.feels.legal"
+    comet_base_url: str = DEFAULT_COMET_PRIMARY
     # Ordered instance list (newline in DB). Seeded at migration, not from env prefill.
     comet_base_urls: str = ""
-    torrentio_base_url: str = "https://torrentio.strem.fun"
+    torrentio_base_url: str = DEFAULT_TORRENTIO_BASE_URL
     uwuplus_base_url: str = ""
-    download_source_order: str = "wawacity,free_telecharger,hive,comet,torrentio,stremio_addons"
+    download_source_order: str = DEFAULT_DOWNLOAD_SOURCE_ORDER
     wawacity_user_agent: str | None = None
     free_telecharger_user_agent: str | None = None
     # When true, scan redirects only store a candidate; default is automatic migration.
     wawacity_domain_propose_only: bool = False
     default_quality: str = "HD"
     default_language: str = "VFF"
-    hoster_preference: str = "rapidgator,turbobit,uploady,dailyuploads,1fichier"
+    hoster_preference: str = ",".join(DEFAULT_HOSTER_PREFERENCE)
     max_concurrent_downloads: int = 2
     # Wawacity is polled at this interval, and only for ongoing followed series.
     scan_interval_min: int = 720
@@ -142,8 +145,8 @@ class Settings(BaseSettings):
     aria2_unreachable_alert_min: int = 15
     backup_keep: int = 7
     # Rotating log under CONFIG_DIR/logs.
-    log_max_bytes: int = 2_000_000
-    log_backup_count: int = 5
+    log_max_bytes: int = LOG_MAX_BYTES_DEFAULT
+    log_backup_count: int = LOG_BACKUP_COUNT_DEFAULT
     # Local hour (notify timezone) for weekly SQLite VACUUM/ANALYZE.
     sqlite_maintenance_hour: int = 4
     # TMDB poster cache under CONFIG_DIR/cache/images (not included in SQLite backups).

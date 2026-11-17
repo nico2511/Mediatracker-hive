@@ -2,10 +2,10 @@
 
 URL : `/reglages/maj`
 
-- Affiche version, SHA image, date de build, dernière vérification GHCR/GitHub.
-- **Vérifier la mise à jour** : compare au registre (jetons dans [Jetons](jetons.md)).
-- **Mettre à jour maintenant** : délègue à Watchtower si `watchtower_url` + `watchtower_token` sont configurés.
+- **Version installée** : version, image, date de build, dernière vérification.
+- **Vérifier la mise à jour** : comparaison registre / GitHub (jetons sur [Services et jetons](jetons.md), carte GitHub).
+- **Mettre à jour maintenant** : délègue à Watchtower si URL et jeton Watchtower sont configurés (même carte **Services et jetons**).
 - **Redémarrer** : redémarrage applicatif.
-- **`notify_on_update`** : notification après mise à jour automatique Watchtower.
+- **Me notifier quand Watchtower installe une nouvelle version** (`notify_on_update`) : notification via les canaux définis dans [Notifications](notifications.md) — interrupteur masqué si Watchtower n’est pas configuré.
 
 Voir [Mises à jour](../mises-a-jour.md).

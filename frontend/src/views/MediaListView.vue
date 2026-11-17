@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
+import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
 import StatusIcon from "../components/StatusIcon.vue";
@@ -82,6 +83,10 @@ const typeFilter = ref<TypeFilter>("all");
 const originFilter = ref<OriginFilter>("all");
 const density = ref<Density>("airy");
 const mobileFiltersOpen = ref(false);
+const selecting = ref(false);
+const selectedIds = ref<number[]>([]);
+const deleteOpen = ref(false);
+const deleteBusy = ref(false);
 let reloadGeneration = 0;
 let hiveSummaryGeneration = 0;
 
@@ -99,6 +104,10 @@ function formatFilmCount(count: number): string {
 
 function formatTitleCount(count: number): string {
   return formatCount(count, "titre", "titres");
+}
+
+function formatFichesDeletedMessage(count: number): string {
+  return formatCount(count, "fiche supprimée", "fiches supprimées");
 }
 
 function itemOrigin(item: MediaRow): string {
@@ -445,6 +454,108 @@ async function onQuickViewChanged() {
   }
 }
 
+const selectedCount = computed(() => selectedIds.value.length);
+
+const selectedTitlesForDialog = computed(() => {
+  const wanted = new Set(selectedIds.value);
+  return items.value.filter((row) => wanted.has(row.id)).map((row) => row.title);
+});
+
+function isSelected(id: number): boolean {
+  return selectedIds.value.includes(id);
+}
+
+function toggleSelected(id: number) {
+  const next = new Set(selectedIds.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+  selectedIds.value = [...next];
+}
+
+function enterSelection() {
+  selecting.value = true;
+  selectedIds.value = [];
+  quick.value = null;
+}
+
+function cancelSelection() {
+  selecting.value = false;
+  selectedIds.value = [];
+  deleteOpen.value = false;
+}
+
+function selectAllVisible() {
+  selectedIds.value = visible.value.map((row) => row.id);
+}
+
+function onCardOpen(item: MediaRow) {
+  if (selecting.value) {
+    toggleSelected(item.id);
+    return;
+  }
+  quick.value = mediaTarget(item);
+}
+
+function onBulkEscape(event: KeyboardEvent) {
+  if (event.key !== "Escape" || !selecting.value) {
+    return;
+  }
+  if (deleteOpen.value) {
+    deleteOpen.value = false;
+    return;
+  }
+  cancelSelection();
+}
+
+watch(selecting, (active) => {
+  if (active) {
+    window.addEventListener("keydown", onBulkEscape);
+  } else {
+    window.removeEventListener("keydown", onBulkEscape);
+  }
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", onBulkEscape);
+});
+
+async function deleteSelectedFiches() {
+  const ids = [...selectedIds.value];
+  deleteOpen.value = false;
+  if (!ids.length) {
+    return;
+  }
+  deleteBusy.value = true;
+  error.value = "";
+  try {
+    const result = await api<{ deleted: number[] }>("/api/v1/media/bulk", {
+      method: "DELETE",
+      body: JSON.stringify({ ids, trash: false }),
+    });
+    const removed = new Set(result.deleted);
+    items.value = items.value.filter((row) => !removed.has(row.id));
+    const failed = ids.length - result.deleted.length;
+    if (failed > 0) {
+      note.value = `${formatFichesDeletedMessage(result.deleted.length)}, ${failed} en échec.`;
+    } else {
+      note.value = formatFichesDeletedMessage(result.deleted.length);
+    }
+    cancelSelection();
+    try {
+      await reload();
+    } catch (err) {
+      error.value = userFacingApiError(err, "Liste indisponible.");
+    }
+  } catch (err) {
+    error.value = userFacingApiError(err, "Suppression des fiches impossible.");
+  } finally {
+    deleteBusy.value = false;
+  }
+}
+
 async function unfollowIdentified() {
   error.value = "";
   try {
@@ -512,6 +623,14 @@ onMounted(async () => {
     </header>
 
     <p class="actions media-library-filters">
+      <button
+        v-if="!selecting && visible.length"
+        type="button"
+        :disabled="serverActionsDisabled"
+        @click="enterSelection"
+      >
+        Sélectionner
+      </button>
       <button type="button" :class="{ active: filter === 'all' }" @click="filter = 'all'">Tous</button>
       <button type="button" :class="{ active: filter === 'available' }" @click="filter = 'available'">Disponibles</button>
       <button type="button" :class="{ active: filter === 'waiting' }" @click="filter = 'waiting'">En attente</button>
@@ -684,21 +803,53 @@ onMounted(async () => {
     </p>
 
     <div
+      v-if="selecting && visible.length"
+      class="media-library-bulk-bar media-library-bulk-bar--top actions"
+      role="toolbar"
+      aria-label="Sélection des fiches"
+    >
+      <span class="hint">{{ selectedCount }} sélectionnée{{ selectedCount > 1 ? "s" : "" }}</span>
+      <button type="button" :disabled="!visible.length" @click="selectAllVisible">Tout sélectionner</button>
+      <button type="button" @click="cancelSelection">Annuler</button>
+      <button
+        type="button"
+        class="danger"
+        :disabled="!selectedCount || deleteBusy || serverActionsDisabled"
+        @click="deleteOpen = true"
+      >
+        Supprimer les fiches
+      </button>
+    </div>
+
+    <div
       v-if="visible.length"
       class="poster-grid pc-grid media-library-grid"
-      :class="{ 'pc-grid--dense': density === 'dense' }"
+      :class="{ 'pc-grid--dense': density === 'dense', 'media-library-grid--selecting': selecting }"
     >
       <PosterCard
         v-for="item in visible"
         :key="item.id"
+        class="media-library-card"
+        :class="{ 'is-selected': selecting && isSelected(item.id) }"
         :poster-url="item.poster_url"
         :title="item.title"
         :kind-label="mediaKind(item.type)"
-        :fiche-to="`/medias/${item.id}`"
+        :fiche-to="selecting ? null : `/medias/${item.id}`"
         :fallback="mediaKind(item.type)"
         :offline-ghost="offlineShell"
-        @open="quick = mediaTarget(item)"
+        :hide-more-button="selecting"
+        @open="onCardOpen(item)"
       >
+        <template v-if="selecting" #shell-extra>
+          <label class="media-library-select-check check" @click.stop @pointerdown.stop>
+            <input
+              type="checkbox"
+              aria-label="Sélectionner la fiche"
+              :checked="isSelected(item.id)"
+              @change="toggleSelected(item.id)"
+            />
+          </label>
+        </template>
         <template #meta>
           <span class="hint media-library-kind">{{ mediaKind(item.type) }}</span>
           <strong>{{ item.title }}</strong>
@@ -739,11 +890,44 @@ onMounted(async () => {
       Fin de liste · {{ formatTitleCount(filteredStats.total) }} affiché{{ filteredStats.total > 1 ? "s" : "" }} sur {{ formatTitleCount(libraryStats.total) }}
     </p>
 
+    <div
+      v-if="selecting && visible.length"
+      class="media-library-bulk-bar media-library-bulk-bar--mobile actions"
+      role="toolbar"
+      aria-label="Sélection des fiches"
+    >
+      <span class="hint">{{ selectedCount }} sélectionnée{{ selectedCount > 1 ? "s" : "" }}</span>
+      <button type="button" :disabled="!visible.length" @click="selectAllVisible">Tout sélectionner</button>
+      <button type="button" @click="cancelSelection">Annuler</button>
+      <button
+        type="button"
+        class="danger"
+        :disabled="!selectedCount || deleteBusy || serverActionsDisabled"
+        @click="deleteOpen = true"
+      >
+        Supprimer les fiches
+      </button>
+    </div>
+
+    <DeleteFicheDialog
+      :open="deleteOpen"
+      :count="selectedCount"
+      :titles="selectedTitlesForDialog"
+      files-on-disk-untouched
+      @cancel="deleteOpen = false"
+      @confirm="deleteSelectedFiches"
+    />
+
     <MediaQuickView :target="quick" @close="quick = null" @changed="onQuickViewChanged" />
   </section>
 </template>
 
 <style scoped>
+.media-library-card.is-selected {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 .hive-list-badge {
   display: inline-flex;
   font-size: 0.74rem;

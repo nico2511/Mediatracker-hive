@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { api, userFacingApiError } from "../api";
+import { refreshServiceStatus } from "../composables/useServiceStatus";
+import { PANEL_POLL_INTERVAL_MS } from "../constants/uiPollIntervals";
 
 interface PinView {
   pin: string | null;
@@ -28,8 +30,6 @@ const manualOpen = ref(false);
 const manualKey = ref("");
 const manualSaving = ref(false);
 const expiresLeft = ref<number | null>(null);
-const POLL_MS = 5000;
-
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let pollInFlight = false;
@@ -125,6 +125,7 @@ async function loadAccount() {
     actionError.value = userFacingApiError(err, "Lecture du compte impossible.");
   } finally {
     loading.value = false;
+    void refreshServiceStatus();
   }
 }
 
@@ -147,6 +148,9 @@ async function pollOnce() {
     if (account.value.connected || account.value.pin_phase !== "pending") {
       stopPoll();
       stopTick();
+      if (account.value.connected) {
+        void refreshServiceStatus();
+      }
     }
   } catch (err) {
     if (gen === pollGeneration) {
@@ -166,7 +170,7 @@ async function runPollCycle() {
   } finally {
     pollInFlight = false;
     if (showPending.value && !pausedForHidden && expiresLeft.value !== 0) {
-      schedulePoll(POLL_MS);
+      schedulePoll(PANEL_POLL_INTERVAL_MS);
     }
   }
 }
@@ -184,7 +188,7 @@ function schedulePoll(delay = 0) {
 function ensurePoll(immediate = false) {
   stopPoll();
   if (!showPending.value || pausedForHidden) return;
-  schedulePoll(immediate ? 0 : POLL_MS);
+  schedulePoll(immediate ? 0 : PANEL_POLL_INTERVAL_MS);
 }
 
 function onVisibilityChange() {
@@ -236,6 +240,7 @@ async function disconnect() {
     account.value = await api<AccountState>("/api/v1/integrations/alldebrid/account/disconnect", {
       method: "POST",
     });
+    void refreshServiceStatus();
   } catch (err) {
     actionError.value = userFacingApiError(err, "Déconnexion impossible.");
   }
@@ -251,6 +256,7 @@ async function saveManual() {
     });
     manualKey.value = "";
     manualOpen.value = false;
+    void refreshServiceStatus();
   } catch (err) {
     actionError.value = userFacingApiError(err, "Enregistrement impossible.");
   } finally {

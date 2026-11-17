@@ -208,6 +208,7 @@ class StremioAddonsProvider:
         base_url: str | None = None,
         addons: list[StremioAddonEntry] | None = None,
         transport=None,
+        request_delay_seconds: float | None = None,
     ):
         entries = list(addons or [])
         if not entries and base_url:
@@ -215,7 +216,11 @@ class StremioAddonsProvider:
         enabled = [entry for entry in entries if entry.enabled and entry.url.strip()]
         if not enabled:
             return None
-        delay = float(settings.source_request_delay_seconds)
+        delay = float(
+            settings.source_request_delay_seconds
+            if request_delay_seconds is None
+            else request_delay_seconds
+        )
         return StremioAddonsAggregateSource(enabled, delay=delay, transport=transport)
 
     def search(self, query: str, media_type: MediaType | None) -> list[SourceResult]:

@@ -209,7 +209,7 @@ def maybe_scan_library(
     moment = now or datetime.now(timezone.utc)
     if not _setting_bool(db, "library_scan_enabled", True):
         return None
-    hours = _setting_int(db, "library_scan_interval_hours", 24)
+    hours = _setting_int(db, "library_scan_interval_hours", settings.library_scan_interval_hours)
     last = _last_scan(db)
     full_due = last is None or moment - last >= timedelta(hours=hours)
     movies, series = library_roots(db, settings)

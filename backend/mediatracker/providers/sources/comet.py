@@ -233,6 +233,7 @@ class CometProvider:
         base_url: str | None = None,
         base_urls: list[str] | None = None,
         transport=None,
+        request_delay_seconds: float | None = None,
     ):
         """Download-only Comet client. The catalog never calls this."""
         urls: list[str]
@@ -245,7 +246,11 @@ class CometProvider:
             urls = [root] if root else []
         if not urls:
             return None
-        delay = float(settings.source_request_delay_seconds)
+        delay = float(
+            settings.source_request_delay_seconds
+            if request_delay_seconds is None
+            else request_delay_seconds
+        )
         return CometCascadeSource(urls, delay=delay, transport=transport)
 
     def search(self, query: str, media_type: MediaType | None) -> list[SourceResult]:

@@ -10,23 +10,25 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
 from mediatracker.config import Settings
 from mediatracker.core.outbound_http import borrow_http_client
+from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
 
 logger = logging.getLogger(__name__)
 
 KINDS = frozenset({"poster", "backdrop", "still"})
 SIZES = frozenset({"w92", "w185", "w342", "w780", "original"})
 _FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:jpe?g|png|webp)$", re.IGNORECASE)
-_TMDB_CDN = "https://image.tmdb.org/t/p"
+_TMDB_CDN = f"{TMDB_IMAGE_BASE}/t/p"
 _CACHE_CONTROL = "public, max-age=31536000, immutable"
 _STAMP = "image_cache_purge_at"
 _LOCKS: dict[str, threading.Lock] = {}
 _LOCK_GUARD = threading.Lock()
-_CLIENT_KEY = ("tmdb_cdn", "image.tmdb.org")
+_CLIENT_KEY = ("tmdb_cdn", urlparse(TMDB_IMAGE_BASE).netloc)
 _TOUCH_MIN_AGE = timedelta(hours=24)
 
 

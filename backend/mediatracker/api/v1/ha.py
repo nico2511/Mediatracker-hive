@@ -26,6 +26,7 @@ from mediatracker.core.source_force import request_source_check, source_configur
 from mediatracker.core.source_poll import close_source
 from mediatracker.core.storage import device_id, incomplete_dir, storage_layout
 from mediatracker.db.models import CatalogEntry, Download, Media, MediaItem, Provider
+from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
 from mediatracker.library.scanner import LAST_SCAN_KEY, force_scan
 from mediatracker.providers.sources.loading import sources_for_catalog
 
@@ -37,7 +38,6 @@ _UPCOMING_LIMIT = 8
 _WATCH_LIMIT = 8
 _QUEUE_LIMIT = 5
 _LATEST = 5
-_TMDB_POSTER = "https://image.tmdb.org/"
 _HEALTH_RANK = {"down": 2, "degraded": 1}
 _HEALTH_LABEL = {"ok": "ok", "degraded": "dégradé", "down": "indisponible"}
 _GIB = 1024 * 1024 * 1024
@@ -692,7 +692,7 @@ def _health(db: Session, settings) -> HealthSummary:
     if disk.free_bytes is None:
         findings.append(("disk", "down", "Espace disque illisible."))
     elif limit and disk.free_bytes < limit:
-        findings.append(("disk", "down", f"{disk.free_gb} Go libres, sous le seuil."))
+        findings.append(("disk", "down", f"{disk.free_gb} Gio libres, sous le seuil."))
     if _volumes_split(db, settings):
         findings.append(("volumes", "degraded", "Les dossiers médias ne sont pas sur le même disque."))
     if not findings:
@@ -776,7 +776,7 @@ def _shown(value: str | None) -> str:
 
 
 def _poster(url: str | None) -> str | None:
-    if isinstance(url, str) and url.startswith(_TMDB_POSTER):
+    if isinstance(url, str) and url.startswith(f"{TMDB_IMAGE_BASE}/"):
         return url
     return None
 

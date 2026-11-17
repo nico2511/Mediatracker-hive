@@ -10,9 +10,7 @@ HOME_BLOCKS = ROOT / "frontend" / "src" / "components" / "HomePersonalBlocks.vue
 def test_key_views_import_poster_card():
     views = (
         ROOT / "frontend" / "src" / "views" / "HomeView.vue",
-        ROOT / "frontend" / "src" / "views" / "CatalogView.vue",
         ROOT / "frontend" / "src" / "views" / "MediaListView.vue",
-        ROOT / "frontend" / "src" / "views" / "LibraryView.vue",
     )
     for path in views:
         source = path.read_text(encoding="utf-8")

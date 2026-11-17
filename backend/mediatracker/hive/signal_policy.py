@@ -284,6 +284,8 @@ def explicit_announce_cherche(
         return False
     if item_file_present(db, item) or item.watched:
         return False
+    if not cherche_slot_eligible_for_publish(media, item, now=now):
+        return False
     clear_cherche_retract(db, item.id)
     clear_cherche_miss_prompt(db, item.id)
     return publish_cherche_for_item(db, settings, media=media, item=item, now=now)

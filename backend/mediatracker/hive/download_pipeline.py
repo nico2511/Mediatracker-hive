@@ -19,7 +19,7 @@ from mediatracker.hive.download_aria2 import (
     ensure_mint_for_download,
     hive_file_download_url,
 )
-from mediatracker.hive.fetch_grant import HIVE_FETCH_GRANT_HEADER
+from mediatracker.hive.fetch_grant import GRANT_RENEW_LEAD, HIVE_FETCH_GRANT_HEADER
 from mediatracker.hive.peer_outbound import validate_hive_peer_base_url
 from mediatracker.hive.source_catalog import HiveCatalogMatch
 from mediatracker.hive.transfer_settings import transfer_recv_bps
@@ -27,7 +27,6 @@ from mediatracker.providers.downloaders.aria2 import Aria2Error
 
 logger = logging.getLogger(__name__)
 
-GRANT_RENEW_LEAD = timedelta(minutes=30)
 HIVE_ARIA2_EXTRA_OPTIONS: dict[str, str] = {
     "continue": "true",
     "follow-redirect": "false",

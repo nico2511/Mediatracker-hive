@@ -49,14 +49,24 @@ def _stable_work_key(cle: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
-def _latest_entry_per_offer(db: Session) -> dict[tuple[bytes, str, str], HiveEntry]:
-    """Dernière entrée signée par offre (cle_json) ; une pierre tombale récente écrase un « disponible » plus ancien."""
+def _offer_dedup_key(row: HiveEntry) -> tuple[bytes, str, bytes | str] | None:
+    if row.origin_instance_id is None or row.ruche_id is None:
+        return None
+    if row.file_id is not None:
+        return (row.ruche_id, row.origin_instance_id, row.file_id)
+    if row.cle_json:
+        return (row.ruche_id, row.origin_instance_id, row.cle_json)
+    return None
+
+
+def _latest_entry_per_offer(db: Session) -> dict[tuple[bytes, str, bytes | str], HiveEntry]:
+    """Dernière entrée signée par offre (ruche, origine, file_id) ou cle_json si file_id absent."""
     rows = list(db.scalars(select(HiveEntry)).all())
-    best: dict[tuple[bytes, str, str], HiveEntry] = {}
+    best: dict[tuple[bytes, str, bytes | str], HiveEntry] = {}
     for row in rows:
-        if not row.cle_json or row.origin_instance_id is None or row.ruche_id is None:
+        key = _offer_dedup_key(row)
+        if key is None:
             continue
-        key = (row.ruche_id, row.origin_instance_id, row.cle_json)
         prev = best.get(key)
         if prev is None or int(row.seq) > int(prev.seq):
             best[key] = row
@@ -136,6 +146,9 @@ def build_merged_hive_catalogue(
             "sha256": row.sha256_hex,
             "joignable": joignable,
         }
+        nom = fiche.get("nom_fichier")
+        if isinstance(nom, str) and nom.strip():
+            src["nom_fichier"] = nom.strip()
         bps = measured_bps_for_origin(db, ruche_id=row.ruche_id, origin_instance_id=origin)
         if bps is not None:
             src["measured_bps"] = bps
