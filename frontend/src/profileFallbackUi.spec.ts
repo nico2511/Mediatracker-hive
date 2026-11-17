@@ -138,15 +138,22 @@ describe("Profils de repli — réglages", () => {
   });
 
   it("GET settings retardé : pas de PATCH avant chargement", async () => {
-    let resolveSettings: (value: unknown) => void = () => undefined;
-    fetchSettingsMock
-      .mockResolvedValueOnce({ settings: [] })
-      .mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            resolveSettings = resolve;
-          }),
-      );
+    let resolvePanelSettings: (value: unknown) => void = () => undefined;
+    let settingsFetches = 0;
+    let panelSettingsPromise: Promise<{ settings: unknown[] }> | null = null;
+    fetchSettingsMock.mockImplementation(async () => {
+      settingsFetches += 1;
+      if (settingsFetches === 1) {
+        return { settings: [] };
+      }
+      if (!panelSettingsPromise) {
+        panelSettingsPromise = new Promise((resolve) => {
+          resolvePanelSettings = (value: unknown) =>
+            resolve(value as { settings: unknown[] });
+        });
+      }
+      return panelSettingsPromise;
+    });
     apiMock.mockImplementation(async (url: string) => {
       if (url === "/api/v1/quality-profiles") {
         return { profiles };
@@ -160,12 +167,14 @@ describe("Profils de repli — réglages", () => {
     });
     await flushPromises();
     expect(wrapper.find("form.profile-fallback-panel").exists()).toBe(false);
-    resolveSettings({
+    expect(settingsFetches).toBeGreaterThanOrEqual(2);
+    resolvePanelSettings({
       settings: [
         { key: "allow_fallback", value: true },
         { key: "profile_fallback_order", value: "1,2" },
       ],
     });
+    await flushPromises();
     await flushPromises();
     expect(wrapper.find("form.profile-fallback-panel").exists()).toBe(true);
     expect(patchSettingsMock).not.toHaveBeenCalled();

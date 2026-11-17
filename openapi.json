@@ -4231,6 +4231,34 @@
         "title": "FileStatusCountsOut",
         "type": "object"
       },
+      "FixedRetentionOut": {
+        "properties": {
+          "event_journal_days": {
+            "title": "Event Journal Days",
+            "type": "integer"
+          },
+          "incomplete_orphan_keep_days": {
+            "title": "Incomplete Orphan Keep Days",
+            "type": "integer"
+          },
+          "metrics_history_days": {
+            "title": "Metrics History Days",
+            "type": "integer"
+          },
+          "source_state_days": {
+            "title": "Source State Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_journal_days",
+          "source_state_days",
+          "metrics_history_days",
+          "incomplete_orphan_keep_days"
+        ],
+        "title": "FixedRetentionOut",
+        "type": "object"
+      },
       "FolderFileOut": {
         "properties": {
           "episode": {
@@ -5228,6 +5256,14 @@
       },
       "HosterOptionsOut": {
         "properties": {
+          "blocked_hosters": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Hosters",
+            "type": "array"
+          },
           "hosters": {
             "items": {
               "type": "string"
@@ -11874,9 +11910,34 @@
       },
       "SettingOut": {
         "properties": {
+          "default": {
+            "title": "Default"
+          },
           "key": {
             "title": "Key",
             "type": "string"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
           },
           "secret": {
             "title": "Secret",
@@ -11906,10 +11967,14 @@
             },
             "title": "Settings",
             "type": "array"
+          },
+          "source_defaults": {
+            "$ref": "#/components/schemas/SourceUrlDefaults"
           }
         },
         "required": [
-          "settings"
+          "settings",
+          "source_defaults"
         ],
         "title": "SettingsOut",
         "type": "object"
@@ -12712,8 +12777,33 @@
         "title": "SourceStatesOut",
         "type": "object"
       },
+      "SourceUrlDefaults": {
+        "properties": {
+          "comet_base_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Comet Base Urls",
+            "type": "array"
+          },
+          "torrentio_base_url": {
+            "title": "Torrentio Base Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "comet_base_urls",
+          "torrentio_base_url"
+        ],
+        "title": "SourceUrlDefaults",
+        "type": "object"
+      },
       "StorageOut": {
         "properties": {
+          "backups_dir": {
+            "title": "Backups Dir",
+            "type": "string"
+          },
           "downloads_dir": {
             "title": "Downloads Dir",
             "type": "string"
@@ -12756,6 +12846,7 @@
           "series_dir",
           "downloads_dir",
           "trash_dir",
+          "backups_dir",
           "same_filesystem",
           "warning"
         ],
@@ -23600,6 +23691,27 @@
           }
         },
         "summary": "Patch Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/fixed-retention": {
+      "get": {
+        "operationId": "get_fixed_retention_api_v1_settings_fixed_retention_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixedRetentionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Fixed Retention",
         "tags": [
           "settings"
         ]

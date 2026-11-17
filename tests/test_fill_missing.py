@@ -61,7 +61,8 @@ class _Source:
             for season in query.seasons
         ]
 
-    def get_links(self, ref: SourceRef) -> list[LinkCandidate]:
+    def get_links(self, ref: SourceRef, *, hoster_preference=None, profile=None, **_kwargs) -> list[LinkCandidate]:
+        del hoster_preference, profile
         self.pages += 1
         season = int(ref.ref[1:])
         return [

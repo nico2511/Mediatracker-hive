@@ -13,4 +13,5 @@ def test_library_view_wires_verify_all_endpoint():
         Path(__file__).resolve().parents[1] / "frontend" / "src" / "composables" / "useLibraryVerifyAll.ts"
     ).read_text(encoding="utf-8")
     assert "useLibraryVerifyAll" in source
-    assert "Relancer le scan" in source
+    assert 'data-library-rescan' in source
+    assert "Relire les incomplets" in source

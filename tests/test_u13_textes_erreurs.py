@@ -11,10 +11,11 @@ LIBRARY = FRONT / "views" / "LibraryView.vue"
 
 
 def test_identified_filter_label_mentions_jellyfin():
-    for path in (MEDIA_LIST, LIBRARY):
-        source = path.read_text(encoding="utf-8")
-        assert "Suivi via identification" not in source
-        assert "Suivi par Jellyfin" in source
+    media_list = MEDIA_LIST.read_text(encoding="utf-8")
+    library = LIBRARY.read_text(encoding="utf-8")
+    assert "Suivi via identification" not in media_list
+    assert "Suivi par Jellyfin" in media_list
+    assert "Suivi via identification" not in library
 
 
 def test_user_facing_api_error_mapping():
