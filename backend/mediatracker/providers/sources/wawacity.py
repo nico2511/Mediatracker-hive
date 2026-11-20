@@ -284,6 +284,7 @@ class WawacitySource:
                     original_title=query.original_title,
                     year=query.year,
                     media_type="film",
+                    candidate_ref=item.url or item.ref,
                 ):
                     continue
                 if item.rejection:
@@ -598,6 +599,7 @@ def _seasons_covered(results: list[SourceResult], query: SourceQuery) -> bool:
                 original_title=query.original_title,
                 year=query.year,
                 media_type="film",
+                candidate_ref=item.url or item.ref,
             )
             and not item.rejection
             for item in results

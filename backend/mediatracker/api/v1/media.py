@@ -878,10 +878,16 @@ def _download_activity_ids(db: Session, item_ids: list[int]) -> tuple[set[int], 
 
 
 def _sync_library_claims(db: Session, request: Request, media: Media, items: list[MediaItem]) -> None:
-    """Drop a downloaded flag when the library video is gone. Does not queue."""
+    """Attach missing series files from the show folder, then drop a gone video flag. Does not queue."""
     from mediatracker.core.source_poll import refresh_library_claims
+    from mediatracker.library.series_folder_attach import attach_series_folder_if_needed
 
-    if refresh_library_claims(db, media, items, request.app.state.settings, datetime.now(timezone.utc)):
+    settings = request.app.state.settings
+    now = datetime.now(timezone.utc)
+    changed = bool(attach_series_folder_if_needed(db, settings, media, items, now))
+    if refresh_library_claims(db, media, items, settings, now):
+        changed = True
+    if changed:
         db.commit()
 
 
@@ -1185,9 +1191,21 @@ def follow_existing_media(
         )
     except FollowError as exc:
         raise Problem(exc.status, exc.title, exc.detail) from exc
+    settings = request.app.state.settings
+    items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == row.id)).all())
+    from mediatracker.library.series_folder_attach import attach_series_folder_if_needed
+
+    attach_series_folder_if_needed(
+        db,
+        settings,
+        row,
+        items,
+        datetime.now(timezone.utc),
+        force=True,
+    )
     from mediatracker.core.worker_wake import REASON_API_MEDIA, wake_worker
 
-    wake_worker(db, request.app.state.settings, REASON_API_MEDIA, commit=False)
+    wake_worker(db, settings, REASON_API_MEDIA, commit=False)
     db.commit()
     db.refresh(row)
     items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == row.id)).all())

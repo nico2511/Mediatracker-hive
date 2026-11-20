@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
 from mediatracker.core.pipeline.download_guard import active_download_for_item
+from mediatracker.core.source_binding import match_catalog_page_url, upsert_binding_path
+from mediatracker.core.worker_wake import REASON_API_MEDIA, wake_worker
 from mediatracker.db.models import Download, Link, Media, MediaItem, Provider
-from mediatracker.providers.sources.manual import ManualSource
+from mediatracker.providers.sources.manual import ManualSource, classify_url
 
 router = APIRouter(prefix="/links", tags=["links"])
 
@@ -38,11 +40,13 @@ class LinkOut(BaseModel):
     language: str | None
     download_id: int | None
     needs_slot: bool = False
+    source_binding: bool = False
 
 
 @router.post("", response_model=LinkOut, status_code=201)
 def create_link(
     body: LinkCreate,
+    request: Request,
     db: Session = Depends(get_db),
     _principal=Depends(require_scope("write")),
 ) -> LinkOut:
@@ -50,6 +54,47 @@ def create_link(
     media = db.get(Media, body.media_id)
     if media is None:
         raise Problem(404, "Introuvable", "Média introuvable.")
+    settings = request.app.state.settings
+    cleaned_url = body.url.strip()
+    if classify_url(cleaned_url) == "direct":
+        page = match_catalog_page_url(db, settings, cleaned_url)
+        if page is not None:
+            if page.media_kind != media.type:
+                raise Problem(
+                    422,
+                    "Requête invalide",
+                    "Cette page source ne correspond pas au type de la fiche.",
+                )
+            bind_season: int | None = None
+            if media.type == "series":
+                bind_season = body.season if body.season is not None else page.season
+                if bind_season is None:
+                    raise Problem(
+                        422,
+                        "Requête invalide",
+                        "Indiquez la saison ou collez une page de saison.",
+                    )
+            upsert_binding_path(
+                db,
+                settings,
+                media,
+                season=bind_season,
+                stored_path=page.stored_path,
+                source_type=page.source_type,
+            )
+            wake_worker(db, settings, REASON_API_MEDIA, commit=False)
+            db.commit()
+            return LinkOut(
+                id=0,
+                media_item_id=0,
+                url=cleaned_url,
+                kind="source_page",
+                hoster=None,
+                quality=None,
+                language=None,
+                download_id=None,
+                source_binding=True,
+            )
     season, episode = _slot_for(media, body)
     provider = db.scalar(select(Provider).where(Provider.kind == "source", Provider.type == "manual"))
     if provider is None:
@@ -100,7 +145,12 @@ def create_link(
             download_id = created.id
         else:
             download_id = active.id
-    if item.state == "missing":
+            if active.link_id != link.id:
+                active.link_id = link.id
+                active.error = None
+                active.error_code = None
+                wake_worker(db, settings, REASON_API_MEDIA, commit=False)
+    if not needs_slot and item.state == "missing":
         item.state = "available"
         item.source_available = True
     db.commit()

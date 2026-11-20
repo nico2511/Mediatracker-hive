@@ -276,16 +276,18 @@ async function addLink() {
   }
   busy.value = "link";
   try {
-    const created = await api<{ needs_slot: boolean }>("/api/v1/links", {
+    const created = await api<{ needs_slot: boolean; source_binding?: boolean }>("/api/v1/links", {
       method: "POST",
       body: JSON.stringify({ media_id: props.mediaId, url: value, start: true }),
     });
-    panelMessage.value = created.needs_slot
-      ? "Lien enregistré. Indiquez la saison et l'épisode sur la fiche si besoin."
-      : "Lien ajouté à la file.";
+    panelMessage.value = created.source_binding
+      ? "Page source enregistrée."
+      : created.needs_slot
+        ? "Lien enregistré. Indiquez la saison et l'épisode sur la fiche si besoin."
+        : "Lien ajouté à la file.";
     linkUrl.value = "";
     emit("updated");
-    await loadDeadLinks();
+    await reloadPanel();
   } catch (err) {
     panelError.value = userFacingApiError(err, "Lien refusé.");
   } finally {

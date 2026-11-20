@@ -35,9 +35,39 @@ def release_core(value: str) -> str:
     return fold_title(title)
 
 
+def numeric_title_tokens(value: str) -> tuple[str, ...] | None:
+    """Digit-only title tokens (e.g. « 7 7 7 »), or ``None`` when letters are present."""
+    core = release_core(value)
+    if not core:
+        return None
+    parts = core.split()
+    if not parts or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(parts)
+
+
 def titles_match(left: str, right: str) -> bool:
+    left_num = numeric_title_tokens(left)
+    right_num = numeric_title_tokens(right)
+    if left_num is not None and right_num is not None:
+        return left_num == right_num
+    if left_num is not None or right_num is not None:
+        return False
     folded = release_core(left)
     return folded == release_core(right) and folded != ""
+
+
+def _tmdb_ref_matches(candidate_ref: str | None, tmdb_id: int) -> bool:
+    text = (candidate_ref or "").strip()
+    if not text:
+        return False
+    token = str(tmdb_id)
+    if token not in text:
+        return False
+    for piece in re.split(r"[^0-9]+", text):
+        if piece == token:
+            return True
+    return False
 
 
 def identity_match(
@@ -48,12 +78,23 @@ def identity_match(
     original_title: str | None,
     year: int | None,
     media_type: str,
+    tmdb_id: int | None = None,
+    candidate_ref: str | None = None,
 ) -> bool:
     """Exact local or original title. A film also needs the same year.
 
     Substrings do not count: Pitch Black is not Les Ensorceleuses 2, and a
     page that forgot its title is not the search phrase.
     """
+    title_names = (title, original_title or "")
+    purely_numeric = any(
+        numeric_title_tokens(name) is not None for name in title_names if name.strip()
+    )
+    if purely_numeric and tmdb_id is not None and _tmdb_ref_matches(candidate_ref, tmdb_id):
+        if year is not None and candidate_year is not None and candidate_year != year:
+            return False
+        if any(titles_match(candidate_title, name) for name in (title, original_title or "") if name.strip()):
+            return True
     names = [name for name in (title, original_title or "") if name.strip()]
     if not (candidate_title or "").strip() or not any(titles_match(candidate_title, name) for name in names):
         return False
@@ -61,6 +102,8 @@ def identity_match(
         return True
     if media_type == "film":
         return candidate_year == year
+    if purely_numeric and candidate_year is not None and candidate_year != year:
+        return False
     return candidate_year is None or candidate_year == year
 
 
@@ -154,6 +197,8 @@ def select_variants(
     language_fallback: Sequence[str],
     exclude: set[tuple[str | None, str | None]] | None = None,
     profile: Profile | None = None,
+    tmdb_id: int | None = None,
+    trust_bound_urls: bool = False,
 ) -> list[SourceResult]:
     """One page per season (or one film page). Preferred quality and language win."""
     ranked: list[tuple[int, SourceResult]] = []
@@ -162,13 +207,15 @@ def select_variants(
             continue
         if exclude and (result.quality, result.language) in exclude:
             continue
-        if not identity_match(
+        if not trust_bound_urls and not identity_match(
             result.title,
             result.year,
             title=title,
             original_title=original_title,
             year=year,
             media_type=media_type,
+            tmdb_id=tmdb_id,
+            candidate_ref=result.ref or result.url,
         ):
             continue
         if media_type == "series" and result.season is not None and result.season not in seasons:
@@ -182,8 +229,10 @@ def select_variants(
             language_fallback=language_fallback,
             profile=profile,
         )
-        if rank is None:
+        if rank is None and not trust_bound_urls:
             continue
+        if rank is None and trust_bound_urls:
+            rank = 0
         ranked.append((rank, result))
     if media_type != "film" and year is not None and any(item.year == year for _, item in ranked):
         ranked = [(rank, item) for rank, item in ranked if item.year == year]
@@ -212,6 +261,7 @@ def explain_misses(
     quality_fallback: Sequence[str],
     language_fallback: Sequence[str],
     profile: Profile | None = None,
+    tmdb_id: int | None = None,
 ) -> str:
     """One French sentence per distinct reason a candidate was left aside. No URLs."""
     notes: list[str] = []
@@ -230,6 +280,8 @@ def explain_misses(
             original_title=original_title,
             year=year,
             media_type=media_type,
+            tmdb_id=tmdb_id,
+            candidate_ref=result.ref or result.url,
         ):
             if (
                 year is not None

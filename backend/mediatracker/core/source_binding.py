@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
@@ -15,6 +16,18 @@ from mediatracker.db.models import Media, MediaItem, Provider, SourceBinding
 from mediatracker.providers.base import SourceResult
 
 REVALIDATE_INTERVAL = timedelta(days=30)
+_CATALOG_BINDING_SOURCES = ("wawacity", "free_telecharger")
+_WAWACITY_PAGE_PATH = re.compile(r"^/(?:film|serie|series|animes)/[^?#]+", re.I)
+_FREE_TELECHARGER_PAGE_PATH = re.compile(r"^/fiches/[^?#]+", re.I)
+_SOURCE_LABELS = {"wawacity": "Wawacity", "free_telecharger": "Free-Télécharger"}
+
+
+@dataclass(frozen=True)
+class CatalogPageMatch:
+    source_type: str
+    stored_path: str
+    season: int | None
+    media_kind: str
 
 
 def path_from_url(url: str | None) -> str | None:
@@ -137,7 +150,8 @@ def pick_bound_pages(
     for season in needed:
         binding = by_season[season]
         if not ignore_revalidation and binding_needs_revalidation(binding, now):
-            return None
+            if not binding.path_manual:
+                return None
     pages: list[SourceResult] = []
     for season in sorted(needed, key=lambda value: (value is None, value or 0)):
         binding = by_season[season]
@@ -206,26 +220,99 @@ def _host_key(base_url: str) -> str:
     return host
 
 
-def resolve_binding_path(
+def _catalog_page_shape(source_type: str, stored_path: str, *, full_text: str) -> bool:
+    lowered = full_text.lower()
+    if "search=" in lowered or "recherche" in stored_path.lower():
+        return False
+    if source_type == "wawacity":
+        return bool(_WAWACITY_PAGE_PATH.match(stored_path))
+    if source_type == "free_telecharger":
+        return bool(_FREE_TELECHARGER_PAGE_PATH.match(stored_path))
+    return False
+
+
+def _catalog_media_kind(source_type: str, stored_path: str, *, full_text: str) -> str | None:
+    if source_type == "wawacity":
+        parts = [part for part in stored_path.split("/") if part]
+        if not parts:
+            return None
+        head = parts[0].lower()
+        if head == "film":
+            return "film"
+        if head in {"serie", "series", "animes"}:
+            return "series"
+        return None
+    if source_type == "free_telecharger":
+        text = full_text.lower()
+        if "series-" in text or "saison" in text:
+            return "series"
+        return "film"
+    return None
+
+
+def _catalog_season(stored_path: str, *, full_text: str) -> int | None:
+    from mediatracker.providers.sources.wawacity_html import season_from_url
+
+    return season_from_url(full_text) or season_from_url(stored_path)
+
+
+def match_catalog_page_url(db: Session, settings: Settings, url: str) -> CatalogPageMatch | None:
+    """Recognize a configured catalogue page URL (Wawacity, Free-Télécharger) for manual binding."""
+    from mediatracker.providers.sources.loading import source_base_url
+
+    raw = (url or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    for source_type in _CATALOG_BINDING_SOURCES:
+        base = source_base_url(db, settings, source_type)
+        if not base:
+            continue
+        if parsed.scheme and parsed.netloc:
+            if _host_key(raw) != _host_key(base):
+                continue
+            stored = path_from_url(raw)
+        else:
+            rel = path_from_url(raw) or raw
+            if not rel:
+                continue
+            stored = rel if rel.startswith("/") else f"/{rel}"
+        if not stored or not _catalog_page_shape(source_type, stored, full_text=raw):
+            continue
+        media_kind = _catalog_media_kind(source_type, stored, full_text=raw)
+        if media_kind is None:
+            continue
+        return CatalogPageMatch(
+            source_type=source_type,
+            stored_path=stored,
+            season=_catalog_season(stored, full_text=raw),
+            media_kind=media_kind,
+        )
+    return None
+
+
+def resolve_catalog_binding_path(
     db: Session,
     settings: Settings,
+    source_type: str,
     *,
     url: str | None,
     path: str | None,
 ) -> str:
-    """Turn a full URL or a relative path into the stored path. The domain must match Wawacity."""
+    """Turn a full URL or a relative path into the stored path for a catalogue source."""
     from mediatracker.providers.sources.loading import source_base_url
 
-    base = source_base_url(db, settings, "wawacity")
+    label = _SOURCE_LABELS.get(source_type, source_type)
+    base = source_base_url(db, settings, source_type)
     if not base:
-        raise ValueError("L'URL Wawacity n'est pas configurée.")
+        raise ValueError(f"L'URL {label} n'est pas configurée.")
     raw_path = (path or "").strip()
     raw_url = (url or "").strip()
     if raw_url:
         parsed = urlparse(raw_url)
         if parsed.scheme and parsed.netloc:
             if _host_key(raw_url) != _host_key(base):
-                raise ValueError(f"L'URL doit utiliser le domaine Wawacity actuel ({urlparse(base).netloc or base}).")
+                raise ValueError(f"L'URL doit utiliser le domaine {label} actuel ({urlparse(base).netloc or base}).")
             resolved = path_from_url(raw_url)
             if not resolved:
                 raise ValueError("Chemin de page invalide.")
@@ -236,12 +323,23 @@ def resolve_binding_path(
         raise ValueError("Indiquez une URL complète ou un chemin relatif.")
     if raw_path.startswith("http://") or raw_path.startswith("https://"):
         if _host_key(raw_path) != _host_key(base):
-            raise ValueError(f"L'URL doit utiliser le domaine Wawacity actuel ({urlparse(base).netloc or base}).")
+            raise ValueError(f"L'URL doit utiliser le domaine {label} actuel ({urlparse(base).netloc or base}).")
         resolved = path_from_url(raw_path)
         if not resolved:
             raise ValueError("Chemin de page invalide.")
         return resolved
     return path_from_url(raw_path) or raw_path
+
+
+def resolve_binding_path(
+    db: Session,
+    settings: Settings,
+    *,
+    url: str | None,
+    path: str | None,
+) -> str:
+    """Turn a full URL or a relative path into the stored path. The domain must match Wawacity."""
+    return resolve_catalog_binding_path(db, settings, "wawacity", url=url, path=path)
 
 
 def bindings_need_search(
@@ -346,12 +444,14 @@ def upsert_binding_path(
     *,
     season: int | None,
     stored_path: str,
+    source_type: str = "wawacity",
 ) -> SourceBinding:
     from mediatracker.providers.sources.loading import source_base_url
+    from mediatracker.providers.sources.registry import get
 
-    provider_id = wawacity_provider_id(db)
+    provider_id = get(source_type).provider_id(db)
     row = get_binding(db, media.id, provider_id, season)
-    page_url = url_from_path(source_base_url(db, settings, "wawacity"), stored_path)
+    page_url = url_from_path(source_base_url(db, settings, source_type), stored_path)
     ref = (stored_path or page_url or "")[:300]
     if row is None:
         row = SourceBinding(

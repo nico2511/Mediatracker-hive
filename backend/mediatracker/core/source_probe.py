@@ -598,33 +598,57 @@ def _probe_links(
     opened = remote_links_source(db, settings, name)
     if opened is None:
         return _ProbeOutcome("skipped", 0, "source non ouverte")
-    _provider_id, source = opened
+    provider_id, source = opened
     try:
-        from mediatracker.core.source_poll import _search
+        from datetime import datetime, timezone
 
-        seasons = {item.season} if item.season is not None else set()
-        crit_quality = getattr(profile, "quality", None) or default_pref_quality(db)
-        crit_language = getattr(profile, "language", None) or default_pref_language(db)
-        results = _search(
-            source,
-            media,
-            seasons,
-            crit_quality,
-            crit_language,
-            False,
+        from mediatracker.core.source_binding import pick_bound_pages, seasons_needed
+        from mediatracker.core.source_poll import _page_links, _search
+
+        season_set: set[int | None]
+        if media.type == "film":
+            season_set = {None}
+        else:
+            season_set = {item.season} if item.season is not None else set()
+        seasons = seasons_needed(media, season_set)
+        bound = pick_bound_pages(
             db,
             settings,
-            preferences=preferences_for(profile) if profile is not None else None,
+            media,
+            provider_id,
+            seasons,
+            now=datetime.now(timezone.utc),
+            force_search=False,
+            ignore_revalidation=True,
         )
-        if not results:
-            return _ProbeOutcome("empty", 0, None)
-        page = results[0]
+        pages = bound
+        if not pages:
+            crit_quality = getattr(profile, "quality", None) or default_pref_quality(db)
+            crit_language = getattr(profile, "language", None) or default_pref_language(db)
+            results = _search(
+                source,
+                media,
+                {season for season in seasons if season is not None},
+                crit_quality,
+                crit_language,
+                False,
+                db,
+                settings,
+                preferences=preferences_for(profile) if profile is not None else None,
+            )
+            if not results:
+                return _ProbeOutcome("empty", 0, None)
+            pages = [results[0]]
+        page = pages[0]
         get_links = getattr(source, "get_links", None)
         if not callable(get_links):
             return _ProbeOutcome("empty", 0, None)
-        page_ref = page.ref if hasattr(page, "ref") else str(page)
-        page_url = getattr(page, "url", None)
-        raw = list(get_links(SourceRef(ref=page_ref, url=page_url)))
+        if bound:
+            raw = list(_page_links(source, page, profile))
+        else:
+            page_ref = page.ref if hasattr(page, "ref") else str(page)
+            page_url = getattr(page, "url", None)
+            raw = list(get_links(SourceRef(ref=page_ref, url=page_url)))
         count, reason = _count_hoster_links(raw, preference)
         if count > 0:
             return _ProbeOutcome("found", count, None)

@@ -73,6 +73,8 @@ def select_pages_for_profile_attempt(
     seasons: set[int],
     original_title: str | None = None,
     exclude: set[tuple[str | None, str | None]] | None = None,
+    tmdb_id: int | None = None,
+    trust_bound_urls: bool = False,
 ) -> list[SourceResult]:
     crit = attempt_selection_criteria(profile)
     return select_variants(
@@ -89,6 +91,8 @@ def select_pages_for_profile_attempt(
         language_fallback=crit.language_fallback,
         exclude=exclude,
         profile=profile,
+        tmdb_id=tmdb_id,
+        trust_bound_urls=trust_bound_urls,
     )
 
 
@@ -127,6 +131,19 @@ def rank_link_for_profile_attempt(link: Link, *, profile: Profile) -> int | None
     language = normalize_language(link.language) or detect_language(link.filename or "")
     if not language:
         return None
+    enforce_size = True
+    if link.size is None or link.size <= 0:
+        from sqlalchemy import inspect as sa_inspect
+
+        from mediatracker.db.models import Provider
+
+        state = sa_inspect(link, raiseerr=False)
+        session = state.session if state is not None else None
+        provider_id = getattr(link, "provider_id", None)
+        if session is not None and provider_id is not None:
+            row = session.get(Provider, provider_id)
+            if row is not None and row.type == "manual":
+                enforce_size = False
     return acceptance_rank(
         ReleaseCandidate(
             language=language,
@@ -135,7 +152,7 @@ def rank_link_for_profile_attempt(link: Link, *, profile: Profile) -> int | None
             text=link.filename or "",
         ),
         profile,
-        enforce_size=True,
+        enforce_size=enforce_size,
     )
 
 

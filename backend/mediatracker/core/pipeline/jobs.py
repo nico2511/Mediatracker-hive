@@ -172,23 +172,9 @@ def _version_penalty(
 ) -> int | None:
     """0 is the fiche's quality and language. Fallback versions come after, when allowed."""
     if profile is not None and link.quality and link.language:
-        from mediatracker.core.quality_profile import (
-            ReleaseCandidate,
-            acceptance_rank,
-            normalize_language,
-            normalize_resolution,
-        )
+        from mediatracker.core.profile_attempt_adapters import rank_link_for_profile_attempt
 
-        return acceptance_rank(
-            ReleaseCandidate(
-                language=normalize_language(link.language),
-                resolution=normalize_resolution(link.quality),
-                size=link.size,
-                text=link.filename or "",
-            ),
-            profile,
-            enforce_size=True,
-        )
+        return rank_link_for_profile_attempt(link, profile=profile)
     if media is None or not link.quality or not link.language:
         return 0
     if link.quality == media.pref_quality and link.language == media.pref_language:

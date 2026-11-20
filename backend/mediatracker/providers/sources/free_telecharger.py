@@ -187,6 +187,7 @@ class FreeTelechargerSource:
                     original_title=query.original_title,
                     year=query.year,
                     media_type=kind,
+                    candidate_ref=item.url or item.ref,
                 ):
                     continue
                 if item.rejection:

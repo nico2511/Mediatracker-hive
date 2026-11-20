@@ -544,6 +544,7 @@ def _collect(
             seasons=seasons,
             chain=chain,
             single_profile=single_profile,
+            trust_bound_urls=True,
         )
         if pick is not None:
             pages = pick.pages
@@ -555,6 +556,12 @@ def _collect(
             allow = crit.allow_fallback
             quality_fallback = list(crit.quality_fallback)
             language_fallback = list(crit.language_fallback)
+        elif report_rows:
+            pages = list(report_rows)
+            if media.type == "film":
+                pages = pages[:1]
+            else:
+                pages = [row for row in pages if row.season is None or row.season in seasons][:_MAX_PAGES]
         results = report_rows
     else:
         if network_only:
@@ -640,6 +647,7 @@ def _collect(
             quality_fallback=quality_fallback,
             language_fallback=language_fallback,
             profile=spec,
+            tmdb_id=media.tmdb_id,
         )
         message = no_version_message(list(results), spec.name, detail)
         if network_only:

@@ -275,6 +275,7 @@ def pick_remote_pages_for_profiles(
     chain: ProfileChain,
     exclude: set[tuple[str | None, str | None]] | None = None,
     single_profile: Profile | None = None,
+    trust_bound_urls: bool = False,
 ) -> RemotePagePick | None:
     profiles: Sequence[Profile] = (single_profile,) if single_profile is not None else chain.profiles
     for index, profile in enumerate(profiles):
@@ -287,6 +288,8 @@ def pick_remote_pages_for_profiles(
             media_type=media.type,
             seasons=seasons,
             exclude=exclude,
+            tmdb_id=media.tmdb_id,
+            trust_bound_urls=trust_bound_urls,
         )
         if pages:
             return RemotePagePick(pages=pages, profile=profile, profile_rank=index + 1)

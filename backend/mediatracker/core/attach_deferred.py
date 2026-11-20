@@ -49,8 +49,13 @@ def schedule_attach_known_files(factory: sessionmaker, settings: Settings, media
 
 
 def _run(factory: sessionmaker, settings: Settings, media_id: int) -> None:
-    from mediatracker.db.models import Media
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from mediatracker.db.models import Media, MediaItem
     from mediatracker.library.scanner import attach_known_files
+    from mediatracker.library.series_folder_attach import attach_series_folder_if_needed
 
     db = factory()
     try:
@@ -58,7 +63,10 @@ def _run(factory: sessionmaker, settings: Settings, media_id: int) -> None:
         if media is None or not media.followed:
             return
         release_sqlite_before_network(db)
-        attached = attach_known_files(db, settings, media)
+        now = datetime.now(timezone.utc)
+        items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all())
+        attached = attach_series_folder_if_needed(db, settings, media, items, now, force=True)
+        attached += attach_known_files(db, settings, media)
         if attached:
             commit_retry(db)
     except Exception:
