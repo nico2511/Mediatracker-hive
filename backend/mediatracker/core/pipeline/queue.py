@@ -920,7 +920,10 @@ def _begin(
         row.error = None
         row.skipped_link_ids = []
     from mediatracker.core.precheck import should_bypass_remote_dedup
-    from mediatracker.core.remote_search_limit import begin_remote_search, remote_search_limit_phrase
+    from mediatracker.core.remote_search_limit import (
+        begin_remote_search,
+        remote_search_reserved_same_pass,
+    )
 
     found = None
     while True:
@@ -956,20 +959,20 @@ def _begin(
             break
         if peek_next_download_profile_repli(db, media, settings, row) is None:
             break
-        if not begin_remote_search(media, now, db, settings):
-            logger.info(
-                "Repli profil ignoré pour le média %s (%s).",
-                media.id,
-                remote_search_limit_phrase(db, settings),
-            )
-            break
+        slot_reused = remote_search_reserved_same_pass(media, now)
+        slot_ok = slot_reused or begin_remote_search(media, now, db, settings)
         if not advance_download_profile_repli(db, media, item, row, settings, now=now):
             break
-        _rediscover(db, settings, media, now, download=row, search_slot_reserved=True)
+        # Nouveau créneau seulement : un créneau déjà pris sur ce passage a déjà
+        # servi à la recherche Wawacity (_ingest_other_versions). Ensuite la boucle
+        # refait le tour des sources avec le profil de repli.
+        if slot_ok and not slot_reused:
+            _rediscover(db, settings, media, now, download=row, search_slot_reserved=True)
         row.error_code = None
         row.error = None
         row.skipped_link_ids = []
         _commit(db)
+        row._download_repli_advanced = True
     if found is None:
         composed = compose_download_pass_failure(row, order)
         if composed is not None:

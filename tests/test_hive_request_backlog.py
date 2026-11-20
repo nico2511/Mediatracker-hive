@@ -12,7 +12,16 @@ from tests.test_hive_profile_attempt import _seed_catalogue_row
 from tests.test_hive_t2 import _enable_hive, _join_fixture_ruche, _origin_id
 from tests.test_hive_t6 import NOW, _ruche
 
-from mediatracker.db.models import Download, HiveRequestResolution, HiveSignal, Media, MediaItem, Setting
+from mediatracker.core.profile_fallback import encode_media_fallback_profile_ids
+from mediatracker.db.models import (
+    Download,
+    HiveRequestResolution,
+    HiveSignal,
+    Media,
+    MediaItem,
+    QualityProfile,
+    Setting,
+)
 from mediatracker.hive.catalog import build_catalog_payload, sign_payload
 from mediatracker.hive.crypto_id import generate_keypair, hive_public_id_from_public_key, public_key_to_pem
 from mediatracker.hive.peer_gossip import ingest_signed_entries
@@ -177,6 +186,129 @@ def test_auto_accept_via_settings_patch(client):
             select(HiveRequestResolution).where(HiveRequestResolution.requester_origin == remote)
         )
         assert row is not None and row.status == "accepted"
+    finally:
+        db.close()
+
+
+def test_try_enqueue_ingested_offer_matches_fallback_profile(client, settings):
+    """Sans ligne Download, une offre du repli doit pouvoir mettre la file en marche."""
+    _enable_hive(client)
+    rid = _ruche(client)
+    db = client.app.state.session_factory()
+    try:
+        _ensure_hive_enqueue_prereqs(db, rid.hex())
+        principal = db.scalar(select(QualityProfile).where(QualityProfile.is_default.is_(True)).limit(1))
+        assert principal is not None
+        repli = QualityProfile(
+            name="Repli VOSTFR test",
+            languages=["VOSTFR"],
+            min_resolution=None,
+            max_resolution="1080p",
+            exclude_keywords=[],
+            is_default=False,
+        )
+        db.add(repli)
+        db.flush()
+        cle = {"type": "film", "tmdb_id": 880072, "version": "1080p+VOSTFR"}
+        media = Media(
+            type="film",
+            title="Film repli Hive",
+            year=2099,
+            tmdb_id=880072,
+            followed=True,
+            quality_profile_id=principal.id,
+            fallback_profile_ids=encode_media_fallback_profile_ids([repli.id]),
+            pref_quality="1080p",
+            pref_language="VFF",
+            new_episode_policy="auto",
+        )
+        db.add(media)
+        db.flush()
+        # La clé cherche suit release_* ; VOSTFR est le rang repli, pas le principal VFF.
+        item = MediaItem(media_id=media.id, state="missing", release_quality="1080p", release_language="VOSTFR")
+        db.add(item)
+        db.flush()
+        _seed_catalogue_row(
+            db,
+            cle=cle,
+            version="1080p+VOSTFR",
+            sha="f" * 64,
+            joignable=True,
+            ruche_hex=rid.hex(),
+        )
+        publish_cherche_for_item(db, settings, media=media, item=item, now=NOW)
+        from mediatracker.hive.source_download import try_enqueue_hive_for_ingested_offers
+
+        queued_n = try_enqueue_hive_for_ingested_offers(db, settings, ruche_id=rid, cles=[cle], now=NOW)
+        assert queued_n == 1
+        dl = db.scalar(select(Download).where(Download.media_item_id == item.id))
+        assert dl is not None
+        db.commit()
+    finally:
+        db.close()
+
+
+
+def test_try_enqueue_ingested_offer_matches_fallback_when_cherche_is_principal(client, settings):
+    """Une offre du repli passe même si la clé cherche a été publiée avec release_* du principal."""
+    _enable_hive(client)
+    rid = _ruche(client)
+    db = client.app.state.session_factory()
+    try:
+        _ensure_hive_enqueue_prereqs(db, rid.hex())
+        principal = QualityProfile(
+            name="Principal VFF test",
+            languages=["VFF"],
+            min_resolution=None,
+            max_resolution="1080p",
+            exclude_keywords=[],
+            is_default=False,
+        )
+        repli = QualityProfile(
+            name="Repli VOSTFR test 2",
+            languages=["VOSTFR"],
+            min_resolution=None,
+            max_resolution="1080p",
+            exclude_keywords=[],
+            is_default=False,
+        )
+        db.add(principal)
+        db.add(repli)
+        db.flush()
+        cle = {"type": "film", "tmdb_id": 880073, "version": "1080p+VOSTFR"}
+        media = Media(
+            type="film",
+            title="Film repli Hive cherche principal",
+            year=2099,
+            tmdb_id=880073,
+            followed=True,
+            quality_profile_id=principal.id,
+            fallback_profile_ids=encode_media_fallback_profile_ids([repli.id]),
+            pref_quality="1080p",
+            pref_language="VFF",
+            new_episode_policy="auto",
+        )
+        db.add(media)
+        db.flush()
+        item = MediaItem(media_id=media.id, state="missing", release_quality="1080p", release_language="VFF")
+        db.add(item)
+        db.flush()
+        _seed_catalogue_row(
+            db,
+            cle=cle,
+            version="1080p+VOSTFR",
+            sha="e" * 64,
+            joignable=True,
+            ruche_hex=rid.hex(),
+        )
+        publish_cherche_for_item(db, settings, media=media, item=item, now=NOW)
+        from mediatracker.hive.source_download import try_enqueue_hive_for_ingested_offers
+
+        queued_n = try_enqueue_hive_for_ingested_offers(db, settings, ruche_id=rid, cles=[cle], now=NOW)
+        assert queued_n == 1
+        dl = db.scalar(select(Download).where(Download.media_item_id == item.id))
+        assert dl is not None
+        db.commit()
     finally:
         db.close()
 

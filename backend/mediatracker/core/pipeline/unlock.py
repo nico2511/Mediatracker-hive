@@ -248,7 +248,13 @@ def _from_hosters(
         if link is None:
             from mediatracker.core.profile_fallback import media_has_profile_repli_chain
 
-            if not looked_for_versions and attempt is not None and media_has_profile_repli_chain(db, media, settings):
+            already_advanced = getattr(row, "__dict__", {}).get("_download_repli_advanced") is True
+            if (
+                not already_advanced
+                and not looked_for_versions
+                and attempt is not None
+                and media_has_profile_repli_chain(db, media, settings)
+            ):
                 looked_for_versions = True
                 if _ingest_other_versions(
                     db, settings, media, item, now, attempt_profile=attempt, from_next_repli=True

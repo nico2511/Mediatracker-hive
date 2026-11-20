@@ -130,6 +130,22 @@ def local_cherche_active(db: Session, *, ruche_id: bytes, origin: str, cle: dict
     return row is not None and row.signal == "cherche"
 
 
+def local_cherche_active_for_work(db: Session, *, ruche_id: bytes, origin: str, cle: dict) -> bool:
+    """Cherche local actif sur la même œuvre (tmdb/saison/épisode), quelle que soit la version."""
+    if local_cherche_active(db, ruche_id=ruche_id, origin=origin, cle=cle):
+        return True
+    target = _stable_work_key(cle)
+    if not target:
+        return False
+    for row in latest_cherche_rows_for_ruche(db, ruche_id=ruche_id):
+        if row.origin_instance_id != origin:
+            continue
+        existing = parse_cle(row.cle_json)
+        if existing and _stable_work_key(existing) == target:
+            return True
+    return False
+
+
 def list_received_requests(db: Session, settings: Settings) -> list[dict[str, Any]]:
     self_origin = _self_origin(settings)
     buckets: dict[tuple[bytes, str], dict[str, Any]] = {}

@@ -448,7 +448,11 @@ def _ingest_other_versions(
     from mediatracker.core.profile_attempt_orchestration import load_profile_chain, profile_chain_from_anchor
     from mediatracker.core.profile_fallback import ProfileResolveError
     from mediatracker.core.quality_profile import Profile, preferences_for
-    from mediatracker.core.remote_search_limit import begin_remote_search, remote_search_limit_phrase
+    from mediatracker.core.remote_search_limit import (
+        begin_remote_search,
+        remote_search_limit_phrase,
+        remote_search_reserved_same_pass,
+    )
     from mediatracker.core.source_poll import _search, _store_links, close_source
     from mediatracker.providers.sources.loading import remote_links_source
     from mediatracker.providers.sources.registry import for_type
@@ -463,7 +467,8 @@ def _ingest_other_versions(
             return False
     if not specs:
         return False
-    if not begin_remote_search(media, now, db, settings):
+    slot_reused = remote_search_reserved_same_pass(media, now)
+    if not slot_reused and not begin_remote_search(media, now, db, settings):
         logger.info(
             "Repli de version ignoré pour le média %s (%s).",
             media.id,

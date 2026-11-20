@@ -11,6 +11,7 @@ from mediatracker.core.remote_search_limit import (
     remote_search_cooldown,
     remote_search_cooldown_hours,
     remote_search_limit_phrase,
+    remote_search_reserved_same_pass,
 )
 from mediatracker.db.models import Media, Setting
 
@@ -62,6 +63,13 @@ def test_remote_search_allowed_after_six_hours_default():
     last = NOW - timedelta(hours=6)
     media = _media(last=last)
     assert remote_search_allowed(media, NOW, cooldown=cooldown) is True
+
+
+def test_remote_search_reserved_same_pass():
+    media = _media(last=NOW)
+    assert remote_search_reserved_same_pass(media, NOW) is True
+    assert remote_search_reserved_same_pass(media, NOW + timedelta(seconds=1)) is False
+    assert remote_search_reserved_same_pass(_media(last=None), NOW) is False
 
 
 def test_remote_search_refused_at_five_hours_fifty_nine_default():

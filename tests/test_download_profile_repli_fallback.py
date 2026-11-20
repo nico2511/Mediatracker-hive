@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import select
-from tests.conftest import login
+from tests.conftest import connect_alldebrid_for_tests, login
+from tests.test_pipeline import FakeDebrid, FakeDownloader
 
+from mediatracker.core.pipeline import queue as download_queue
 from mediatracker.core.pipeline.jobs import (
     _ingest_other_versions,
     advance_download_profile_repli,
@@ -23,6 +25,7 @@ from mediatracker.core.profile_fallback import (
     encode_media_fallback_profile_ids,
 )
 from mediatracker.core.quality_profile import profile_from_row
+from mediatracker.core.remote_search_limit import remote_search_reserved_same_pass
 from mediatracker.core.source_poll import PollReport
 from mediatracker.db.models import Download, Event, Media, MediaItem, QualityProfile
 from mediatracker.db.session import commit_retry
@@ -215,3 +218,201 @@ def test_orchestrate_restrict_single_profile_tries_chain_tail(client, app, db, s
         restrict_single_profile=anchor,
     )
     assert tried == ["Profil R1", "Profil R2"]
+
+
+def test_ingest_other_versions_reuses_remote_search_slot_same_pass(client, app, monkeypatch):
+    db = app.state.session_factory()
+    try:
+        principal = _add_profile(db, "Profil P", languages=("VFF",))
+        r1 = _add_profile(db, "Profil R1", languages=("VOSTFR",))
+        media = _media_with_chain(db, principal, [r1])
+        media.last_remote_search_at = NOW
+        item = MediaItem(media_id=media.id, season=1, episode=1, state="missing")
+        db.add(item)
+        commit_retry(db)
+        media_id, item_id = media.id, item.id
+    finally:
+        db.close()
+
+    begin_calls: list[int] = []
+
+    def refuse_begin(*_a, **_k):
+        begin_calls.append(1)
+        return False
+
+    monkeypatch.setattr("mediatracker.core.remote_search_limit.begin_remote_search", refuse_begin)
+    monkeypatch.setattr(
+        "mediatracker.providers.sources.registry.for_type",
+        lambda _n: MagicMock(capabilities=frozenset()),
+    )
+    monkeypatch.setattr("mediatracker.core.pipeline.jobs._usable_download_sources", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        "mediatracker.providers.sources.loading.remote_links_source",
+        lambda *_a, **_k: (1, MagicMock(close=lambda: None)),
+    )
+
+    db2 = app.state.session_factory()
+    try:
+        media = db2.get(Media, media_id)
+        item = db2.get(MediaItem, item_id)
+        assert media is not None and item is not None
+        assert remote_search_reserved_same_pass(media, NOW)
+        spec_p = profile_from_row(db2.get(QualityProfile, principal.id))
+        ok = _ingest_other_versions(
+            db2, app.state.settings, media, item, NOW, attempt_profile=spec_p, from_next_repli=False
+        )
+        assert ok is False
+        assert begin_calls == []
+    finally:
+        db2.close()
+
+
+def _run_begin(db, dl, now, settings, monkeypatch, *, last_remote=None, begin=None):
+    rediscover_flags: list[bool] = []
+    begin_calls: list[bool] = []
+    tours: list[int | None] = []
+
+    def track_rediscover(*_a, **kwargs):
+        rediscover_flags.append(bool(kwargs.get("search_slot_reserved")))
+
+    def track_begin(*_a, **_k):
+        begin_calls.append(True)
+        return bool(begin) if begin is not None else False
+
+    def track_source(*_a, **_k):
+        tours.append(dl.poll_quality_profile_id)
+        return None
+
+    monkeypatch.setattr(download_queue, "_rediscover", track_rediscover)
+    if begin is not None or last_remote is not None:
+        # last_remote already set on the media; still stub begin when provided.
+        if begin is not None:
+            monkeypatch.setattr("mediatracker.core.remote_search_limit.begin_remote_search", track_begin)
+    monkeypatch.setattr("mediatracker.core.pipeline.unlock._from_named_source", track_source)
+    monkeypatch.setattr(download_queue, "magnet_cache_first", lambda *_a, **_k: None)
+    monkeypatch.setattr(download_queue, "load_known_files", lambda *_a, **_k: ([], False))
+    monkeypatch.setattr(
+        download_queue,
+        "_usable_download_sources",
+        lambda *_a, **_k: ["mock_a", "mock_b"],
+    )
+    outcome = download_queue._begin(
+        db,
+        dl,
+        now,
+        [],
+        None,
+        FakeDebrid(),
+        None,
+        FakeDownloader(),
+        settings,
+        lambda _p: 10**12,
+        [],
+    )
+    return outcome, rediscover_flags, begin_calls, tours
+
+
+def test_download_pass_advances_repli_when_remote_slot_already_reserved(client, app, db, settings, monkeypatch):
+    connect_alldebrid_for_tests(app)
+    login(client)
+    principal = _add_profile(db, "Profil P", languages=("VFF",))
+    r1 = _add_profile(db, "Profil R1", languages=("VOSTFR",))
+    media = _media_with_chain(db, principal, [r1])
+    media.last_remote_search_at = NOW
+    item = MediaItem(media_id=media.id, season=1, episode=1, state="missing")
+    db.add(item)
+    db.flush()
+    dl = Download(media_item_id=item.id, state="pending", poll_quality_profile_id=None)
+    db.add(dl)
+    commit_retry(db)
+
+    outcome, rediscover_flags, begin_calls, tours = _run_begin(
+        db, dl, NOW, settings, monkeypatch, last_remote=NOW, begin=False
+    )
+    assert outcome == "waiting"
+    assert dl.poll_quality_profile_id == r1.id
+    assert begin_calls == []
+    assert rediscover_flags == []
+    assert tours == [None, None, r1.id, r1.id]
+    assert getattr(dl, "_download_repli_advanced", False) is True
+    ev = db.scalar(select(Event).where(Event.type == "download.profile_repli").order_by(Event.id.desc()))
+    assert ev is not None
+    assert "Profil R1" in str(ev.payload.get("message"))
+
+
+def test_download_pass_advances_repli_during_remote_cooldown(client, app, db, settings, monkeypatch):
+    connect_alldebrid_for_tests(app)
+    login(client)
+    principal = _add_profile(db, "Profil P", languages=("VFF",))
+    r1 = _add_profile(db, "Profil R1", languages=("VOSTFR",))
+    media = _media_with_chain(db, principal, [r1])
+    media.last_remote_search_at = NOW - timedelta(hours=1)
+    item = MediaItem(media_id=media.id, season=1, episode=1, state="missing")
+    db.add(item)
+    db.flush()
+    dl = Download(media_item_id=item.id, state="pending", poll_quality_profile_id=None)
+    db.add(dl)
+    commit_retry(db)
+
+    outcome, rediscover_flags, begin_calls, tours = _run_begin(
+        db, dl, NOW, settings, monkeypatch, last_remote=media.last_remote_search_at, begin=False
+    )
+    assert outcome == "waiting"
+    assert dl.poll_quality_profile_id == r1.id
+    assert begin_calls == [True]
+    assert rediscover_flags == []
+    assert tours == [None, None, r1.id, r1.id]
+    ev = db.scalar(select(Event).where(Event.type == "download.profile_repli").order_by(Event.id.desc()))
+    assert ev is not None
+    assert "Passage au profil de repli « Profil R1 »" in str(ev.payload.get("message"))
+
+
+def test_download_pass_rediscovers_only_when_new_slot_reserved(client, app, db, settings, monkeypatch):
+    connect_alldebrid_for_tests(app)
+    login(client)
+    principal = _add_profile(db, "Profil P", languages=("VFF",))
+    r1 = _add_profile(db, "Profil R1", languages=("VOSTFR",))
+    media = _media_with_chain(db, principal, [r1])
+    media.last_remote_search_at = None
+    item = MediaItem(media_id=media.id, season=1, episode=1, state="missing")
+    db.add(item)
+    db.flush()
+    dl = Download(media_item_id=item.id, state="pending", poll_quality_profile_id=None)
+    db.add(dl)
+    commit_retry(db)
+
+    outcome, rediscover_flags, begin_calls, tours = _run_begin(
+        db, dl, NOW, settings, monkeypatch, begin=True
+    )
+    assert outcome == "waiting"
+    assert dl.poll_quality_profile_id == r1.id
+    assert begin_calls == [True]
+    assert rediscover_flags == [True]
+    assert tours == [None, None, r1.id, r1.id]
+
+
+def test_download_pass_stops_at_last_profile(client, app, db, settings, monkeypatch):
+    connect_alldebrid_for_tests(app)
+    login(client)
+    principal = _add_profile(db, "Profil P", languages=("VFF",))
+    r1 = _add_profile(db, "Profil R1", languages=("VOSTFR",))
+    r2 = _add_profile(db, "Profil R2", languages=("VF",))
+    media = _media_with_chain(db, principal, [r1, r2])
+    media.last_remote_search_at = NOW
+    item = MediaItem(media_id=media.id, season=1, episode=1, state="missing")
+    db.add(item)
+    db.flush()
+    dl = Download(media_item_id=item.id, state="pending", poll_quality_profile_id=None)
+    db.add(dl)
+    commit_retry(db)
+
+    outcome, rediscover_flags, begin_calls, tours = _run_begin(
+        db, dl, NOW, settings, monkeypatch, last_remote=NOW, begin=False
+    )
+    assert outcome == "waiting"
+    assert dl.poll_quality_profile_id == r2.id
+    assert begin_calls == []
+    assert rediscover_flags == []
+    assert tours == [None, None, r1.id, r1.id, r2.id, r2.id]
+    events = list(db.scalars(select(Event).where(Event.type == "download.profile_repli").order_by(Event.id)).all())
+    assert [ev.payload.get("profile_name") for ev in events] == ["Profil R1", "Profil R2"]

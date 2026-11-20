@@ -19,7 +19,7 @@ from mediatracker.hive.download_aria2 import (
 from mediatracker.hive.enqueue_types import HiveEnqueueResult
 from mediatracker.hive.identity import hive_enabled_in_db, load_private_key
 from mediatracker.hive.signal import cle_hash, item_file_present
-from mediatracker.hive.signal_requests import local_cherche_active
+from mediatracker.hive.signal_requests import local_cherche_active_for_work
 from mediatracker.hive.source_catalog import HiveCatalogMatch
 
 
@@ -57,8 +57,12 @@ def resolve_hive_match_for_item(
         pick_hive_catalog_for_item,
         resolve_download_poll_profile,
     )
-    from mediatracker.core.profile_fallback import ProfileResolveError
+    from mediatracker.core.profile_fallback import ProfileResolveError, media_has_profile_repli_chain
+    from mediatracker.core.quality_profile import Profile
 
+    chain = None
+    attempt: Profile | None = None
+    pick_profile: Profile | None = None
     if row is not None:
         resolution = resolve_download_poll_profile(db, media, settings, row)
         if resolution.missing_explicit:
@@ -68,15 +72,21 @@ def resolve_hive_match_for_item(
         attempt = resolution.profile
         if attempt is None:
             return HiveMatchResolution("miss")
+        pick_profile = attempt
+        try:
+            chain = load_profile_chain(db, media, settings)
+        except ProfileResolveError:
+            chain = None
     else:
         try:
-            attempt = load_profile_chain(db, media, settings).principal
+            chain = load_profile_chain(db, media, settings)
         except ProfileResolveError:
             return HiveMatchResolution("miss")
-    try:
-        chain = load_profile_chain(db, media, settings)
-    except ProfileResolveError:
-        chain = None
+        attempt = chain.principal
+        if media_has_profile_repli_chain(db, media, settings):
+            pick_profile = None
+        else:
+            pick_profile = attempt
     if chain is None:
         from mediatracker.core.profile_attempt_orchestration import ProfileChain
 
@@ -89,7 +99,7 @@ def resolve_hive_match_for_item(
         item,
         chain,
         prefer_available=True,
-        single_profile=attempt,
+        single_profile=pick_profile,
         version_key=vk,
         explicit_version=explicit_version,
     )
@@ -217,7 +227,7 @@ def try_enqueue_hive_for_ingested_offers(
         if h in seen:
             continue
         seen.add(h)
-        if not local_cherche_active(db, ruche_id=ruche_id, origin=self_origin, cle=cle):
+        if not local_cherche_active_for_work(db, ruche_id=ruche_id, origin=self_origin, cle=cle):
             continue
         matched = _find_requester_item_for_cle(db, cle)
         if matched is None:
