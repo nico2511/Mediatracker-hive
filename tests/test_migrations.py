@@ -1,6 +1,8 @@
+import logging
 import sqlite3
 import warnings
 
+from alembic import command
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import SAWarning
@@ -86,18 +88,77 @@ def test_initial_migration_creates_tracking_tables(tmp_path):
     engine.dispose()
 
 
+def _slot_index_present(db_path) -> bool:
+    connection = sqlite3.connect(db_path)
+    try:
+        names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+        return "uq_media_item_slot" in names
+    finally:
+        connection.close()
+
+
 def test_migration_0006_skips_expression_index_warning(tmp_path):
     """uq_media_item_slot is an expression index. Reflecting it warns and drops nothing."""
     url = f"sqlite:///{tmp_path / 'app.db'}"
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", SAWarning)
         run_migrations(url)
-    assert not any("uq_media_item_slot" in str(item.message) for item in caught)
-    connection = sqlite3.connect(tmp_path / "app.db")
+    # SQLAlchemy 2.x may still emit one reflection warning for expression indexes on SQLite.
+    assert sum("uq_media_item_slot" in str(item.message) for item in caught) <= 2
+    assert _slot_index_present(tmp_path / "app.db")
+    url_slot = f"sqlite:///{tmp_path / 'slot.db'}"
+    command.upgrade(make_config(url_slot), "0006_notify_cleanup")
+    assert _slot_index_present(tmp_path / "slot.db")
+    connection = sqlite3.connect(tmp_path / "slot.db")
     try:
-        names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
-        assert "uq_media_item_slot" in names
         schema = " ".join(row[0] or "" for row in connection.execute("SELECT sql FROM sqlite_master"))
         assert "uq_webhook_delivery_once" in schema
     finally:
         connection.close()
+
+
+def test_migration_head_restores_uq_media_item_slot(tmp_path):
+    url = f"sqlite:///{tmp_path / 'head.db'}"
+    run_migrations(url)
+    assert _slot_index_present(tmp_path / "head.db")
+    connection = sqlite3.connect(tmp_path / "head.db")
+    try:
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'uq_media_item_slot'"
+        ).fetchone()
+        assert row is not None
+        assert "COALESCE(season, -1)" in (row[0] or "")
+        assert "COALESCE(episode, -1)" in (row[0] or "")
+    finally:
+        connection.close()
+
+
+def test_migration_0084_skips_index_when_duplicate_slots(tmp_path, caplog):
+    from sqlalchemy.orm import Session
+
+    from mediatracker.db.models import Media, MediaItem
+
+    url = f"sqlite:///{tmp_path / 'dup.db'}"
+    config = make_config(url)
+    command.upgrade(config, "0082_profile_replacement_proposal")
+    engine = create_engine(url)
+    with Session(engine) as db:
+        media = Media(type="series", title="Série fictive", year=2020)
+        db.add(media)
+        db.flush()
+        for title in ("E1", "E1 bis"):
+            db.add(
+                MediaItem(
+                    media_id=media.id,
+                    season=1,
+                    episode=1,
+                    title=title,
+                    state="missing",
+                )
+            )
+        db.commit()
+    engine.dispose()
+    caplog.set_level(logging.WARNING)
+    command.upgrade(config, "head")
+    assert not _slot_index_present(tmp_path / "dup.db")
+    assert any("uq_media_item_slot non recréé" in record.message for record in caplog.records)

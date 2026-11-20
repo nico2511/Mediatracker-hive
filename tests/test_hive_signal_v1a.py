@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
-from tests.conftest import login
+from tests.conftest import TEST_ADMIN_PASSWORD, login
 from tests.test_hive_t2 import _enable_hive, _join_fixture_ruche, _origin_id
 
 from mediatracker.config import Settings
@@ -45,7 +45,7 @@ def _settings_pair(tmp_path, suffix: str) -> Settings:
     return Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password=TEST_ADMIN_PASSWORD,
         database_url=f"sqlite:///{base / 'app.db'}",
         data_dir=base / "data",
         config_dir=base / "config",

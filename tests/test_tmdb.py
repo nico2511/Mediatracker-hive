@@ -152,17 +152,25 @@ def test_follow_from_tmdb_fills_episodes_and_waits_for_air_date(client, monkeypa
         def close(self) -> None:
             return None
 
-    def _borrow_tmdb(token: str, _factory) -> tuple[FakeTmdb, bool]:
+    def _borrow_tmdb(token: str, _factory, **_) -> tuple[FakeTmdb, bool]:
         """Bypass ``shared_tmdb`` (real ``TmdbClient`` + ``_client``) so fakes stay isolated."""
         return FakeTmdb(token), True
 
+    def _shared_tmdb(token: str, **_) -> FakeTmdb:
+        return FakeTmdb(token)
+
     for path in (
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        "mediatracker.api.v1.metadata.borrow_tmdb",
         "mediatracker.api.v1.media.borrow_tmdb",
         "mediatracker.core.follow.borrow_tmdb",
+        "mediatracker.core.tmdb.client.borrow_tmdb",
     ):
         monkeypatch.setattr(path, _borrow_tmdb)
+    for path in (
+        "mediatracker.integrations.tmdb.shared_tmdb",
+        "mediatracker.core.tmdb.client.shared_tmdb",
+    ):
+        monkeypatch.setattr(path, _shared_tmdb)
     found = client.get("/api/v1/metadata/tmdb/search", params={"q": "Demain", "type": "series"})
     assert found.status_code == 200, found.text
     assert found.json()["items"][0]["tmdb_id"] == 99

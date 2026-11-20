@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from starlette.testclient import TestClient
+from tests.conftest import TEST_ADMIN_PASSWORD as _TEST_ADMIN_PASSWORD
 from tests.conftest import csrf, login
 from tests.test_hive_t3_peer_http import _enable
 from tests.test_hive_t5 import URL_A, URL_B, _join_existing_ruche
@@ -29,8 +30,6 @@ from mediatracker.hive.peer_rate_limit import PeerRateLimiter
 from mediatracker.hive.peer_transport import set_peer_asgi_apps_for_tests
 from mediatracker.hive.transfer_bandwidth import TransferBandwidthLimiter
 from mediatracker.hive.transfer_load import LOAD_MAX_FUTURE_SECONDS, bind_transfer_load_runtime
-
-_TEST_ADMIN_PASSWORD = "Choix-Solide-42!"
 
 
 def _settings_pair(tmp_path, suffix: str) -> Settings:
@@ -82,7 +81,7 @@ def test_build_local_instance_snapshot_always_emitted(peer_info_pair):
     assert isinstance(snap, dict)
     assert "version" in snap
     assert snap["hive_protocol"] == HIVE_PROTOCOL
-    assert snap["capabilities"] == []
+    assert snap["capabilities"] == ["catalog_epoch"]
     assert "at" in snap
 
 

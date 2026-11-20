@@ -56,8 +56,8 @@ def test_tagged_season_folder_keeps_its_tmdb_id_and_a_foreign_file_does_not(tmp_
 
 
 class _Catalog:
-    def __init__(self, token: str | None = None) -> None:
-        del token
+    def __init__(self, token: str | None = None, **_kwargs) -> None:
+        del token, _kwargs
 
     def search(self, query: str, media_type: str) -> list[TmdbHit]:
         key = (fold_title(query), media_type)
@@ -287,7 +287,10 @@ def test_scan_matches_realistic_library_without_creating_folders(client, app, mo
         db.close()
 
     login(client)
-    monkeypatch.setattr("mediatracker.api.v1.library.TmdbClient", _Catalog)
+    monkeypatch.setattr(
+        "mediatracker.api.v1.library.borrow_client",
+        lambda _db, _settings: (_Catalog(), True),
+    )
     saved = client.patch(
         "/api/v1/settings",
         json={

@@ -46,6 +46,101 @@ class ProfileReplacementOut:
     version_key: str
 
 
+@dataclass
+class EpisodeProfileIndex:
+    """Batched profile replacement and served-profile fields for episode lists."""
+
+    _proposals: dict[int, ProfileReplacementProposal]
+    _poll_profile_id: dict[int, int]
+    _rank_by_profile: dict[int, int]
+    _profile_names: dict[int, str]
+
+    @classmethod
+    def load(cls, db: Session, media: Media, items: list[MediaItem], settings: Settings) -> EpisodeProfileIndex:
+        item_ids = [item.id for item in items if item.id is not None]
+        if not item_ids:
+            return cls({}, {}, {}, {})
+
+        proposals = {
+            row.media_item_id: row
+            for row in db.scalars(
+                select(ProfileReplacementProposal).where(
+                    ProfileReplacementProposal.media_item_id.in_(item_ids),
+                    ProfileReplacementProposal.state == _ACTIVE_PROPOSAL,
+                )
+            ).all()
+        }
+
+        poll_by_item: dict[int, int] = {}
+        for item in items:
+            if item.id is None or item.served_poll_quality_profile_id is None:
+                continue
+            poll_by_item[item.id] = int(item.served_poll_quality_profile_id)
+        # Comme served_poll_profile_id : un Download terminé peut porter le profil
+        # même si downloaded est faux et que la colonne servie est vide.
+        missing = [item_id for item_id in item_ids if item_id not in poll_by_item]
+        if missing:
+            for row in db.scalars(
+                select(Download)
+                .where(
+                    Download.media_item_id.in_(missing),
+                    Download.state == "done",
+                    Download.poll_quality_profile_id.isnot(None),
+                )
+                .order_by(Download.id.desc())
+            ).all():
+                if row.media_item_id is not None and row.media_item_id not in poll_by_item:
+                    poll_by_item[row.media_item_id] = int(row.poll_quality_profile_id)
+
+        rank_by_profile: dict[int, int] = {}
+        if poll_by_item:
+            try:
+                resolved = resolve_profiles_for_media(db, media, settings)
+                rank_by_profile = {entry.profile_id: entry.rank for entry in resolved}
+            except ProfileResolveError:
+                rank_by_profile = {}
+
+        profile_ids = set(rank_by_profile) | set(poll_by_item.values())
+        for proposal in proposals.values():
+            profile_ids.add(proposal.principal_profile_id)
+            profile_ids.add(proposal.repli_profile_id)
+        names: dict[int, str] = {}
+        if profile_ids:
+            for row in db.scalars(select(QualityProfile).where(QualityProfile.id.in_(profile_ids))).all():
+                names[row.id] = row.name
+        return cls(proposals, poll_by_item, rank_by_profile, names)
+
+    def served_display_for(self, item: MediaItem) -> dict | None:
+        if item.id is None:
+            return None
+        profile_id = self._poll_profile_id.get(item.id)
+        if profile_id is None:
+            return None
+        rank = self._rank_by_profile.get(profile_id)
+        if rank is None or rank <= 1:
+            return None
+        return {
+            "profile_id": profile_id,
+            "profile_name": self._profile_names.get(profile_id, f"#{profile_id}"),
+            "repli": True,
+        }
+
+    def active_proposal(self, item_id: int) -> ProfileReplacementProposal | None:
+        return self._proposals.get(item_id)
+
+    def proposal_to_out(self, row: ProfileReplacementProposal) -> ProfileReplacementOut:
+        return ProfileReplacementOut(
+            id=row.id,
+            principal_profile_id=row.principal_profile_id,
+            principal_profile_name=self._profile_names.get(
+                row.principal_profile_id, f"#{row.principal_profile_id}"
+            ),
+            repli_profile_id=row.repli_profile_id,
+            repli_profile_name=self._profile_names.get(row.repli_profile_id, f"#{row.repli_profile_id}"),
+            version_key=row.version_key,
+        )
+
+
 def _moment(now: datetime | None) -> datetime:
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:

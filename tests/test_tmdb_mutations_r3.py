@@ -274,7 +274,7 @@ def test_apply_import_borrows_tmdb_client_once(client, app, monkeypatch):
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (opens.append(1) or _Client(), True),
+        lambda token, cls, **_: (opens.append(1) or _Client(), True),
     )
     lines = [
         HistoryLine(1, "movie", "Film-a", 2020, None, None, None, None, None, None, None, NOW, 1, "jellyfin"),

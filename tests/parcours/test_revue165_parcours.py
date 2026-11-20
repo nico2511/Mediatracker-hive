@@ -152,7 +152,7 @@ def test_parcours_import_title_search_and_cache(client, app, monkeypatch):
     FakeSearchImport.search_calls = 0
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (FakeSearchImport(token), True),
+        lambda token, cls, **_: (FakeSearchImport(token), True),
     )
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     lines = [
@@ -205,7 +205,7 @@ def test_parcours_import_episode_homonym_uses_series_year(client, app, monkeypat
 
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (HomonymSearch(token), True),
+        lambda token, cls, **_: (HomonymSearch(token), True),
     )
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     line = HistoryLine(
@@ -254,7 +254,7 @@ def test_parcours_import_identify_pending_stored(client, app, monkeypatch):
 
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (MultiSearch(token), True),
+        lambda token, cls, **_: (MultiSearch(token), True),
     )
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     line = HistoryLine(2, "movie", "Film-identify", 2015, None, None, None, None, None, None, None, NOW, 1, "jellyfin")

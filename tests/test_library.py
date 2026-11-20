@@ -192,7 +192,10 @@ def test_manual_match_and_api_scan(client, app, monkeypatch):
     login(client)
     root = Path(app.state.settings.data_dir) / "library-api"
     films, series = _tree(root)
-    monkeypatch.setattr("mediatracker.api.v1.library.TmdbClient", lambda token: FakeTmdb())
+    monkeypatch.setattr(
+        "mediatracker.api.v1.library.borrow_client",
+        lambda _db, _settings: (FakeTmdb(), True),
+    )
     saved = client.patch(
         "/api/v1/settings",
         json={

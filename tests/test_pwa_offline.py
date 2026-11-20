@@ -21,8 +21,9 @@ def _tsx(script: str) -> subprocess.CompletedProcess[str]:
 
 def test_offline_queue_duplicates_expiry_and_alternate_type():
     script = r"""
-import { addQueueItem, findQueueDuplicate, isExpired, purgeExpiredQueue, QUEUE_RETENTION_MS } from "./src/pwa/offlineQueue.ts";
+import { addQueueItem, findQueueDuplicate, isExpired, purgeExpiredQueue } from "./src/pwa/offlineQueue.ts";
 import { alternateFollowType } from "./src/pwa/parseTmdbInput.ts";
+import { offlineQueueRetentionMs, setFixedRetentionForTests } from "./src/fixedRetention.ts";
 
 class MemoryStorage {
   store = new Map();
@@ -154,6 +155,14 @@ globalThis.indexedDB = {
 };
 
 (async () => {
+setFixedRetentionForTests({
+  event_journal_days: 30,
+  source_state_days: 7,
+  metrics_history_days: 30,
+  incomplete_orphan_keep_days: 14,
+});
+const retention = offlineQueueRetentionMs();
+if (retention === null) throw new Error("retention unset");
 const first = await addQueueItem(900001, "film");
 if (!first.ok) throw new Error("add1 failed");
 const dup = await addQueueItem(900001, "film");
@@ -165,7 +174,7 @@ const old = {
   id: "old",
   tmdb_id: 900010,
   type: "film",
-  added_at: new Date(Date.now() - QUEUE_RETENTION_MS - 1000).toISOString(),
+  added_at: new Date(Date.now() - retention - 1000).toISOString(),
 };
 const store = dbs.get("mt-follow-queue");
 store.tables.get("follow_queue")?.set(old.id, old);

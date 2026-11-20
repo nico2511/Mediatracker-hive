@@ -192,7 +192,7 @@ def test_parcours_import_search_cache_two_films(client, app, monkeypatch):
     FakeFilmSearch.search_calls = 0
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (FakeFilmSearch(token), True),
+        lambda token, cls, **_: (FakeFilmSearch(token), True),
     )
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     lines = [

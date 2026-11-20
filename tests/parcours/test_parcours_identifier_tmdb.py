@@ -138,7 +138,7 @@ def test_parcours_jellyfin_export_candidate_only_on_exact_match(client, app, mon
     )
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (_SearchClient(wrong_first), True),
+        lambda token, cls, **_: (_SearchClient(wrong_first), True),
     )
     try:
         assert (

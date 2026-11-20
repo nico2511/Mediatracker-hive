@@ -76,7 +76,7 @@ def _cache_count(db) -> int:
 
 def _patch_tmdb(monkeypatch, stub: _TmdbStub) -> None:
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda *_args: "jeton-factice")
-    monkeypatch.setattr("mediatracker.integrations.tmdb.shared_tmdb", lambda _token: stub)
+    monkeypatch.setattr("mediatracker.integrations.tmdb.shared_tmdb", lambda _token, **_: stub)
 
 
 def test_two_seasons_same_key_one_lookup_one_cache_row(client, app):

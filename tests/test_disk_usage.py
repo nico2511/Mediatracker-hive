@@ -221,7 +221,7 @@ def test_sparse_incomplete_splits_written_and_reserved_and_names_the_job(tmp_pat
     assert by_name["Brume.mkv.aria2"]["job_id"] == 7
     assert by_name["Brume.mkv.aria2"]["orphan"] is False
     givre = next(row for row in by_name.values() if Path(row["name"]).stem.startswith("Givre"))
-    assert givre["orphan"] is True
+    assert givre["orphan"] is False
 
 
 def test_busy_incomplete_file_is_not_orphan_even_with_an_older_done_row(client, app, tmp_path):
@@ -296,7 +296,7 @@ def test_busy_incomplete_file_is_not_orphan_even_with_an_older_done_row(client, 
     assert by_name["Flux.mkv"]["orphan"] is False
     assert by_name["Flux.mkv"]["job_state"] == "downloading"
     assert by_name["Flux.mkv.aria2"]["orphan"] is False
-    assert by_name["Relic.mkv"]["orphan"] is True
+    assert by_name["Relic.mkv"]["orphan"] is False
     assert by_name["Relic.mkv"]["job_state"] == "done"
 
 

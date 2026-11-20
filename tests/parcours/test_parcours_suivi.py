@@ -226,7 +226,7 @@ def test_parcours_suivi_ha_sans_doublon(client, monkeypatch):
 
     login(client)
 
-    def _borrow_tmdb(token, factory):
+    def _borrow_tmdb(token, factory, **_kwargs):
         return _Tmdb(token), True
 
     _patch_borrow_tmdb(monkeypatch, _borrow_tmdb)

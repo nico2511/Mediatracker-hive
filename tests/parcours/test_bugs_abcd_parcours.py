@@ -294,7 +294,7 @@ def test_parcours_d_jellyfin_import_resolves_tvdb(client, app, monkeypatch):
     FakeTmdbImport.calls.clear()
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (FakeTmdbImport(token), True),
+        lambda token, cls, **_: (FakeTmdbImport(token), True),
     )
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     line = HistoryLine(

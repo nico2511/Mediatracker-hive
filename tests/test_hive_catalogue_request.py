@@ -371,7 +371,7 @@ def test_miss_detail_already_in_library(client, settings):
         db.close()
     resp = client.post(
         f"/api/v1/hive/catalogue/{work_key}/request",
-        json={"version_key": "HD+VFF"},
+        json={},
         headers=csrf(client),
     )
     assert resp.status_code == 422

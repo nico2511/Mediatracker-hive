@@ -215,12 +215,18 @@ def test_migration_idempotent_grants_intent_for_published(tmp_path):
     command.upgrade(cfg, "0057_hive_manual_share_default")
     command.upgrade(cfg, "0057_hive_manual_share_default")
 
+    session = Session(engine)
+    try:
+        assert session.get(Setting, HIVE_CATALOG_AUTO_SHARE_KEY) is not None
+        assert session.get(HiveShareIntent, item_id) is not None
+    finally:
+        session.close()
+
     command.upgrade(cfg, "head")
 
     session = Session(engine)
     try:
         assert session.get(Setting, HIVE_CATALOG_AUTO_SHARE_KEY) is not None
-        assert session.get(HiveShareIntent, item_id) is not None
         media2 = Media(type="film", title="Orphan", year=2098, tmdb_id=89101)
         session.add(media2)
         session.flush()

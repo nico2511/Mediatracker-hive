@@ -855,6 +855,28 @@ def _in_progress_ids(db: Session, item_ids: list[int]) -> set[int]:
     return _item_ids_in(db, item_ids, IN_PROGRESS)
 
 
+def _download_activity_ids(db: Session, item_ids: list[int]) -> tuple[set[int], set[int]]:
+    if not item_ids:
+        return set(), set()
+    from mediatracker.core.force_download import IN_PROGRESS
+
+    states = tuple(set(_DOWNLOAD_BLOCKS_OFFER) | set(IN_PROGRESS))
+    busy: set[int] = set()
+    progress: set[int] = set()
+    rows = db.execute(
+        select(Download.media_item_id, Download.state).where(
+            Download.media_item_id.in_(item_ids),
+            Download.state.in_(states),
+        )
+    )
+    for item_id, state in rows:
+        if state in _DOWNLOAD_BLOCKS_OFFER:
+            busy.add(item_id)
+        if state in IN_PROGRESS:
+            progress.add(item_id)
+    return busy, progress
+
+
 def _sync_library_claims(db: Session, request: Request, media: Media, items: list[MediaItem]) -> None:
     """Drop a downloaded flag when the library video is gone. Does not queue."""
     from mediatracker.core.source_poll import refresh_library_claims
@@ -873,6 +895,7 @@ def _episode_out(
     db: Session | None = None,
     settings: Settings | None = None,
     media: Media | None = None,
+    episode_profile_index=None,
 ) -> EpisodeOut:
     from mediatracker.core.forget import is_file_absent
 
@@ -889,26 +912,42 @@ def _episode_out(
 
     served_profile = None
     profile_replacement = None
-    if db is not None and settings is not None and media is not None and row.id is not None:
+    if row.id is not None and (
+        episode_profile_index is not None
+        or (db is not None and settings is not None and media is not None)
+    ):
         from mediatracker.core.profile_replacement import (
             active_proposal_for_item,
             proposal_to_out,
             served_profile_display,
         )
 
-        served_raw = served_profile_display(db, media, row, settings)
+        if episode_profile_index is not None:
+            served_raw = episode_profile_index.served_display_for(row)
+            proposal = episode_profile_index.active_proposal(row.id)
+            if proposal is not None:
+                out = episode_profile_index.proposal_to_out(proposal)
+                profile_replacement = ProfileReplacementProposalOut(
+                    id=out.id,
+                    principal_profile_id=out.principal_profile_id,
+                    principal_profile_name=out.principal_profile_name,
+                    repli_profile_id=out.repli_profile_id,
+                    repli_profile_name=out.repli_profile_name,
+                )
+        else:
+            served_raw = served_profile_display(db, media, row, settings)
+            proposal = active_proposal_for_item(db, row.id)
+            if proposal is not None:
+                out = proposal_to_out(db, proposal)
+                profile_replacement = ProfileReplacementProposalOut(
+                    id=out.id,
+                    principal_profile_id=out.principal_profile_id,
+                    principal_profile_name=out.principal_profile_name,
+                    repli_profile_id=out.repli_profile_id,
+                    repli_profile_name=out.repli_profile_name,
+                )
         if served_raw is not None:
             served_profile = ServedProfileOut(**served_raw)
-        proposal = active_proposal_for_item(db, row.id)
-        if proposal is not None:
-            out = proposal_to_out(db, proposal)
-            profile_replacement = ProfileReplacementProposalOut(
-                id=out.id,
-                principal_profile_id=out.principal_profile_id,
-                principal_profile_name=out.principal_profile_name,
-                repli_profile_id=out.repli_profile_id,
-                repli_profile_name=out.repli_profile_name,
-            )
 
     return EpisodeOut(
         id=row.id,
@@ -1767,11 +1806,16 @@ def _seasons_out(
     media: Media | None = None,
 ) -> list[SeasonOut]:
     rows_sorted = sorted(rows, key=lambda item: (item.season is None, item.season or 0, item.episode or 0, item.id))
-    busy = _busy_item_ids(db, [row.id for row in rows_sorted])
-    progress_ids = _in_progress_ids(db, [row.id for row in rows_sorted])
+    item_ids = [row.id for row in rows_sorted if row.id is not None]
+    busy, progress_ids = _download_activity_ids(db, item_ids)
     file_status_index = FileStatusIndex.load(db, rows_sorted)
     if media is None:
         media = db.get(Media, media_id)
+    episode_profile_index = None
+    if settings is not None and media is not None:
+        from mediatracker.core.profile_replacement import EpisodeProfileIndex
+
+        episode_profile_index = EpisodeProfileIndex.load(db, media, rows_sorted, settings)
     meta = {
         season.number: season
         for season in db.scalars(select(MediaSeason).where(MediaSeason.media_id == media_id)).all()
@@ -1786,9 +1830,7 @@ def _seasons_out(
                     download_active=row.id in busy,
                     download_busy=row.id in progress_ids,
                     file_status_index=file_status_index,
-                    db=db,
-                    settings=settings,
-                    media=media,
+                    episode_profile_index=episode_profile_index,
                 ),
             )
         )

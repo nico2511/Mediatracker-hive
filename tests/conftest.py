@@ -63,6 +63,9 @@ def sparse_payload_alloc_bytes(path: Path) -> int:
 # < 20 caractères : le scan-secrets refuse les littéraux `*_api_key="..."` trop longs.
 FICTIVE_ALLDEBRID_API_KEY = "fictive-adb-tst-k"
 
+# Politique bootstrap : pas de sous-chaîne du nom d'utilisateur « admin ».
+TEST_ADMIN_PASSWORD = "Choix-Solide-42!"
+
 
 def connect_alldebrid_for_tests(app) -> None:
     """Provider AllDebrid activé + clé « connectée » pour le pipeline."""
@@ -146,7 +149,7 @@ def settings(tmp_path, monkeypatch):
     return Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="Choix-Solide-42!",
+        admin_password=TEST_ADMIN_PASSWORD,
         database_url=f"sqlite:///{tmp_path / 'app.db'}",
         data_dir=tmp_path / "data",
         config_dir=tmp_path / "config",
@@ -185,7 +188,7 @@ def wizard_client(tmp_path):
     application.state.engine.dispose()
 
 
-def login(client, username="admin", password="Choix-Solide-42!"):
+def login(client, username="admin", password=TEST_ADMIN_PASSWORD):
     response = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200, response.text
     return response

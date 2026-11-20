@@ -244,7 +244,7 @@ def _patch_tmdb(monkeypatch, *, calls: dict[str, int] | None = None):
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok-demo")
     monkeypatch.setattr("mediatracker.hive.wanted_tmdb.TmdbClient", FakeTmdb)
 
-    def _borrow(token: str, _factory) -> tuple[FakeTmdb, bool]:
+    def _borrow(token: str, _factory, **_) -> tuple[FakeTmdb, bool]:
         return FakeTmdb(token), True
 
     for path in (

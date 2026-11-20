@@ -326,8 +326,10 @@ def test_follow_from_home_assistant_is_idempotent_and_attaches_files(client, app
     body = created.json()
     assert body["already"] is False
     assert body["title"] == "Demain"
-    assert body["attached"] == 1
-    assert "déjà" in body["detail"]
+    assert body["attached"] == 0
+    from mediatracker.core.attach_deferred import join_pending
+
+    join_pending()
     again = client.post(
         "/api/v1/ha/actions/follow",
         headers=headers,

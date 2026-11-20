@@ -64,7 +64,7 @@ def test_correction_csv_rows_survives_rate_limit(client, app, monkeypatch):
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (_RateLimitedSearch(), True),
+        lambda token, cls, **_: (_RateLimitedSearch(), True),
     )
     db = app.state.session_factory()
     bundle = _probable_bundle("Exemple A", "Exemple B")
@@ -93,7 +93,7 @@ def test_export_corrections_csv_route_returns_200_on_rate_limit(client, app, mon
     monkeypatch.setattr("mediatracker.core.tmdb.token.read_tmdb_token", lambda db, key: "tok")
     monkeypatch.setattr(
         "mediatracker.integrations.tmdb.borrow_tmdb",
-        lambda token, cls: (_RateLimitedSearch(), True),
+        lambda token, cls, **_: (_RateLimitedSearch(), True),
     )
     response = client.post(
         "/api/v1/library/jellyfin-history/db/session/fake-session/export-corrections.csv",

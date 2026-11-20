@@ -30,7 +30,7 @@ def app_auto(tmp_path, monkeypatch):
     settings = Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
         database_url=f"sqlite:///{tmp_path / 'app.db'}",
         data_dir=tmp_path / "data",
         config_dir=tmp_path / "config",
@@ -64,7 +64,7 @@ def test_cookie_secure_auto_forwarded_proto_https(app_auto):
     with TestClient(wrapped, base_url="http://testserver") as client:
         response = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "test-admin-password"},
+            json={"username": "admin", "password": "Choix-Solide-42!"},
             headers={"X-Forwarded-Proto": "https", "X-Forwarded-For": "127.0.0.1"},
         )
         assert response.status_code == 200, response.text
@@ -78,7 +78,7 @@ def app_cookie_true(tmp_path, monkeypatch):
     settings = Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
         database_url=f"sqlite:///{tmp_path / 'app.db'}",
         data_dir=tmp_path / "data",
         config_dir=tmp_path / "config",
@@ -97,7 +97,7 @@ def app_cookie_false(tmp_path, monkeypatch):
     settings = Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
         database_url=f"sqlite:///{tmp_path / 'app.db'}",
         data_dir=tmp_path / "data",
         config_dir=tmp_path / "config",

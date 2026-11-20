@@ -33,7 +33,7 @@ def _app_settings(tmp_path, **overrides) -> Settings:
     base = {
         "secret_key": "test-secret-key-0123456789",
         "admin_username": "admin",
-        "admin_password": "test-admin-password",
+        "admin_password": "Choix-Solide-42!",
         "database_url": f"sqlite:///{tmp_path / 'app.db'}",
         "data_dir": tmp_path / "data",
         "config_dir": tmp_path / "config",
@@ -58,7 +58,7 @@ def test_public_url_absent_settings_default_none():
     settings = Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
     )
     assert settings.public_url is None
 

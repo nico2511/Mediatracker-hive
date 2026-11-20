@@ -59,7 +59,7 @@ def test_change_password_rejects_weak(client):
     login(client)
     resp = client.post(
         "/api/v1/auth/password",
-        json={"current_password": "test-admin-password", "new_password": "12345678"},
+        json={"current_password": "Choix-Solide-42!", "new_password": "12345678"},
         headers=csrf(client),
     )
     assert resp.status_code == 422

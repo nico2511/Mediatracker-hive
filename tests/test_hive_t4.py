@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from tests.conftest import csrf, login
+from tests.conftest import TEST_ADMIN_PASSWORD, csrf, login
 from tests.test_hive_t3_peer_http import CREATOR_URL, _create_invitation, _enable
 
 from mediatracker.api.app import create_app
@@ -50,7 +50,7 @@ def _settings_pair(tmp_path, suffix: str) -> Settings:
     return Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password=TEST_ADMIN_PASSWORD,
         database_url=f"sqlite:///{base / 'app.db'}",
         data_dir=base / "data",
         config_dir=base / "config",

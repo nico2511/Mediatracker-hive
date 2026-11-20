@@ -702,7 +702,7 @@ def test_two_apps_ingest_fills_peer_catalog(tmp_path):
     settings_a = Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
         database_url=f"sqlite:///{base_a / 'app.db'}",
         data_dir=base_a / "data",
         config_dir=base_a / "config",
@@ -711,7 +711,7 @@ def test_two_apps_ingest_fills_peer_catalog(tmp_path):
     settings_b = Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
         database_url=f"sqlite:///{base_b / 'app.db'}",
         data_dir=base_b / "data",
         config_dir=base_b / "config",
