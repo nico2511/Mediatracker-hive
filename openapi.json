@@ -7917,6 +7917,11 @@
             ],
             "title": "Quality"
           },
+          "source_binding": {
+            "default": false,
+            "title": "Source Binding",
+            "type": "boolean"
+          },
           "url": {
             "title": "Url",
             "type": "string"
