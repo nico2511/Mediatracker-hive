@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.config import Settings
 from mediatracker.db.models import HiveEntry, HiveMember, HiveOriginReachability, HiveSignal, HiveVersions
 from mediatracker.hive.access import is_active_member
 from mediatracker.hive.catalog_epoch import local_catalog_epoch, payload_catalog_epoch
@@ -170,9 +171,16 @@ def _upsert_version(db: Session, *, ruche_id: bytes, origin_id: str, seq: int) -
 
 
 def ingest_signed_entries(
-    db: Session, *, ruche_id: bytes, items: list[dict[str, Any]], now: datetime
+    db: Session,
+    *,
+    ruche_id: bytes,
+    items: list[dict[str, Any]],
+    now: datetime,
+    settings: Settings | None = None,
+    collected_disponible_cles: list[dict] | None = None,
 ) -> int:
     accepted = 0
+    ingested_disponible_cles: list[dict] = []
     for item in items:
         payload = item.get("payload")
         sig = item.get("signature_b64")
@@ -248,7 +256,24 @@ def ingest_signed_entries(
                     sha256_hex=sha,
                     seq=seq,
                 )
+        if etat == "disponible" and isinstance(cle, dict) and cle:
+            ingested_disponible_cles.append(cle)
         accepted += 1
+    if ingested_disponible_cles:
+        if collected_disponible_cles is not None:
+            collected_disponible_cles.extend(ingested_disponible_cles)
+        elif settings is not None:
+            from mediatracker.hive.hive_catalogue import refresh_hive_catalogue_store
+            from mediatracker.hive.source_download import try_enqueue_hive_for_ingested_offers
+
+            refresh_hive_catalogue_store(db, now=now, settings=settings)
+            try_enqueue_hive_for_ingested_offers(
+                db,
+                settings,
+                ruche_id=ruche_id,
+                cles=ingested_disponible_cles,
+                now=now,
+            )
     return accepted
 
 

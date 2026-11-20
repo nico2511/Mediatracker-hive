@@ -164,6 +164,9 @@ def build_merged_hive_catalogue(
 
 def refresh_hive_catalogue_store(db: Session, *, now: datetime, settings: Settings | None = None) -> int:
     """Recalcule et persiste la table hive_catalogue."""
+    # autoflush est désactivé : sans ce flush, les entrées et la joignabilité
+    # juste écrites dans la même session restent invisibles.
+    db.flush()
     merged = build_merged_hive_catalogue(db, now=now, settings=settings)
     db.execute(delete(HiveCatalogue))
     count = 0
@@ -190,6 +193,7 @@ def refresh_hive_catalogue_store(db: Session, *, now: datetime, settings: Settin
                 )
             )
             count += 1
+    db.flush()
     return count
 
 

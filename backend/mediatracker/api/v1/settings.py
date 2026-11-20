@@ -217,8 +217,11 @@ def patch_settings(
         update_settings(db, request.app.state.settings, body.values)
     except SettingsError as exc:
         raise Problem(422, "Requête invalide", str(exc)) from exc
+    from mediatracker.hive.signal_runtime import after_hive_signal_settings_patch
     from mediatracker.hive.transfer_runtime import after_hive_transfer_settings_patch
 
-    after_hive_transfer_settings_patch(request, db, set(body.values))
+    changed = set(body.values)
+    after_hive_transfer_settings_patch(request, db, changed)
+    after_hive_signal_settings_patch(db, request.app.state.settings, changed)
     db.commit()
     return _settings_response(db, request.app.state.settings, request.app.state.settings.secret_key)

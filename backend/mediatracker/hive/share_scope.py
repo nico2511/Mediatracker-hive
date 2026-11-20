@@ -109,8 +109,11 @@ def apply_sharing_to_scope(
         touched.append(item_id)
     if touched:
         from mediatracker.hive.hive_catalogue import refresh_hive_catalogue_store
+        from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
 
         refresh_hive_catalogue_store(db, now=moment, settings=settings)
+        if not exclude_all:
+            maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
         from mediatracker.core.worker_wake import REASON_API_HIVE, wake_worker
 
         wake_worker(db, settings, REASON_API_HIVE, commit=False)

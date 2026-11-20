@@ -27,6 +27,7 @@ from mediatracker.hive.peer_client import fetch_member_list, gossip_sync_once
 from mediatracker.hive.peer_gossip import (
     GOSSIP_PAGE_DEFAULT,
     ingest_signed_entries,
+    record_reachability,
     signals_page_for_peer,
     version_vector_for_ruche,
 )
@@ -198,6 +199,7 @@ def pull_gossip_from_peer(
     signal_vector = signal_version_vector_for_ruche(db, ruche_id)
     cursor: GossipCursor | None = None
     signal_cursor: GossipCursor | None = None
+    collected_disponible_cles: list[dict] = []
     for _ in range(max_rounds):
         outbound = _entries_outbound(db, ruche_id=ruche_id, peer_vector=vector)
         sig_out = _signals_outbound(db, ruche_id=ruche_id, peer_vector=signal_vector)
@@ -220,6 +222,8 @@ def pull_gossip_from_peer(
         if resp.status_code != 200:
             break
         body = resp.json()
+        if peer_instance_id:
+            record_reachability(db, ruche_id=ruche_id, origin_id=peer_instance_id, now=now)
         if peer_instance_id and body.get("load") is not None:
             ingest_peer_load(
                 db,
@@ -238,7 +242,14 @@ def pull_gossip_from_peer(
             )
         items = body.get("entries")
         if isinstance(items, list):
-            added = ingest_signed_entries(db, ruche_id=ruche_id, items=items, now=now)
+            added = ingest_signed_entries(
+                db,
+                ruche_id=ruche_id,
+                items=items,
+                now=now,
+                settings=settings,
+                collected_disponible_cles=collected_disponible_cles,
+            )
             total += added
             if added > 0:
                 release_sqlite_before_network(db)
@@ -283,4 +294,16 @@ def pull_gossip_from_peer(
             signal_cursor = None
         if not has_more and not sig_has_more:
             break
+    if collected_disponible_cles:
+        from mediatracker.hive.hive_catalogue import refresh_hive_catalogue_store
+        from mediatracker.hive.source_download import try_enqueue_hive_for_ingested_offers
+
+        refresh_hive_catalogue_store(db, now=now, settings=settings)
+        try_enqueue_hive_for_ingested_offers(
+            db,
+            settings,
+            ruche_id=ruche_id,
+            cles=collected_disponible_cles,
+            now=now,
+        )
     return total

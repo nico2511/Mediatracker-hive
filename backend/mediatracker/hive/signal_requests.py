@@ -403,3 +403,21 @@ def try_auto_accept_incoming(db: Session, settings: Settings, *, ruche_id: bytes
         accept_received_request(db, settings, request_id=rid, now=now)
         accepted += 1
     return accepted
+
+
+def try_auto_accept_incoming_for_instance(db: Session, settings: Settings, *, now: datetime) -> int:
+    """Retraite les demandes reçues déjà en stock (toutes les ruches locales)."""
+    if not hive_auto_accept_requests_enabled(db):
+        return 0
+    self_origin = _self_origin(settings)
+    if self_origin is None:
+        return 0
+    total = 0
+    for ruche in ruches_for_instance(db, self_origin):
+        total += try_auto_accept_incoming(db, settings, ruche_id=ruche.ruche_id, now=now)
+    return total
+
+
+def maybe_try_auto_accept_stored_incoming(db: Session, settings: Settings, *, now: datetime) -> int:
+    """Point d'entrée idempotent après partage ou rattachement de fichier."""
+    return try_auto_accept_incoming_for_instance(db, settings, now=now)

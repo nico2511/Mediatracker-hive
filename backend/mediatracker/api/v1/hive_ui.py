@@ -836,11 +836,16 @@ def patch_item_sharing(
         revoke_share_intent(db, media_item_id)
     else:
         grant_share_intent(db, media_item_id)
-    sync_hive_catalog_item(db, _settings(request), media_item_id, now=moment)
-    refresh_hive_catalogue_store(db, now=moment, settings=_settings(request))
+    settings = _settings(request)
+    sync_hive_catalog_item(db, settings, media_item_id, now=moment)
+    refresh_hive_catalogue_store(db, now=moment, settings=settings)
+    if not body.exclude_all:
+        from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
+
+        maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
     from mediatracker.core.worker_wake import REASON_API_HIVE, wake_worker
 
-    wake_worker(db, _settings(request), REASON_API_HIVE, commit=False)
+    wake_worker(db, settings, REASON_API_HIVE, commit=False)
     db.commit()
 
 

@@ -321,6 +321,7 @@ def mount_hive_router(app) -> None:
 
         session = request.app.state.session_factory()
         now = _now()
+        settings = request.app.state.settings
         try:
             ctx = authenticate_member_peer(
                 session,
@@ -350,9 +351,8 @@ def mount_hive_router(app) -> None:
                     instance=doc.get("instance"),
                     now=now,
                 )
-            ingest_signed_entries(session, ruche_id=ruche_id, items=entries_in, now=now)
+            ingest_signed_entries(session, ruche_id=ruche_id, items=entries_in, now=now, settings=settings)
             ingest_signed_signals(session, ruche_id=ruche_id, items=signals_in, now=now)
-            settings = request.app.state.settings
             try_auto_accept_incoming(session, settings, ruche_id=ruche_id, now=now)
             our_vector = version_vector_for_ruche(session, ruche_id)
             our_signal_vector = signal_version_vector_for_ruche(session, ruche_id)

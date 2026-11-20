@@ -355,6 +355,9 @@ def _continue_active(db: Session, settings: Settings, *, moment: datetime) -> bo
     if fresh is not None and (fresh.sha256_hex or "").strip():
         fresh.hash_claimed_at = None
         sync_hive_catalog_item(db, settings, _active_item_id, now=moment)
+        from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
+
+        maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
         dequeue_completed(db, _active_item_id)
         _transient_claim_errors.pop(_active_item_id, None)
         clear_active_session()

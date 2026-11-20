@@ -5,13 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
-from mediatracker.db.models import Media, MediaItem
-from mediatracker.hive.download_aria2 import enqueue_hive_download_match, hive_reception_active_for_item
+from mediatracker.db.models import Download, Media, MediaItem
+from mediatracker.hive.crypto_id import hive_public_id_from_public_key
+from mediatracker.hive.download_aria2 import (
+    DOWNLOAD_TERMINAL_STATES,
+    enqueue_hive_download_match,
+    hive_reception_active_for_item,
+)
 from mediatracker.hive.enqueue_types import HiveEnqueueResult
-from mediatracker.hive.identity import hive_enabled_in_db
+from mediatracker.hive.identity import hive_enabled_in_db, load_private_key
+from mediatracker.hive.signal import cle_hash, item_file_present
+from mediatracker.hive.signal_requests import local_cherche_active
 from mediatracker.hive.source_catalog import HiveCatalogMatch
 
 
@@ -151,3 +159,86 @@ def try_enqueue_hive_for_item(
         db, settings, media=media, item=item, now=now, row=row, version_key=version_key
     )
     return HiveEnqueueResult(resolved.outcome, resolved.detail)
+
+
+def _self_origin(settings: Settings) -> str | None:
+    pk = load_private_key(settings)
+    if pk is None:
+        return None
+    return hive_public_id_from_public_key(pk.public_key())
+
+
+def _find_requester_item_for_cle(db: Session, cle: dict) -> tuple[Media, MediaItem] | None:
+    tmdb_id = cle.get("tmdb_id")
+    if tmdb_id is None:
+        return None
+    media_type = str(cle.get("type") or "film")
+    media = db.scalar(select(Media).where(Media.tmdb_id == tmdb_id, Media.type == media_type).limit(1))
+    if media is None or not media.followed:
+        return None
+    if media_type == "series":
+        season, episode = cle.get("saison"), cle.get("episode")
+        if season is None or episode is None:
+            return None
+        item = db.scalar(
+            select(MediaItem).where(
+                MediaItem.media_id == media.id,
+                MediaItem.season == season,
+                MediaItem.episode == episode,
+            ).limit(1)
+        )
+    else:
+        item = db.scalar(select(MediaItem).where(MediaItem.media_id == media.id).limit(1))
+    if item is None or item_file_present(db, item) or item.watched:
+        return None
+    return media, item
+
+
+def try_enqueue_hive_for_ingested_offers(
+    db: Session,
+    settings: Settings,
+    *,
+    ruche_id: bytes,
+    cles: list[dict],
+    now: datetime,
+) -> int:
+    """Lance le transfert côté demandeur quand une offre disponible rejoint le catalogue."""
+    if not cles or not hive_enabled_in_db(db):
+        return 0
+    self_origin = _self_origin(settings)
+    if self_origin is None:
+        return 0
+    queued = 0
+    seen: set[str] = set()
+    for cle in cles:
+        if not isinstance(cle, dict):
+            continue
+        h = cle_hash(cle)
+        if h in seen:
+            continue
+        seen.add(h)
+        if not local_cherche_active(db, ruche_id=ruche_id, origin=self_origin, cle=cle):
+            continue
+        matched = _find_requester_item_for_cle(db, cle)
+        if matched is None:
+            continue
+        media, item = matched
+        if item.id is not None:
+            active = db.scalar(
+                select(Download.id)
+                .where(
+                    Download.media_item_id == item.id,
+                    Download.state.not_in(tuple(DOWNLOAD_TERMINAL_STATES)),
+                )
+                .limit(1)
+            )
+            if active is not None:
+                continue
+        result = try_enqueue_hive_for_item(db, settings, media=media, item=item, now=now)
+        if result.outcome == "queued":
+            queued += 1
+    if queued:
+        from mediatracker.core.worker_wake import REASON_API_HIVE, wake_worker
+
+        wake_worker(db, settings, REASON_API_HIVE, commit=False)
+    return queued
