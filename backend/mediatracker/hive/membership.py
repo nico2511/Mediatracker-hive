@@ -20,6 +20,7 @@ from mediatracker.db.models import (
     HiveRuche,
     HiveRucheExcluded,
 )
+from mediatracker.hive.catalog_epoch import member_list_epoch_fields, ruche_confirm_name
 from mediatracker.hive.control_code import control_code_for_pair
 from mediatracker.hive.crypto_id import (
     build_name_document,
@@ -92,7 +93,14 @@ def create_ruche(db: Session, settings: Settings, *, now: datetime) -> HiveRuche
         }
     ]
     version = 1
-    payload = build_member_list_payload(ruche_id=ruche_id, version=version, members=members)
+    catalog_epoch, catalog_reset_at = member_list_epoch_fields(db, ruche_id)
+    payload = build_member_list_payload(
+        ruche_id=ruche_id,
+        version=version,
+        members=members,
+        catalog_epoch=catalog_epoch,
+        catalog_reset_at=catalog_reset_at,
+    )
     sig = sign_member_list(pk, payload)
     apply_member_list(
         db,
@@ -102,6 +110,7 @@ def create_ruche(db: Session, settings: Settings, *, now: datetime) -> HiveRuche
         payload=payload,
         signature_b64=sig,
         now=now,
+        settings=settings,
     )
     return ruche
 
@@ -234,7 +243,14 @@ def accept_join_pending(
         }
     )
     version = latest_member_list_version(db, pending.ruche_id) + 1
-    payload = build_member_list_payload(ruche_id=pending.ruche_id, version=version, members=members)
+    catalog_epoch, catalog_reset_at = member_list_epoch_fields(db, pending.ruche_id)
+    payload = build_member_list_payload(
+        ruche_id=pending.ruche_id,
+        version=version,
+        members=members,
+        catalog_epoch=catalog_epoch,
+        catalog_reset_at=catalog_reset_at,
+    )
     sig = sign_member_list(pk, payload)
     apply_member_list(
         db,
@@ -244,6 +260,7 @@ def accept_join_pending(
         payload=payload,
         signature_b64=sig,
         now=now,
+        settings=settings,
     )
     duplicate_ids = [
         row.id
@@ -357,7 +374,14 @@ def exclude_member(
     if len(members) == len(current_members_as_records(db, ruche_id)):
         raise ValueError("member_not_found")
     version = latest_member_list_version(db, ruche_id) + 1
-    payload = build_member_list_payload(ruche_id=ruche_id, version=version, members=members)
+    catalog_epoch, catalog_reset_at = member_list_epoch_fields(db, ruche_id)
+    payload = build_member_list_payload(
+        ruche_id=ruche_id,
+        version=version,
+        members=members,
+        catalog_epoch=catalog_epoch,
+        catalog_reset_at=catalog_reset_at,
+    )
     sig = sign_member_list(pk, payload)
     apply_member_list(
         db,
@@ -367,6 +391,7 @@ def exclude_member(
         payload=payload,
         signature_b64=sig,
         now=now,
+        settings=settings,
     )
     existing = db.scalar(
         select(HiveRucheExcluded.id)
@@ -438,3 +463,50 @@ def pending_for_ruche(db: Session, ruche_id: bytes) -> list[HiveJoinPending]:
 
 def open_pending_count_for_ruche(db: Session, ruche_id: bytes) -> int:
     return len(pending_for_ruche(db, ruche_id))
+
+
+def reset_ruche_catalog(
+    db: Session,
+    settings: Settings,
+    *,
+    ruche_id: bytes,
+    confirm_name: str,
+    now: datetime,
+) -> HiveRuche:
+    pk, creator_id, _, _, _, _ = local_instance_identity(db, settings)
+    ruche = db.get(HiveRuche, ruche_id)
+    if ruche is None or ruche.creator_instance_id != creator_id:
+        raise ValueError("not_creator")
+    expected = ruche_confirm_name(ruche_id)
+    if confirm_name.strip() != expected:
+        raise ValueError("confirm_name_mismatch")
+    new_epoch = int(ruche.catalog_epoch or 0) + 1
+    reset_at_iso = now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    members = current_members_as_records(db, ruche_id)
+    version = latest_member_list_version(db, ruche_id) + 1
+    payload = build_member_list_payload(
+        ruche_id=ruche_id,
+        version=version,
+        members=members,
+        catalog_epoch=new_epoch,
+        catalog_reset_at=reset_at_iso,
+    )
+    sig = sign_member_list(pk, payload)
+    apply_member_list(
+        db,
+        ruche_id=ruche_id,
+        creator_id=creator_id,
+        creator_public_key=pk.public_key(),
+        payload=payload,
+        signature_b64=sig,
+        now=now,
+        settings=settings,
+    )
+    from mediatracker.hive.gossip_burst import mark_local_catalog_change
+
+    mark_local_catalog_change(db, ruche_id=ruche_id, now=now)
+    db.flush()
+    refreshed = db.get(HiveRuche, ruche_id)
+    if refreshed is None:
+        raise ValueError("ruche_not_found")
+    return refreshed

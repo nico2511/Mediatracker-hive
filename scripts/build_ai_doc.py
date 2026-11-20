@@ -24,6 +24,7 @@ ORDERED_REL_PATHS: tuple[str, ...] = (
     "reglages/sources.md",
     "reglages/scan.md",
     "reglages/jellyfin.md",
+    "reglages/tmdb-catalog.md",
     "reglages/notifications.md",
     "reglages/corbeille.md",
     "reglages/alldebrid.md",

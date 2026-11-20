@@ -141,6 +141,90 @@ def test_batch_media_sharing_summary(client):
         assert row["shared"] is False
 
 
+def test_batch_media_sharing_summary_query_budget(client, app):
+    from datetime import date, datetime, timezone
+
+    from sqlalchemy import event
+    from tests.test_hive_t2 import _enable_hive
+
+    from mediatracker.db.models import Media, MediaItem
+
+    login(client)
+    _enable_hive(client)
+    db = app.state.session_factory()
+    media_ids: list[int] = []
+    try:
+        for index in range(40):
+            media = Media(
+                type="series" if index % 2 == 0 else "film",
+                title=f"Hive partage {index:03d}",
+                year=2020 + (index % 5),
+                tmdb_id=300_000 + index,
+                followed=True,
+            )
+            db.add(media)
+            db.flush()
+            if media.type == "film":
+                db.add(
+                    MediaItem(
+                        media_id=media.id,
+                        season=None,
+                        episode=None,
+                        title="Film",
+                        downloaded=True,
+                        state="downloaded",
+                        file_path=f"/fiction/hive-film-{index}.mkv",
+                    )
+                )
+            else:
+                for episode in range(1, 6):
+                    db.add(
+                        MediaItem(
+                            media_id=media.id,
+                            season=1,
+                            episode=episode,
+                            title=f"Épisode {episode}",
+                            air_date=date(2024, 1, episode),
+                            downloaded=True,
+                            watched=True,
+                            watched_at=datetime.now(timezone.utc),
+                            state="downloaded",
+                            file_path=f"/fiction/hive-serie-{index}-s01e{episode:02d}.mkv",
+                        )
+                    )
+            media_ids.append(media.id)
+        db.commit()
+    finally:
+        db.close()
+
+    def _count_queries(engine):
+        queries: list[str] = []
+
+        def before(_conn, _cursor, statement, _parameters, _context, _executemany):
+            queries.append(statement)
+
+        event.listen(engine, "before_cursor_execute", before)
+        return queries, before
+
+    small_queries, small_hook = _count_queries(app.state.engine)
+    try:
+        small = client.get(f"/api/v1/hive/media/sharing-summary?ids={','.join(str(i) for i in media_ids[:5])}")
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", small_hook)
+
+    large_queries, large_hook = _count_queries(app.state.engine)
+    try:
+        large = client.get(f"/api/v1/hive/media/sharing-summary?ids={','.join(str(i) for i in media_ids)}")
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", large_hook)
+
+    assert small.status_code == 200, small.text
+    assert large.status_code == 200, large.text
+    assert len(large.json()) == len(media_ids)
+    assert len(large_queries) <= 18
+    assert abs(len(large_queries) - len(small_queries)) <= 3
+
+
 def test_ruche_detail_quota(client):
     from tests.conftest import csrf
     from tests.test_hive_t2 import _enable_hive

@@ -168,9 +168,11 @@ def _follow_create(db: Session, secret_key: str, body: FollowInput) -> tuple[Med
     fetched: TmdbTitle | None = None
     imdb_id: str | None = None
     if tmdb_id is not None and token:
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
         from mediatracker.integrations import tmdb as tmdb_integration
 
-        client, owned = borrow_tmdb(token, tmdb_integration.TmdbClient)
+        catalog = read_tmdb_catalog_settings(db)
+        client, owned = borrow_tmdb(token, tmdb_integration.TmdbClient, language=catalog.display_language)
         try:
             fetched = client.fetch(tmdb_id, media_type)
             imdb_id = fetched.imdb_id

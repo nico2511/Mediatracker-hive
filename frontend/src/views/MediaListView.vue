@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
+import FilterHelpHint from "../components/FilterHelpHint.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
 import StatusIcon from "../components/StatusIcon.vue";
@@ -14,11 +16,8 @@ import { mediaKind } from "../labels";
 import { mediaBadge, mediaOnDisk, mediaWaiting } from "../mediaDisplay";
 import { useHiveEnabled } from "../composables/useHive";
 import { hiveBadgesFromMediaSummary, type HiveMediaSummary } from "../hive/hiveBadges";
-import {
-  fetchHiveMediaSummaries,
-  HIVE_MEDIA_SUMMARY_LIMIT,
-  releaseLoadingThenRefreshHive,
-} from "../media/hiveMediaSummaries";
+import { hiveMediaSummaryLimit } from "../clientConstants";
+import { fetchHiveMediaSummaries, releaseLoadingThenRefreshHive } from "../media/hiveMediaSummaries";
 import { tmdbBackdropSrc, tmdbPosterSrc } from "../tmdbImages";
 import type { QuickTarget } from "../quick";
 
@@ -57,12 +56,51 @@ interface MediaRow {
 }
 
 type Density = "airy" | "dense";
-type StateFilter = "all" | "available" | "waiting" | "disk" | "paused" | "identified";
+type StateFilter = "all" | "available" | "waiting" | "disk" | "paused";
+const STATE_FILTERS: StateFilter[] = ["all", "available", "waiting", "disk", "paused"];
+const LEGACY_STATE_FILTER_IDENTIFIED = "identified";
+
+const STATE_FILTER_HELP: Record<StateFilter, string> = {
+  all: "Aucun filtre d'état : toutes les fiches de la liste.",
+  available: "Une source a trouvé un lien, mais rien n'est encore sur le disque.",
+  waiting: "En attente de téléchargement, pas encore marquées vues (hors « pas encore disponible »).",
+  disk: "Fichier présent sur le disque (y compris série partielle).",
+  paused: "Fiches dont le suivi est en pause.",
+};
+
+const FOLLOW_FILTER_HELP = {
+  all: "Toutes les fiches, suivies ou non.",
+  followed: "Fiches actuellement suivies.",
+  unfollowed: "Fiches non suivies.",
+};
+
+const WATCH_FILTER_HELP = {
+  all: "Tous les états de visionnage.",
+  watched: "Fiches marquées comme vues.",
+  in_progress: "Séries avec au moins un épisode vu, sans marquage « vu » global.",
+  unwatched: "Aucun épisode vu et non marquées vues.",
+};
+
+const TYPE_FILTER_HELP = {
+  all: "Films et séries.",
+  film: "Uniquement les films.",
+  series: "Uniquement les séries.",
+};
+
+const ORIGIN_FILTER_HELP = {
+  all: "Toutes les origines de fiche.",
+  user: "Fiches ajoutées manuellement (follow_origin « user »).",
+  jellyfin_import: "Fiches issues de l'import historique Jellyfin.",
+  identification: "Fiches créées par l'identification des dossiers bibliothèque.",
+  tmdb_pending: "Fiches en attente d'identification TMDB.",
+};
 type FollowFilter = "all" | "followed" | "unfollowed";
 type WatchFilter = "all" | "watched" | "in_progress" | "unwatched";
 type TypeFilter = "all" | "film" | "series";
 type OriginFilter = "all" | "user" | "jellyfin_import" | "identification" | "tmdb_pending";
 
+const route = useRoute();
+const router = useRouter();
 const { offlineShell, serverActionsDisabled } = useConnectivity();
 const { hiveEnabled } = useHiveEnabled();
 const hiveSummaries = ref<Record<number, HiveMediaSummary>>({});
@@ -72,6 +110,8 @@ const quick = ref<QuickTarget | null>(null);
 const items = ref<MediaRow[]>([]);
 const loading = ref(false);
 const loadingCount = ref(0);
+const loadFailed = ref(false);
+const refreshNote = ref("");
 const error = ref("");
 const note = ref("");
 const query = ref("");
@@ -89,6 +129,8 @@ const deleteOpen = ref(false);
 const deleteBusy = ref(false);
 let reloadGeneration = 0;
 let hiveSummaryGeneration = 0;
+let hiveSummaryInFlight: Promise<void> | null = null;
+let hiveSummaryInFlightKey = "";
 
 function formatCount(count: number, singular: string, plural: string): string {
   return `${count} ${count <= 1 ? singular : plural}`;
@@ -161,9 +203,6 @@ const visible = computed(() => {
     if (filter.value === "disk" && !mediaOnDisk(item)) {
       return false;
     }
-    if (filter.value === "identified" && itemOrigin(item) !== "identification") {
-      return false;
-    }
     if (followFilter.value === "followed" && !item.followed) {
       return false;
     }
@@ -228,6 +267,65 @@ const activeFilterCount = computed(() => {
   }
   return count;
 });
+
+const mobileStateFilterHelp = computed(() => {
+  if (filter.value === "all") {
+    return "";
+  }
+  return STATE_FILTER_HELP[filter.value];
+});
+
+const mobileAdvancedFilterHelps = computed(() => {
+  const lines: string[] = [];
+  if (followFilter.value !== "all") {
+    lines.push(`Suivi : ${FOLLOW_FILTER_HELP[followFilter.value]}`);
+  }
+  if (watchFilter.value !== "all") {
+    lines.push(`Vu : ${WATCH_FILTER_HELP[watchFilter.value]}`);
+  }
+  if (typeFilter.value !== "all") {
+    lines.push(`Type : ${TYPE_FILTER_HELP[typeFilter.value]}`);
+  }
+  if (originFilter.value !== "all") {
+    lines.push(`Origine : ${ORIGIN_FILTER_HELP[originFilter.value]}`);
+  }
+  return lines;
+});
+
+function isStateFilter(value: string): value is StateFilter {
+  return (STATE_FILTERS as string[]).includes(value);
+}
+
+function applyLegacyStateFilterFromQuery(raw: string): void {
+  if (raw === LEGACY_STATE_FILTER_IDENTIFIED) {
+    filter.value = "all";
+    originFilter.value = "identification";
+    const query = { ...route.query } as Record<string, string | string[] | undefined>;
+    delete query.etat;
+    query.origine = "identification";
+    void router.replace({ query });
+    return;
+  }
+  if (isStateFilter(raw)) {
+    filter.value = raw;
+  }
+}
+
+function readFiltersFromRoute(): void {
+  const rawEtat = typeof route.query.etat === "string" ? route.query.etat : "";
+  if (rawEtat) {
+    applyLegacyStateFilterFromQuery(rawEtat);
+  }
+  const rawOrigine = typeof route.query.origine === "string" ? route.query.origine : "";
+  if (
+    rawOrigine === "user" ||
+    rawOrigine === "jellyfin_import" ||
+    rawOrigine === "identification" ||
+    rawOrigine === "tmdb_pending"
+  ) {
+    originFilter.value = rawOrigine;
+  }
+}
 
 const activeFilterChips = computed(() => {
   const chips: { key: string; label: string }[] = [];
@@ -359,46 +457,80 @@ watch(density, (value) => {
   persistDensity(value);
 });
 
-async function refreshHiveSummaries(parentGeneration = reloadGeneration) {
-  if (!hiveEnabled.value || !items.value.length) {
-    hiveSummaries.value = {};
+function scheduleHiveSummaryRefresh() {
+  if (!hiveEnabled.value || loading.value || !items.value.length) {
+    if (!hiveEnabled.value || !items.value.length) {
+      hiveSummaries.value = {};
+    }
+    return;
+  }
+  const parentGeneration = reloadGeneration;
+  const limit = hiveMediaSummaryLimit();
+  const slice = limit === null ? visible.value : visible.value.slice(0, limit);
+  const mediaIds = slice.map((row) => row.id);
+  const requestKey = `${parentGeneration}:${mediaIds.join(",")}`;
+  if (hiveSummaryInFlight && hiveSummaryInFlightKey === requestKey) {
     return;
   }
   const generation = ++hiveSummaryGeneration;
-  const mediaIds = visible.value.slice(0, HIVE_MEDIA_SUMMARY_LIMIT).map((row) => row.id);
-  try {
-    const next = await fetchHiveMediaSummaries(api, mediaIds);
-    if (generation !== hiveSummaryGeneration || parentGeneration !== reloadGeneration) {
-      return;
+  hiveSummaryInFlightKey = requestKey;
+  const run = (async () => {
+    try {
+      const next = await fetchHiveMediaSummaries(api, mediaIds);
+      if (generation !== hiveSummaryGeneration || parentGeneration !== reloadGeneration) {
+        return;
+      }
+      hiveSummaries.value = next;
+    } catch {
+      if (generation !== hiveSummaryGeneration || parentGeneration !== reloadGeneration) {
+        return;
+      }
     }
-    hiveSummaries.value = next;
-  } catch {
-    if (generation !== hiveSummaryGeneration || parentGeneration !== reloadGeneration) {
-      return;
+  })();
+  hiveSummaryInFlight = run;
+  void run.finally(() => {
+    if (hiveSummaryInFlight === run) {
+      hiveSummaryInFlight = null;
+      hiveSummaryInFlightKey = "";
     }
-  }
+  });
 }
 
-const visibleSummaryKey = computed(() =>
-  visible.value
-    .slice(0, HIVE_MEDIA_SUMMARY_LIMIT)
-    .map((row) => row.id)
-    .join(","),
-);
+const visibleSummaryKey = computed(() => {
+  const limit = hiveMediaSummaryLimit();
+  const slice = limit === null ? visible.value : visible.value.slice(0, limit);
+  return slice.map((row) => row.id).join(",");
+});
 
-watch(visibleSummaryKey, () => {
-  if (hiveEnabled.value && items.value.length) {
-    void refreshHiveSummaries();
-  }
+watch([visibleSummaryKey, loading], () => {
+  scheduleHiveSummaryRefresh();
 });
 
 function hiveListBadges(mediaId: number) {
   return hiveBadgesFromMediaSummary(hiveSummaries.value[mediaId]);
 }
 
+function applyMediaListSnapshot(noteSuffix = ""): boolean {
+  const snap = loadMediaListSnapshot<{ items: MediaRow[] }>();
+  if (!snap?.body?.items?.length) {
+    return false;
+  }
+  items.value = snap.body.items;
+  loadingCount.value = snap.body.items.length;
+  const stamp = formatParis(snap.saved_at);
+  cacheNote.value = noteSuffix
+    ? `${noteSuffix} · dernière liste enregistrée le ${stamp}`
+    : `Affichage de la dernière liste enregistrée (${stamp}). Les affiches peuvent être absentes jusqu'à la mise à jour.`;
+  return true;
+}
+
 async function reload() {
   const generation = ++reloadGeneration;
+  hiveSummaryGeneration += 1;
   error.value = "";
+  loadFailed.value = false;
+  refreshNote.value = "";
+  const hadSnapshot = applyMediaListSnapshot();
   loading.value = true;
   loadingCount.value = items.value.length;
   try {
@@ -411,6 +543,7 @@ async function reload() {
         }
         items.value = partial;
         loadingCount.value = partial.length;
+        cacheNote.value = "";
       },
     );
     if (generation !== reloadGeneration) {
@@ -419,28 +552,29 @@ async function reload() {
     items.value = all;
     saveMediaListSnapshot({ items: all });
     cacheNote.value = "";
-    await releaseLoadingThenRefreshHive(
-      (value) => {
-        loading.value = value;
-      },
-      () => refreshHiveSummaries(generation),
-    );
+    await releaseLoadingThenRefreshHive((value) => {
+      loading.value = value;
+    });
+    scheduleHiveSummaryRefresh();
     return;
   } catch (err) {
     if (generation !== reloadGeneration) {
       return;
     }
-    if (offlineShell.value) {
-      const snap = loadMediaListSnapshot<{ items: MediaRow[] }>();
-      if (snap) {
-        items.value = snap.body.items;
-        cacheNote.value = `Affichage de la dernière visite (${formatParis(snap.saved_at)}). Les affiches ne sont pas conservées hors ligne.`;
-        return;
+    if (items.value.length) {
+      loadFailed.value = true;
+      refreshNote.value = userFacingApiError(err, "Mise à jour impossible ; liste affichée depuis le cache local.");
+      if (!hadSnapshot && offlineShell.value) {
+        applyMediaListSnapshot("Hors ligne");
       }
+      return;
+    }
+    if (offlineShell.value && applyMediaListSnapshot("Hors ligne")) {
+      return;
     }
     throw err;
   } finally {
-    if (generation === reloadGeneration) {
+    if (generation === reloadGeneration && loading.value) {
       loading.value = false;
     }
   }
@@ -537,6 +671,9 @@ async function deleteSelectedFiches() {
     });
     const removed = new Set(result.deleted);
     items.value = items.value.filter((row) => !removed.has(row.id));
+    if (items.value.length) {
+      saveMediaListSnapshot({ items: items.value });
+    }
     const failed = ids.length - result.deleted.length;
     if (failed > 0) {
       note.value = `${formatFichesDeletedMessage(result.deleted.length)}, ${failed} en échec.`;
@@ -571,6 +708,7 @@ async function unfollowIdentified() {
 
 onMounted(async () => {
   density.value = readDensity();
+  readFiltersFromRoute();
   try {
     await reload();
   } catch (err) {
@@ -606,6 +744,7 @@ onMounted(async () => {
     <header class="media-library-header">
       <h1>Médias</h1>
       <p v-if="cacheNote" class="offline-cache-note">{{ cacheNote }}</p>
+      <p v-if="refreshNote" class="hint media-library-refresh-note">{{ refreshNote }}</p>
       <p v-if="loading" class="hint media-library-loading">
         <span class="media-library-loading-spinner" aria-hidden="true"></span>
         Chargement… {{ formatTitleCount(loadingCount) }} reçu{{ loadingCount > 1 ? "s" : "" }}
@@ -622,23 +761,35 @@ onMounted(async () => {
       </p>
     </header>
 
-    <p class="actions media-library-filters">
-      <button
-        v-if="!selecting && visible.length"
-        type="button"
-        :disabled="serverActionsDisabled"
-        @click="enterSelection"
-      >
-        Sélectionner
-      </button>
-      <button type="button" :class="{ active: filter === 'all' }" @click="filter = 'all'">Tous</button>
-      <button type="button" :class="{ active: filter === 'available' }" @click="filter = 'available'">Disponibles</button>
-      <button type="button" :class="{ active: filter === 'waiting' }" @click="filter = 'waiting'">En attente</button>
-      <button type="button" :class="{ active: filter === 'disk' }" @click="filter = 'disk'">Sur le disque</button>
-      <button type="button" :class="{ active: filter === 'paused' }" @click="filter = 'paused'">En pause</button>
-      <button type="button" :class="{ active: filter === 'identified' }" @click="filter = 'identified'">Suivi par Jellyfin</button>
-    </p>
-    <p v-if="filter === 'identified'" class="actions">
+    <div class="media-library-state-filters">
+      <p class="actions media-library-filters" role="group" aria-label="Filtres d'état">
+        <span class="media-library-filter-control">
+          <button type="button" :class="{ active: filter === 'all' }" @click="filter = 'all'">Tous</button>
+          <FilterHelpHint label="Tous" :text="STATE_FILTER_HELP.all" />
+        </span>
+        <span class="media-library-filter-control">
+          <button type="button" :class="{ active: filter === 'available' }" @click="filter = 'available'">Lien trouvé</button>
+          <FilterHelpHint label="Lien trouvé" :text="STATE_FILTER_HELP.available" />
+        </span>
+        <span class="media-library-filter-control">
+          <button type="button" :class="{ active: filter === 'waiting' }" @click="filter = 'waiting'">En attente</button>
+          <FilterHelpHint label="En attente" :text="STATE_FILTER_HELP.waiting" />
+        </span>
+        <span class="media-library-filter-control">
+          <button type="button" :class="{ active: filter === 'disk' }" @click="filter = 'disk'">Sur le disque</button>
+          <FilterHelpHint label="Sur le disque" :text="STATE_FILTER_HELP.disk" />
+        </span>
+        <span class="media-library-filter-control">
+          <button type="button" :class="{ active: filter === 'paused' }" @click="filter = 'paused'">En pause</button>
+          <FilterHelpHint label="En pause" :text="STATE_FILTER_HELP.paused" />
+        </span>
+      </p>
+      <p v-if="!selecting && visible.length" class="actions media-library-select-action">
+        <button type="button" :disabled="serverActionsDisabled" @click="enterSelection">Sélectionner</button>
+      </p>
+    </div>
+    <p v-if="mobileStateFilterHelp" class="hint media-library-filter-active-help">{{ mobileStateFilterHelp }}</p>
+    <p v-if="originFilter === 'identification'" class="actions">
       <button type="button" :disabled="serverActionsDisabled" @click="unfollowIdentified">Ne plus suivre ces fiches</button>
     </p>
 
@@ -696,7 +847,10 @@ onMounted(async () => {
     >
       <div class="media-library-extra-filters-desktop">
         <label>
-          <span>Suivi</span>
+          <span class="media-library-filter-label">
+            Suivi
+            <FilterHelpHint label="Suivi" :text="FOLLOW_FILTER_HELP[followFilter]" />
+          </span>
           <select v-model="followFilter">
             <option value="all">Tous</option>
             <option value="followed">Suivis</option>
@@ -704,7 +858,10 @@ onMounted(async () => {
           </select>
         </label>
         <label>
-          <span>Vu</span>
+          <span class="media-library-filter-label">
+            Vu
+            <FilterHelpHint label="Vu" :text="WATCH_FILTER_HELP[watchFilter]" />
+          </span>
           <select v-model="watchFilter">
             <option value="all">Tous</option>
             <option value="watched">Vus</option>
@@ -713,7 +870,10 @@ onMounted(async () => {
           </select>
         </label>
         <label>
-          <span>Type</span>
+          <span class="media-library-filter-label">
+            Type
+            <FilterHelpHint label="Type" :text="TYPE_FILTER_HELP[typeFilter]" />
+          </span>
           <select v-model="typeFilter">
             <option value="all">Tous</option>
             <option value="series">Séries</option>
@@ -721,7 +881,10 @@ onMounted(async () => {
           </select>
         </label>
         <label>
-          <span>Origine</span>
+          <span class="media-library-filter-label">
+            Origine
+            <FilterHelpHint label="Origine" :text="ORIGIN_FILTER_HELP[originFilter]" />
+          </span>
           <select v-model="originFilter">
             <option value="all">Toutes</option>
             <option value="user">Ajout manuel</option>
@@ -734,8 +897,17 @@ onMounted(async () => {
       </div>
 
       <div class="media-library-extra-filters-mobile">
+        <p
+          v-if="mobileAdvancedFilterHelps.length"
+          class="hint media-library-filter-active-help media-library-filter-active-help--panel"
+        >
+          <span v-for="line in mobileAdvancedFilterHelps" :key="line">{{ line }}</span>
+        </p>
         <div class="media-library-segment">
-          <span class="media-library-segment-label">Suivi</span>
+          <span class="media-library-segment-label">
+            Suivi
+            <FilterHelpHint label="Suivi" :text="FOLLOW_FILTER_HELP[followFilter]" />
+          </span>
           <p class="actions media-library-segment-actions">
             <button type="button" :class="{ active: followFilter === 'all' }" @click="followFilter = 'all'">Tous</button>
             <button type="button" :class="{ active: followFilter === 'followed' }" @click="followFilter = 'followed'">Suivis</button>
@@ -743,7 +915,10 @@ onMounted(async () => {
           </p>
         </div>
         <div class="media-library-segment">
-          <span class="media-library-segment-label">Vu</span>
+          <span class="media-library-segment-label">
+            Vu
+            <FilterHelpHint label="Vu" :text="WATCH_FILTER_HELP[watchFilter]" />
+          </span>
           <p class="actions media-library-segment-actions">
             <button type="button" :class="{ active: watchFilter === 'all' }" @click="watchFilter = 'all'">Tous</button>
             <button type="button" :class="{ active: watchFilter === 'watched' }" @click="watchFilter = 'watched'">Vus</button>
@@ -752,7 +927,10 @@ onMounted(async () => {
           </p>
         </div>
         <div class="media-library-segment">
-          <span class="media-library-segment-label">Type</span>
+          <span class="media-library-segment-label">
+            Type
+            <FilterHelpHint label="Type" :text="TYPE_FILTER_HELP[typeFilter]" />
+          </span>
           <p class="actions media-library-segment-actions">
             <button type="button" :class="{ active: typeFilter === 'all' }" @click="typeFilter = 'all'">Tous</button>
             <button type="button" :class="{ active: typeFilter === 'series' }" @click="typeFilter = 'series'">Séries</button>
@@ -760,7 +938,10 @@ onMounted(async () => {
           </p>
         </div>
         <label>
-          <span>Origine</span>
+          <span class="media-library-filter-label">
+            Origine
+            <FilterHelpHint label="Origine" :text="ORIGIN_FILTER_HELP[originFilter]" />
+          </span>
           <select v-model="originFilter">
             <option value="all">Toutes</option>
             <option value="user">Ajout manuel</option>
@@ -798,7 +979,7 @@ onMounted(async () => {
       Aucun titre ne correspond aux filtres.
       <button type="button" class="linkish" @click="resetAdvancedFilters">Réinitialiser</button>
     </p>
-    <p v-else-if="!visible.length && !loading" class="hint">
+    <p v-else-if="!visible.length && !loading && !loadFailed" class="hint">
       Aucun suivi. <router-link to="/suivre">Suivre un titre</router-link>.
     </p>
 

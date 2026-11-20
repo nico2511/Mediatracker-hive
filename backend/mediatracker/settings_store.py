@@ -38,6 +38,7 @@ from mediatracker.hive.crypto_id import validate_instance_name
 from mediatracker.hive.identity import (
     HIVE_ENABLED_KEY,
     HIVE_INSTANCE_NAME_KEY,
+    HIVE_ONLY_KEY,
     HIVE_SETTING_KEYS,
     RESERVED_HIVE_KEYS,
     TRANSIENT_ACTIVATION_NAME_KEY,
@@ -100,6 +101,7 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "source_request_delay_seconds": SettingSpec(False, "int", "source_request_delay_seconds"),
     "source_error_backoff_min": SettingSpec(False, "int", "source_error_backoff_min"),
     "remote_search_cooldown_hours": SettingSpec(False, "int", "remote_search_cooldown_hours"),
+    "scan_episode_sources_fallback": SettingSpec(False, "bool", "scan_episode_sources_fallback"),
     "scan_ongoing_only": SettingSpec(False, "bool", "scan_ongoing_only"),
     "scan_air_window_days": SettingSpec(False, "int", "scan_air_window_days"),
     "film_theatrical_fallback_months": SettingSpec(False, "int", "film_theatrical_fallback_months"),
@@ -110,6 +112,9 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "catalog_retention_days": SettingSpec(False, "int", "catalog_retention_days"),
     "catalog_quality": SettingSpec(False, "str", "catalog_quality", optional=True),
     "catalog_language": SettingSpec(False, "str", "catalog_language", optional=True),
+    "tmdb_display_language": SettingSpec(False, "str", "tmdb_display_language", optional=True),
+    "tmdb_region": SettingSpec(False, "str", "tmdb_region", optional=True),
+    "tmdb_original_languages": SettingSpec(False, "str", "tmdb_original_languages", optional=True),
     "media_dir": SettingSpec(False, "str", "media_dir", optional=True),
     "library_movies_path": SettingSpec(False, "str", "library_movies_path", optional=True),
     "library_series_path": SettingSpec(False, "str", "library_series_path", optional=True),
@@ -173,6 +178,7 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "hive_catalog_auto_share": SettingSpec(False, "bool", "hive_catalog_auto_share", optional=True),
     "hive_request_on_miss": SettingSpec(False, "str", "hive_request_on_miss", optional=True),
     "hive_auto_accept_requests": SettingSpec(False, "bool", "hive_auto_accept_requests", optional=True),
+    "hive_only": SettingSpec(False, "bool", "hive_only", optional=True),
 }
 
 
@@ -333,6 +339,16 @@ def update_settings(db: Session, settings: Settings, values: dict[str, Any]) -> 
 
     existing = {row.key: (row.value or "").strip() for row in db.scalars(select(Setting)).all()}
 
+    if HIVE_ONLY_KEY in work:
+        requested = parse_bool_setting(work[HIVE_ONLY_KEY])
+        if requested:
+            if HIVE_ENABLED_KEY in work:
+                hive_on = parse_bool_setting(work[HIVE_ENABLED_KEY])
+            else:
+                hive_on = (existing.get(HIVE_ENABLED_KEY) or "").lower() == "true"
+            if not hive_on:
+                raise SettingsError("Activez Hive avant d’activer « Ruche seule ».")
+
     try:
         prepare_hive_settings_update(
             db,
@@ -410,6 +426,11 @@ def update_settings(db: Session, settings: Settings, values: dict[str, Any]) -> 
             db, parse_stremio_addons_setting(_setting_row_text(db, "stremio_addons"))
         )
     db.commit()
+    if any(key in work for key in ("tmdb_display_language", "tmdb_region", "tmdb_original_languages")):
+        # Shared TMDB clients are keyed by display language: no need to close them.
+        from mediatracker.core.tmdb_trial_cache import clear_tmdb_trial_cache
+
+        clear_tmdb_trial_cache()
     if "aria2_rpc_secret" in values:
         write_aria2_secret_file(db, settings)
 
@@ -508,6 +529,27 @@ def _normalize(spec: SettingSpec, key: str, value: Any) -> str:
         if text not in LANGUAGES:
             raise SettingsError("Langue inconnue.")
         return text
+    if key == "tmdb_display_language":
+        from mediatracker.core.tmdb.catalog_settings import validate_display_language
+
+        try:
+            return validate_display_language(text)
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+    if key == "tmdb_region":
+        from mediatracker.core.tmdb.catalog_settings import validate_region
+
+        try:
+            return validate_region(text)
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+    if key == "tmdb_original_languages":
+        from mediatracker.core.tmdb.catalog_settings import validate_original_languages
+
+        try:
+            return validate_original_languages(text)
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
     if key in {"ghcr_read_token", "github_update_token", "watchtower_token"}:
         if any(char.isspace() for char in text) or len(text) > 300:
             raise SettingsError("Jeton refusé.")

@@ -115,11 +115,10 @@ describe("Réglages — section Corbeille", () => {
     });
     const wrapper = mountCorbeille();
     await flushPromises();
-    const boxes = wrapper.findAll('input[type="checkbox"]');
-    const autoToggle = boxes.find((b) => b.element.parentElement?.textContent?.includes("Suppression automatique"));
-    expect(autoToggle?.element).toBeInstanceOf(HTMLInputElement);
-    expect((autoToggle!.element as HTMLInputElement).checked).toBe(true);
     const autoDeleteBlock = wrapper.find("[data-testid=corbeille-bloc-auto-delete]");
+    const autoToggle = autoDeleteBlock.find('input[type="checkbox"]');
+    expect(autoToggle.element).toBeInstanceOf(HTMLInputElement);
+    expect((autoToggle.element as HTMLInputElement).checked).toBe(true);
     const daysInput = autoDeleteBlock.find('input[type="number"]');
     expect((daysInput.element as HTMLInputElement).disabled).toBe(false);
   });

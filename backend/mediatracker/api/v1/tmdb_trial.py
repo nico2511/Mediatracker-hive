@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
 from mediatracker.api.v1.dashboard import LatestCard
-from mediatracker.core.tmdb_trial import browse_page, home_rows, providers_fr
+from mediatracker.core.tmdb.catalog_settings import (
+    validate_display_language,
+    validate_original_languages,
+    validate_region,
+)
+from mediatracker.core.tmdb_trial import browse_page, home_rows, preview_discover, providers_fr
 from mediatracker.hive.home_row import list_hive_dispos_for_home
 from mediatracker.integrations.tmdb import TmdbError
 
@@ -121,3 +126,51 @@ def browse_tmdb_trial(
         years=years,
         providers=provider_rows,
     )
+
+
+class TmdbTrialPreview(BaseModel):
+    items: list[TmdbTrialCard] = Field(default_factory=list)
+
+
+@router.get("/preview", response_model=TmdbTrialPreview)
+def preview_tmdb_trial_catalog(
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+    display_language: str | None = Query(default=None, max_length=12),
+    region: str | None = Query(default=None, min_length=2, max_length=2),
+    original_languages: str | None = Query(default=None, max_length=120),
+) -> TmdbTrialPreview:
+    del _principal
+    settings = request.app.state.settings
+    lang_override = None
+    region_override = None
+    langs: tuple[str, ...] | None = None
+    if display_language is not None:
+        try:
+            lang_override = validate_display_language(display_language)
+        except ValueError as exc:
+            raise Problem(422, "Requête invalide", str(exc)) from exc
+    if region is not None:
+        try:
+            region_override = validate_region(region.upper())
+        except ValueError as exc:
+            raise Problem(422, "Requête invalide", str(exc)) from exc
+    if original_languages is not None:
+        try:
+            text = validate_original_languages(original_languages)
+            langs = tuple(part for part in text.split(",") if part) if text else ()
+        except ValueError as exc:
+            raise Problem(422, "Requête invalide", str(exc)) from exc
+    try:
+        items = preview_discover(
+            db,
+            settings,
+            display_language=lang_override,
+            region=region_override,
+            original_languages=langs,
+            limit=4,
+        )
+    except TmdbError as exc:
+        raise _problem(exc) from exc
+    return TmdbTrialPreview(items=[TmdbTrialCard.model_validate(row) for row in items])

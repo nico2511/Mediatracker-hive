@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetServiceStatusForTests } from "../composables/useServiceStatus";
+import { setFixedRetentionForTests } from "../fixedRetention";
 
 const apiMock = vi.hoisted(() => vi.fn());
 const fetchSettingsMock = vi.hoisted(() => vi.fn());
@@ -19,9 +20,10 @@ vi.mock("../components/MediaQuickView.vue", () => ({ default: { template: "<div 
 vi.mock("../components/StatusIcon.vue", () => ({ default: { template: "<span />" } }));
 vi.mock("../components/TmdbPosterImg.vue", () => ({ default: { template: "<span />" } }));
 const routerReplace = vi.hoisted(() => vi.fn());
+const routeQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }));
 
 vi.mock("vue-router", () => ({
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: routeQuery.value }),
   useRouter: () => ({ replace: routerReplace }),
 }));
 
@@ -116,6 +118,15 @@ const oneIncompleteFile = {
   job_state: "",
   orphan: true,
 };
+
+beforeEach(() => {
+  setFixedRetentionForTests({
+    event_journal_days: 30,
+    source_state_days: 30,
+    metrics_history_days: 7,
+    incomplete_orphan_keep_days: 5,
+  });
+});
 
 describe("LibraryView — revue films / séries", () => {
   beforeEach(() => {
@@ -271,8 +282,66 @@ describe("LibraryView — alignement Jellyfin", () => {
   });
 });
 
+describe("LibraryView — incomplets corbeille vide", () => {
+  beforeEach(() => {
+    routeQuery.value = { incomplets: "corbeille" };
+    apiMock.mockReset();
+    fetchSettingsMock.mockReset();
+    resetServiceStatusForTests();
+    fetchSettingsMock.mockResolvedValue({ settings: [] });
+    apiMock.mockImplementation(async (url: string) => {
+      const status = serviceStatusResponse(url);
+      if (status !== null) {
+        return status;
+      }
+      if (url === "/api/v1/library/verify-all") {
+        return { progress: { running: false, started_at: null, processed: 0, total: 0, batch: 0, stop_reason: null }, last_summary: null };
+      }
+      if (url === "/api/v1/library/review") {
+        return { series: [], empty: [], mismatch: 0, duplicate_folders: 0, unmatched: 0, empty_count: 0 };
+      }
+      if (url === "/api/v1/library/regroup") {
+        return emptyRegroup;
+      }
+      if (url === "/api/v1/library/jellyfin") {
+        return emptyAlign;
+      }
+      if (url === "/api/v1/library/incomplete") {
+        return {
+          ...emptyIncomplete,
+          kept_recent_count: 2,
+          keep_until: "2026-11-22T10:00:00+00:00",
+        };
+      }
+      if (url === "/api/v1/media") {
+        return { items: [] };
+      }
+      throw new Error(`unexpected api ${url}`);
+    });
+  });
+
+  it("affiche un message quand la corbeille est vide mais des fichiers sont gardés", async () => {
+    const wrapper = mount(LibraryView, {
+      global: {
+        components: {
+          RouterLink: { template: "<a><slot /></a>" },
+        },
+      },
+    });
+    await flushPromises();
+    await wrapper.find('[data-library-tab="nettoyage"]').trigger("click");
+    await flushPromises();
+    const empty = wrapper.find("[data-incomplete-corbeille-empty]");
+    expect(empty.exists()).toBe(true);
+    expect(wrapper.text()).toContain("Rien à mettre à la corbeille");
+    expect(empty.text()).toMatch(/2 fichiers récents encore gardés/);
+    expect(empty.text()).toMatch(/22\/11\/2026/);
+  });
+});
+
 describe("LibraryView — rétention corbeille", () => {
   beforeEach(() => {
+    routeQuery.value = {};
     apiMock.mockReset();
     fetchSettingsMock.mockReset();
     resetServiceStatusForTests();
@@ -309,13 +378,27 @@ describe("LibraryView — rétention corbeille", () => {
         return emptyAlign;
       }
       if (url === "/api/v1/library/incomplete") {
-        return { ...emptyIncomplete, files: [oneIncompleteFile] };
+        return { ...emptyIncomplete, auto_enabled: true, files: [oneIncompleteFile] };
       }
       if (url === "/api/v1/media") {
         return { items: [] };
       }
       throw new Error(`unexpected api ${url}`);
     });
+  });
+
+  it("affiche la durée orphelin depuis fixed-retention", async () => {
+    const wrapper = mount(LibraryView, {
+      global: {
+        components: {
+          RouterLink: { template: "<a><slot /></a>" },
+        },
+      },
+    });
+    await flushPromises();
+    await wrapper.find('[data-library-tab="nettoyage"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("au bout de 5 jours");
   });
 
   it("renvoie la conservation corbeille vers les réglages", async () => {

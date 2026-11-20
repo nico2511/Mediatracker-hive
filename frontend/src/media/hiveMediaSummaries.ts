@@ -1,6 +1,6 @@
+import { requestAppSettingsCachesIfEmpty } from "../appSettingsCaches";
+import { hiveMediaSummaryLimit } from "../clientConstants";
 import type { HiveMediaSummary } from "../hive/hiveBadges";
-
-export const HIVE_MEDIA_SUMMARY_LIMIT = 80;
 
 type HiveMediaSummaryRow = HiveMediaSummary & { media_id: number };
 
@@ -11,7 +11,9 @@ export async function fetchHiveMediaSummaries(
   if (!mediaIds.length) {
     return {};
   }
-  const limited = mediaIds.slice(0, HIVE_MEDIA_SUMMARY_LIMIT);
+  requestAppSettingsCachesIfEmpty();
+  const limit = hiveMediaSummaryLimit();
+  const limited = limit === null ? mediaIds : mediaIds.slice(0, limit);
   const rows = await request<HiveMediaSummaryRow[]>(
     `/api/v1/hive/media/sharing-summary?ids=${limited.join(",")}`,
   );
@@ -27,11 +29,13 @@ export async function fetchHiveMediaSummaries(
   return next;
 }
 
-/** Release list loading before awaiting Hive badge summaries (non-blocking UI). */
+/** Release list loading; Hive badge refresh is scheduled separately when the list is ready. */
 export async function releaseLoadingThenRefreshHive(
   setLoading: (value: boolean) => void,
-  refresh: () => Promise<void>,
+  refresh?: () => Promise<void>,
 ): Promise<void> {
   setLoading(false);
-  await refresh();
+  if (refresh) {
+    await refresh();
+  }
 }

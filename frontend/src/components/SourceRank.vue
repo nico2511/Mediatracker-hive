@@ -168,9 +168,12 @@ function onDrop(targetId: string) {
     >
       <span class="rank-handle" aria-hidden="true">⠿</span>
       <span v-if="orderOnly" class="rank-label">{{ row.label }}</span>
-      <label v-else class="check">
-        <input type="checkbox" :checked="row.enabled" @change="toggle(row.id)" />
+      <label v-else class="switch-line compact">
         <span>{{ row.label }}</span>
+        <span class="switch switch-small">
+          <input type="checkbox" :checked="row.enabled" @change="toggle(row.id)" />
+          <span class="switch-ui" aria-hidden="true"></span>
+        </span>
       </label>
       <span v-if="!row.enabled" class="rank-off">désactivée</span>
       <span class="rank-moves">

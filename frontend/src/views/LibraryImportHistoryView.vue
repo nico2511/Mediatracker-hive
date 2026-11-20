@@ -727,11 +727,14 @@ const showResultPanel = computed(() => result.value !== null && (dbStep.value ==
       </section>
       <label
         v-if="importMode === 'db' && dbStep === 'preview' && (preview.export_probable_count ?? 0) > 0"
-        class="library-import-include-probable"
+        class="library-import-include-probable switch-line"
         data-import-include-probable
       >
-        <input v-model="includeProbable" type="checkbox" />
-        Inclure les probables dans l'import
+        <span>Inclure les probables dans l'import</span>
+        <span class="switch">
+          <input v-model="includeProbable" type="checkbox" />
+          <span class="switch-ui" aria-hidden="true"></span>
+        </span>
       </label>
       <p v-if="includeProbable && (preview.export_probable_count ?? 0) > 0" class="hint">
         Les lignes probables seront importées si TMDB permet de les résoudre.
@@ -793,7 +796,7 @@ const showResultPanel = computed(() => result.value !== null && (dbStep.value ==
       <p class="hint">
         Titres concernés par le dernier import. Rien n'est suivi tant que vous n'avez pas coché et appliqué.
       </p>
-      <label v-if="selectableCandidates.length" class="library-import-select-all">
+      <label v-if="selectableCandidates.length" class="library-import-select-all check">
         <input
           ref="selectAllRef"
           type="checkbox"
@@ -801,11 +804,11 @@ const showResultPanel = computed(() => result.value !== null && (dbStep.value ==
           data-import-select-all
           @change="toggleSelectAll"
         />
-        Tout sélectionner
+        <span>Tout sélectionner</span>
       </label>
       <ul class="library-import-refollow">
         <li v-for="row in followCandidates" :key="row.id">
-          <label :class="{ 'library-import-refollow-done': row.followed }">
+          <label class="check" :class="{ 'library-import-refollow-done': row.followed }">
             <input
               type="checkbox"
               :checked="row.followed ? true : selectedFollow.includes(row.id)"

@@ -190,7 +190,7 @@ def _effective_probe_order(db: Session, settings: Settings) -> list[str]:
 def _source_disabled(db: Session, name: str, settings: Settings) -> str | None:
     from mediatracker.core.source_availability import source_unusable_reason
 
-    blocked = source_unusable_reason(db, settings, name)
+    blocked = source_unusable_reason(db, settings, name, for_manual_probe=True)
     if blocked:
         return blocked
     row = db.scalar(select(Provider).where(Provider.kind == "source", Provider.type == name))

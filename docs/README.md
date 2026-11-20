@@ -43,7 +43,7 @@ Index : [Réglages](reglages/README.md) — URLs du type `http://<hôte>:8080/re
 | Hive | [reglages/hive.md](reglages/hive.md) |
 | Application | [reglages/application.md](reglages/application.md) |
 | Mise à jour et redémarrage | [reglages/maj.md](reglages/maj.md) |
-| Services et jetons | [reglages/jetons.md](reglages/jetons.md) |
+| API et jetons | [reglages/jetons.md](reglages/jetons.md) |
 | Réinitialiser la base | [reglages/reset.md](reglages/reset.md) |
 
 ### Maintenance

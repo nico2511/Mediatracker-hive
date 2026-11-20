@@ -1,5 +1,8 @@
 /** État d’adhésion en cours (invité), persistant au rechargement — sans lien d’invitation. */
 
+import { requestAppSettingsCachesIfEmpty } from "../appSettingsCaches";
+import { hiveJoinWaitTtlMs } from "../clientConstants";
+
 export interface HiveJoinWaitState {
   ruche_id_hex: string;
   creator_id: string;
@@ -9,7 +12,6 @@ export interface HiveJoinWaitState {
 
 const STORAGE_KEY = "mediatracker:hive-join-wait";
 const STORAGE_VERSION = 2;
-const WAIT_TTL_MS = 48 * 60 * 60 * 1000;
 
 interface PersistedHiveJoinWait extends HiveJoinWaitState {
   v: number;
@@ -33,6 +35,7 @@ function purgeStale(raw: string | null): void {
 }
 
 export function readHiveJoinWait(): HiveJoinWaitState | null {
+  requestAppSettingsCachesIfEmpty();
   if (typeof localStorage === "undefined") {
     return null;
   }
@@ -51,7 +54,12 @@ export function readHiveJoinWait(): HiveJoinWaitState | null {
       return null;
     }
     const started = typeof parsed.started_at === "string" ? Date.parse(parsed.started_at) : Number.NaN;
-    if (!Number.isFinite(started) || Date.now() - started > WAIT_TTL_MS) {
+    const ttl = hiveJoinWaitTtlMs();
+    if (!Number.isFinite(started)) {
+      purgeStale(raw);
+      return null;
+    }
+    if (ttl !== null && Date.now() - started > ttl) {
       purgeStale(raw);
       return null;
     }

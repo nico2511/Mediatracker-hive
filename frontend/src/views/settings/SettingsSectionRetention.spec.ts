@@ -167,7 +167,8 @@ describe("Réglages — libellés dynamiques", () => {
     routeSection.value = "disque";
     const disque = mountSettings();
     await flushPromises();
-    expect(disque.text()).toContain("voir Corbeille");
+    expect(disque.text()).toContain("Sauvegardes quotidiennes conservées : 7");
+    expect(disque.text()).toContain("Modifier");
     expect(disque.text()).not.toContain("Sauvegardes conservées");
     routeSection.value = "scan";
     const scan = mountSettings();

@@ -391,9 +391,12 @@ function checkedFrom(event: Event): boolean {
             </button>
           </ActionMenuPopover>
         </p>
-        <label v-if="followed && (section ?? 'all') === 'all'" class="check">
-          <input type="checkbox" :checked="autoDownload" @change="emit('auto', checkedFrom($event))" />
+        <label v-if="followed && (section ?? 'all') === 'all'" class="switch-line">
           <span>Téléchargement automatique</span>
+          <span class="switch">
+            <input type="checkbox" :checked="autoDownload" @change="emit('auto', checkedFrom($event))" />
+            <span class="switch-ui" aria-hidden="true"></span>
+          </span>
         </label>
       </section>
     </div>

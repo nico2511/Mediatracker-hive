@@ -15,6 +15,7 @@ from mediatracker.config import Settings
 from mediatracker.core.file_status import FileStatusIndex
 from mediatracker.db.models import HiveSignal, HiveSignalVersions, Media, MediaItem
 from mediatracker.hive.access import is_active_member
+from mediatracker.hive.catalog_epoch import local_catalog_epoch, payload_catalog_epoch
 from mediatracker.hive.crypto_id import verify_document_signature
 from mediatracker.hive.identity import hive_enabled_in_db
 from mediatracker.hive.peer_gossip import _origin_public_key
@@ -46,6 +47,7 @@ def build_signal_payload(
     signal: str,
     cle: dict,
     mini_fiche: dict | None = None,
+    catalog_epoch: int = 0,
 ) -> dict:
     payload: dict = {
         "v": SIGNAL_DOCUMENT_VERSION,
@@ -55,6 +57,7 @@ def build_signal_payload(
         "seq": seq,
         "signal": signal,
         "cle": cle,
+        "catalog_epoch": int(catalog_epoch),
     }
     if mini_fiche:
         payload["mini_fiche"] = mini_fiche
@@ -125,6 +128,7 @@ def _publish_signal(
     from mediatracker.hive.signal_mini_fiche import sanitize_mini_fiche
 
     safe_mini = sanitize_mini_fiche(mini_fiche) if mini_fiche else None
+    epoch = local_catalog_epoch(db, ruche_id)
     payload = build_signal_payload(
         ruche_id=ruche_id,
         origin_instance_id=origin_id,
@@ -132,6 +136,7 @@ def _publish_signal(
         signal=signal,
         cle=cle,
         mini_fiche=safe_mini,
+        catalog_epoch=epoch,
     )
     _, _, _, sign_fn = _catalog_helpers()
     sig = sign_fn(private_key, payload)
@@ -272,6 +277,16 @@ def publish_cherche_for_item(
 
     mini_fiche = build_cherche_mini_fiche(media, item)
     for rid in ruches_fn(db, origin_id):
+        _retract_superseded_cherche_slot(
+            db,
+            settings,
+            ruche_id=rid,
+            origin_id=origin_id,
+            private_key=private_key,
+            new_cle=cle,
+            media_item_id=item.id,
+            now=now,
+        )
         _publish_signal(
             db,
             settings,
@@ -285,6 +300,50 @@ def publish_cherche_for_item(
             mini_fiche=mini_fiche,
         )
     return True
+
+
+def _retract_superseded_cherche_slot(
+    db: Session,
+    settings: Settings,
+    *,
+    ruche_id: bytes,
+    origin_id: str,
+    private_key,
+    new_cle: dict,
+    media_item_id: int | None,
+    now: datetime,
+) -> None:
+    """Retire les cherche actifs sur le même créneau (œuvre/saison/épisode) mais autre version."""
+    from mediatracker.hive.hive_catalogue import _stable_work_key
+
+    target_wk = _stable_work_key(new_cle)
+    target_hash = cle_hash(new_cle)
+    rows = list(
+        db.scalars(
+            select(HiveSignal).where(
+                HiveSignal.ruche_id == ruche_id,
+                HiveSignal.origin_instance_id == origin_id,
+                HiveSignal.signal == "cherche",
+            )
+        ).all()
+    )
+    for row in rows:
+        old_cle = parse_cle(row.cle_json)
+        if not old_cle or _stable_work_key(old_cle) != target_wk:
+            continue
+        if cle_hash(old_cle) == target_hash:
+            continue
+        _publish_signal(
+            db,
+            settings,
+            ruche_id=ruche_id,
+            origin_id=origin_id,
+            private_key=private_key,
+            signal="retire",
+            cle=old_cle,
+            media_item_id=media_item_id,
+            now=now,
+        )
 
 
 def retract_cherche_for_item(
@@ -409,6 +468,8 @@ def ingest_signed_signals(db: Session, *, ruche_id: bytes, items: list[dict], no
         try:
             verify_remote_signal(db, ruche_id=ruche_id, payload=payload, signature_b64=sig)
         except (ValueError, Exception):
+            continue
+        if payload_catalog_epoch(payload) < local_catalog_epoch(db, ruche_id):
             continue
         origin = str(payload["origine"])
         seq = int(payload["seq"])

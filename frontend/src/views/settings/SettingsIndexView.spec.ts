@@ -92,4 +92,10 @@ describe("SettingsIndexView — sommaire", () => {
     const links = w.findAll("[data-testid^=settings-index-link-]");
     expect(links).toHaveLength(14);
   });
+
+  it("affiche le libellé de menu « API et jetons » pour la section jetons", () => {
+    const w = mount(SettingsIndexView);
+    const link = w.find("[data-testid=settings-index-link-jetons]");
+    expect(link.text()).toContain("API et jetons");
+  });
 });

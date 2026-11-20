@@ -12,3 +12,8 @@ export function hiveRucheLabel(r: HiveRucheListRow): string {
   const creator = r.is_creator ? " (créateur)" : "";
   return `Ruche ${short}…${members}${creator}`;
 }
+
+/** Nom court attendu pour confirmer une action destructive sur la ruche. */
+export function hiveRucheConfirmName(rucheIdHex: string): string {
+  return `Ruche ${rucheIdHex.slice(0, 8)}`;
+}

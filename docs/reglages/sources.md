@@ -4,7 +4,7 @@ URL : `/reglages/sources`
 
 Page dédiée (composant séparé de l’écran générique). Les mêmes URL peuvent être préremplies à l’étape **Sources** de l’assistant (`/configuration`) — voir [Premier démarrage](../premier-demarrage.md).
 
-Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la page et renvoie vers [Services et jetons](jetons.md) ou [Hive](hive.md).
+Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la page et renvoie vers [API et jetons](jetons.md) ou [Hive](hive.md).
 
 ## Présentation
 
@@ -16,6 +16,8 @@ Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la
 
 - Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré.
 - État en ligne / panne : affiché sur chaque carte ; API `GET /api/v1/settings/sources/status`.
+- Une source **désactivée** n’est utilisée ni par le téléchargement automatique, ni par **Réparer** et **Vérifier tout** ; sa carte n’affiche ni bouton **Tester** ni état de panne. L’interrupteur enregistre aussitôt `download_source_order` ; en cas d’échec, il revient à sa position et un message s’affiche.
+- Une valeur inconnue dans l’ordre enregistré est ignorée : les autres sources restent telles quelles, sans retour à l’ordre par défaut.
 
 ## Sans clé AllDebrid
 
@@ -31,8 +33,9 @@ Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la
 | `source_cache_seconds` | 900 | 0–3600 | Cache des résultats de recherche |
 | `source_error_backoff_min` | 180 | 30–1440 | Repousse après erreur source |
 | `remote_search_cooldown_hours` | 6 | 1–72 | Délai entre deux recherches distantes d’une même fiche |
+| `scan_episode_sources_fallback` | true | bool | Repli scan Comet / Torrentio / addons Stremio si le sondage « liens » n’a retenu aucune page |
 
-`remote_search_cooldown_hours` s’applique **par fiche** : retéléchargement, repli de profil, relecture source, y compris actions manuelles (pas de dérogation si une recherche réseau est nécessaire).
+`remote_search_cooldown_hours` s’applique **par fiche** : retéléchargement, repli de profil, relecture source, repli scan épisode, y compris actions manuelles (pas de dérogation si une recherche réseau est nécessaire).
 
 ## Hébergeurs (liens HTML)
 

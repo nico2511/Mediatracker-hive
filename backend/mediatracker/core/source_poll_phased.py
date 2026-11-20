@@ -198,7 +198,7 @@ def _run_search_phase(plan: RemoteCollectPlan, source: object, settings: Setting
 
     from mediatracker.core.profile_attempt_adapters import attempt_selection_criteria, select_pages_for_profile_attempt
     from mediatracker.core.quality_profile import Profile, preferences_for
-    from mediatracker.core.source_select import explain_misses
+    from mediatracker.core.source_select import explain_misses, no_version_message
 
     _NETWORK_CALLS += 1
     media = SimpleNamespace(
@@ -259,9 +259,7 @@ def _run_search_phase(plan: RemoteCollectPlan, source: object, settings: Setting
             language_fallback=list(crit.language_fallback),
             profile=spec,
         )
-        message = f"Aucune version ne correspond au profil « {spec.name} »."
-        if detail:
-            message = f"{message} {detail}"
+        message = no_version_message(list(results), spec.name, detail)
         plan.early = PollReport(
             result="nothing",
             message=message,

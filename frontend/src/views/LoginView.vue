@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useRouter } from "vue-router";
 
 import {api, userFacingApiError} from "../api";
+import { prefetchAppSettingsCaches } from "../appSettingsCaches";
 import { clearSession } from "../session";
 
 const router = useRouter();
@@ -24,6 +25,7 @@ async function submit() {
       body: JSON.stringify({ username: username.value, password: password.value }),
     });
     clearSession();
+    void prefetchAppSettingsCaches();
     await router.push("/");
   } catch (err) {
     if (!navigator.onLine) {

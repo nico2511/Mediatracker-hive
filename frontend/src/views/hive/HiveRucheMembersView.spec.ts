@@ -24,9 +24,45 @@ beforeEach(() => {
         ruche_id_hex: RUCHE,
         is_creator: true,
         weekly_quota_bytes: 100 * 1024 ** 3,
+        catalog_epoch: 0,
+        catalog_reset_at: null,
         members: [
-          { instance_id: "cr-1", display_name: "Creator", pull_only: false, is_self: true },
-          { instance_id: "inv-42", display_name: "Invitee", pull_only: false, is_self: false },
+          {
+            instance_id: "cr-1",
+            display_name: "Creator",
+            pull_only: false,
+            is_self: true,
+            app_version: "3.0.0@abc12345",
+            hive_protocol: 1,
+            capabilities: [],
+          },
+          {
+            instance_id: "inv-42",
+            display_name: "Invitee",
+            pull_only: false,
+            is_self: false,
+            app_version: "2.5.0@deadbeef",
+            hive_protocol: 1,
+            capabilities: [],
+          },
+          {
+            instance_id: "inv-old",
+            display_name: "Legacy",
+            pull_only: false,
+            is_self: false,
+            app_version: "2.0.0",
+            hive_protocol: 0,
+            capabilities: [],
+          },
+          {
+            instance_id: "inv-unk",
+            display_name: "Unknown",
+            pull_only: false,
+            is_self: false,
+            app_version: null,
+            hive_protocol: 0,
+            capabilities: [],
+          },
         ],
       };
     }
@@ -46,9 +82,14 @@ beforeEach(() => {
     if (url === "/api/v1/hive/join/reject" && opts?.method === "POST") {
       return undefined;
     }
-    return {};
+    if (url === `/api/v1/hive/ruches/${RUCHE}/catalog-reset` && opts?.method === "POST") {
+      return undefined;
+    }
+  return {};
   });
 });
+
+import { hiveRucheConfirmName } from "../../hive/hiveRucheLabel";
 
 import HiveRucheMembersView from "./HiveRucheMembersView.vue";
 
@@ -57,6 +98,75 @@ async function mountMembers() {
   await flushPromises();
   return w;
 }
+
+describe("HiveRucheMembersView — versions", () => {
+  it("affiche l’annonce locale, à jour, ancienne et inconnue", async () => {
+    const w = await mountMembers();
+    expect(w.get("[data-testid=hive-self-version-announce]").text()).toContain("v3.0.0");
+    const pills = w.findAll("[data-testid=hive-member-version-pill]");
+    const texts = pills.map((p) => p.text());
+    expect(texts.some((t) => t.includes("v3.0.0") && t.includes("à jour"))).toBe(true);
+    expect(texts.some((t) => t.includes("v2.5.0") && t.includes("à jour"))).toBe(true);
+    expect(texts.some((t) => t.includes("v2.0.0") && t.includes("ancienne version"))).toBe(true);
+    expect(texts.some((t) => t.includes("version inconnue"))).toBe(true);
+    const upToDate = pills.find((p) => p.text().includes("v2.5.0"));
+    expect(upToDate?.attributes("title")).toContain("@deadbeef");
+  });
+});
+
+describe("HiveRucheMembersView — reset catalogue", () => {
+  it("affiche la boîte et n’envoie qu’après saisie du nom exact", async () => {
+    const w = await mountMembers();
+    expect(w.find("[data-testid=hive-catalog-reset-zone]").exists()).toBe(true);
+    await w.get("[data-testid=hive-catalog-reset-open]").trigger("click");
+    await flushPromises();
+    const dialog = document.body.querySelector("[data-testid=hive-catalog-reset-dialog]");
+    expect(dialog?.textContent).toContain("Effacé");
+    expect(dialog?.textContent).toContain("Conservé");
+    const submit = document.body.querySelector(
+      "[data-testid=hive-catalog-reset-submit]",
+    ) as HTMLButtonElement | null;
+    expect(submit?.disabled).toBe(true);
+    const label = hiveRucheConfirmName(RUCHE);
+    const input = document.body.querySelector("[data-testid=hive-catalog-reset-input]") as HTMLInputElement;
+    input.value = label;
+    input.dispatchEvent(new Event("input"));
+    await flushPromises();
+    expect((document.body.querySelector("[data-testid=hive-catalog-reset-submit]") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    submit?.click();
+    await flushPromises();
+    expect(apiMock).toHaveBeenCalledWith(
+      `/api/v1/hive/ruches/${RUCHE}/catalog-reset`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ confirm_name: label }),
+      }),
+    );
+  });
+
+  it("affiche l’avis discret pour un membre non créateur", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === `/api/v1/hive/ruches/${RUCHE}/detail`) {
+        return {
+          ruche_id_hex: RUCHE,
+          is_creator: false,
+          weekly_quota_bytes: 100 * 1024 ** 3,
+          catalog_epoch: 2,
+          catalog_reset_at: "2026-03-15T12:00:00+00:00",
+          members: [],
+        };
+      }
+      return {};
+    });
+    const w = mount(HiveRucheMembersView);
+    await flushPromises();
+    const notice = w.get("[data-testid=hive-catalog-reset-notice]");
+    expect(notice.text()).toContain("15/03");
+    expect(w.find("[data-testid=hive-catalog-reset-zone]").exists()).toBe(false);
+  });
+});
 
 describe("HiveRucheMembersView — adhésion", () => {
   it("n’affiche pas le code attendu et garde Accepter inactif sans confirmation", async () => {

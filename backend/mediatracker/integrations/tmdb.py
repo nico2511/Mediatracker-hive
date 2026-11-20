@@ -64,6 +64,7 @@ class TmdbHit:
     runtime: int | None = None
     seasons: tuple[TmdbSeasonBrief, ...] = ()
     release_date: date | None = None
+    original_language: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,6 +210,7 @@ def _hit(
         episode_count=_count(row.get("number_of_episodes")),
         runtime=_count(row.get("runtime")),
         release_date=released,
+        original_language=row.get("original_language") if isinstance(row.get("original_language"), str) else None,
     )
 
 
@@ -273,37 +275,47 @@ _SHARED: dict[str, TmdbClient] = {}
 _RETRY_CAP_SECONDS = 30.0
 
 
-def shared_tmdb(token: str) -> TmdbClient:
-    """One client per token for the process. Replaced clients are closed.
+def _shared_cache_key(token: str, language: str) -> str:
+    return f"{token}\0{language}"
+
+
+def shared_tmdb(token: str, *, language: str = "fr-FR") -> TmdbClient:
+    """One client per token and display language. Replaced clients are closed.
 
     A monkeypatched client class is not reused, so tests stay isolated.
     """
-    current = _SHARED.get(token)
+    cache_key = _shared_cache_key(token, language)
+    current = _SHARED.get(cache_key)
     if (
         current is not None
         and type(current) is TmdbClient
         and not current._client.is_closed
     ):
         return current
-    client = TmdbClient(token)
-    previous = _SHARED.get(token)
+    client = TmdbClient(token, language=language)
+    previous = _SHARED.get(cache_key)
     if previous is not None and previous is not client:
         close = getattr(previous, "close", None)
         if close is not None:
             close()
-    _SHARED[token] = client
+    _SHARED[cache_key] = client
     return client
 
 
-def borrow_tmdb(token: str, factory: Callable[..., TmdbClient]) -> tuple[TmdbClient, bool]:
+def borrow_tmdb(
+    token: str,
+    factory: Callable[..., TmdbClient],
+    *,
+    language: str = "fr-FR",
+) -> tuple[TmdbClient, bool]:
     """Return ``(client, owned)``. The shared client is not closed by the caller.
 
     ``factory`` is the name tests replace (``media.TmdbClient`` and the like).
     A substitute is created for that call and the caller closes it.
     """
     if factory is TmdbClient:
-        return shared_tmdb(token), False
-    return factory(token), True
+        return shared_tmdb(token, language=language), False
+    return factory(token, language=language), True
 
 
 def close_shared_tmdb() -> None:
@@ -359,19 +371,21 @@ class TmdbClient:
         self,
         token: str,
         *,
+        language: str = "fr-FR",
         transport: httpx.BaseTransport | None = None,
         sleeper: Callable[[float], None] = time.sleep,
         request_timeout: float = 20.0,
     ) -> None:
         from mediatracker.core.outbound_http import borrow_http_client
 
+        self._language = language
         self._client, self._owns_client = borrow_http_client(
-            ("tmdb", token),
+            ("tmdb", token, language),
             httpx.Client,
             transport=transport,
             base_url="https://api.themoviedb.org/3",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            params={"language": "fr-FR"},
+            params={"language": language},
             timeout=request_timeout,
         )
         self._sleeper = sleeper
@@ -544,6 +558,7 @@ class TmdbClient:
         release_date_lte: str | None = None,
         primary_release_year: int | None = None,
         with_genres: str | None = None,
+        with_original_language: str | None = None,
         sort_by: str = "popularity.desc",
     ) -> tuple[list[TmdbHit], int]:
         params: dict[str, str] = {
@@ -553,6 +568,8 @@ class TmdbClient:
             "sort_by": sort_by,
             "include_adult": "false",
         }
+        if with_original_language:
+            params["with_original_language"] = with_original_language
         if watch_region:
             params["watch_region"] = watch_region
             params["with_watch_monetization_types"] = (
@@ -585,6 +602,7 @@ class TmdbClient:
         with_watch_providers: str | None = None,
         with_watch_monetization_types: str | None = None,
         with_genres: str | None = None,
+        with_original_language: str | None = None,
         sort_by: str = "popularity.desc",
     ) -> tuple[list[TmdbHit], int]:
         params: dict[str, str] = {
@@ -594,6 +612,8 @@ class TmdbClient:
             "include_adult": "false",
             "with_watch_monetization_types": with_watch_monetization_types or WATCH_MONETIZATION_TYPES_FR,
         }
+        if with_original_language:
+            params["with_original_language"] = with_original_language
         if first_air_date_gte:
             params["first_air_date.gte"] = first_air_date_gte
         if first_air_date_lte:
@@ -634,10 +654,10 @@ class TmdbClient:
             hits.append(_hit(row, media_type, str(title), aired if isinstance(aired, str) else None, rating, genre_ids))
         return hits, int(payload.get("total_pages") or 1)
 
-    def watch_providers_movie_fr(self) -> list[tuple[int, str]]:
-        payload = self._get("/watch/providers/movie", {"watch_region": "FR"})
+    def watch_providers_movie(self, *, watch_region: str = "FR") -> list[tuple[int, str]]:
+        payload = self._get("/watch/providers/movie", {"watch_region": watch_region})
         block = payload.get("results") or {}
-        fr = block.get("FR") if isinstance(block, dict) else None
+        fr = block.get(watch_region) if isinstance(block, dict) else None
         if not isinstance(fr, dict):
             return []
         seen: dict[int, str] = {}
@@ -650,6 +670,9 @@ class TmdbClient:
                 if isinstance(provider_id, int) and isinstance(name, str) and name.strip():
                     seen[provider_id] = name.strip()
         return sorted(seen.items(), key=lambda pair: pair[1].casefold())
+
+    def watch_providers_movie_fr(self) -> list[tuple[int, str]]:
+        return self.watch_providers_movie(watch_region="FR")
 
     def find_external(self, external_id: str, source: str) -> tuple[int | None, str | None]:
         """Resolve an IMDb or TVDB id. ``source`` is ``imdb_id`` or ``tvdb_id``.

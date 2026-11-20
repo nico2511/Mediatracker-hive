@@ -111,6 +111,14 @@ def _record_updated_event(
     return event
 
 
+def align_installed_fingerprint(db: Session) -> None:
+    """Store the running image fingerprint without recording an update event (e.g. after restore)."""
+    moment = datetime.now(timezone.utc)
+    current = installed_fingerprint()
+    _touch_app_version(db, moment)
+    _store_fingerprint(db, current, moment)
+
+
 def observe_installed_version(db: Session, _settings: Settings) -> None:
     """Compare the running image to the last stored fingerprint. Never raises."""
     moment = datetime.now(timezone.utc)

@@ -30,7 +30,7 @@ from mediatracker.core.catalog_poster import display_poster_url, resolve_catalog
 from mediatracker.core.display_title import clean_display_title
 from mediatracker.core.source_poll import close_source
 from mediatracker.core.tracking import tmdb_page_url
-from mediatracker.db.models import CatalogEntry, Media, MediaItem
+from mediatracker.db.models import CatalogEntry, Media
 from mediatracker.providers.sources.loading import sources_for_catalog
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
@@ -317,10 +317,11 @@ def follow_entry(
     _reject_if_followed(db, row)
     from mediatracker.core.follow import default_pref_language, default_pref_quality
 
+    settings = request.app.state.settings
     policy = _policy(row.media_type, body.new_episode_policy)
     created, episodes = insert_followed(
         db,
-        request.app.state.settings.secret_key,
+        settings.secret_key,
         MediaCreate(
             type=row.media_type,
             title=row.title,
@@ -334,18 +335,13 @@ def follow_entry(
             seasons=body.seasons,
             start_now=body.start_now,
         ),
+        settings=settings,
     )
-    from mediatracker.library.scanner import attach_known_files
+    from mediatracker.core.attach_deferred import commit_follow_side_effects, schedule_attach_known_files
 
-    attached = attach_known_files(db, request.app.state.settings, created)
-    if attached:
-        db.commit()
-        episodes = list(db.scalars(select(MediaItem).where(MediaItem.media_id == created.id)).all())
-    from mediatracker.core.worker_wake import REASON_API_MEDIA, wake_worker
-
-    wake_worker(db, request.app.state.settings, REASON_API_MEDIA, commit=False)
-    db.commit()
-    created._attached = attached  # type: ignore[attr-defined]
+    commit_follow_side_effects(db, settings)
+    schedule_attach_known_files(request.app.state.session_factory, settings, created.id)
+    created._attached = 0  # type: ignore[attr-defined]
     return _to_media(created, episodes, db)
 
 

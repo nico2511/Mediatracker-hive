@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
-import { api } from "../api";
+import { api, userFacingApiError } from "../api";
 import ActionMenuPopover from "./ActionMenuPopover.vue";
 import HiveBulkShareMenuItems from "./HiveBulkShareMenuItems.vue";
 import HiveEmpreintesPanel from "./HiveEmpreintesPanel.vue";
 import type { HiveShareUiState } from "../hive/hiveBadges";
 import { hiveShareFicheStatus } from "../hive/hiveShareStatus";
 import { hiveRucheLabel, type HiveRucheListRow } from "../hive/hiveRucheLabel";
+import {
+  hiveFicheSeriesDemandLine,
+  hiveMediaRequestsActiveAnnounced,
+  type HiveMyRequestItem,
+} from "../hive/hiveRequests";
 
 const props = defineProps<{
   hiveEnabled: boolean;
@@ -15,17 +21,20 @@ const props = defineProps<{
   mediaId: number;
   /** inline : bandeau compact ; card : carte fiche série (maquettes A/B). */
   layout?: "inline" | "card";
-  hiveRequestAnnounced?: boolean;
+  mediaRequests?: HiveMyRequestItem[];
   openSignal?: number;
 }>();
 
-const emit = defineEmits<{ changed: []; openEmpreintes: [] }>();
+const emit = defineEmits<{ changed: [] }>();
 
 defineOptions({ inheritAttrs: false });
 
+const router = useRouter();
 const legendOpen = ref(false);
 const empreintesFoldOpen = ref(false);
 const ruches = ref<HiveRucheListRow[]>([]);
+const requestError = ref("");
+const requestBusy = ref(false);
 
 const legend = [
   { title: "Non partagé", text: "Partage manuel : rien n’est proposé sans action dans le menu." },
@@ -46,14 +55,18 @@ watch(
 );
 const cardLayout = computed(() => (props.layout ?? "card") === "card");
 
+const mediaRequests = computed(() => props.mediaRequests ?? []);
+
 const stats = computed(() => {
   let shared = 0;
   let preparing = 0;
   let errors = 0;
+  let withFile = 0;
   for (const state of Object.values(props.episodeStates)) {
     if (!state?.has_file) {
       continue;
     }
+    withFile += 1;
     const phase = hiveShareFicheStatus(state, {}).phase;
     if (state.shared && !state.exclude_all) {
       shared += 1;
@@ -63,7 +76,7 @@ const stats = computed(() => {
       errors += 1;
     }
   }
-  return { shared, preparing, errors };
+  return { shared, preparing, errors, withFile };
 });
 
 const summaryLine = computed(() => {
@@ -80,7 +93,50 @@ const summaryLine = computed(() => {
   return parts.join(" · ") || "Aucun épisode partagé";
 });
 
+const partageLine = computed(() => {
+  const y = stats.value.withFile;
+  const x = stats.value.shared;
+  if (y === 0) {
+    return "Aucun épisode partagé";
+  }
+  const unit = y > 1 ? "épisodes" : "épisode";
+  const sharedWord = x > 1 ? "partagés" : "partagé";
+  return `${x}/${y} ${unit} ${sharedWord}`;
+});
+
+const demandLine = computed(() => hiveFicheSeriesDemandLine(mediaRequests.value));
+
+const showDemandSection = computed(() => mediaRequests.value.length > 0);
+
 const shareActive = computed(() => stats.value.shared > 0);
+
+const canRetractAll = computed(() => hiveMediaRequestsActiveAnnounced(mediaRequests.value).length > 0);
+
+async function retractAllRequests() {
+  const targets = hiveMediaRequestsActiveAnnounced(mediaRequests.value);
+  if (!targets.length) {
+    return;
+  }
+  requestBusy.value = true;
+  requestError.value = "";
+  try {
+    for (const row of targets) {
+      await api("/api/v1/hive/requests/retract", {
+        method: "POST",
+        body: JSON.stringify({ media_item_id: row.media_item_id }),
+      });
+    }
+    emit("changed");
+  } catch (err) {
+    requestError.value = userFacingApiError(err, "Retrait impossible.");
+  } finally {
+    requestBusy.value = false;
+  }
+}
+
+function openMineRequests() {
+  void router.push("/hive/demandes");
+}
 
 onMounted(async () => {
   if (!props.hiveEnabled || !cardLayout.value) {
@@ -122,30 +178,64 @@ onMounted(async () => {
       </svg>
       <header class="fiche-hive-card-head">
         <span class="lbl hint">Hive</span>
-        <span v-if="hiveRequestAnnounced" class="pill honey">Demandé à la ruche</span>
         <span v-if="shareActive" class="pill honey">Partage actif</span>
-        <span v-else-if="!hiveRequestAnnounced" class="pill muted">Inactif</span>
+        <span v-else class="pill muted">Inactif</span>
       </header>
-      <p class="fiche-hive-card-meta">{{ summaryLine }}</p>
+      <section class="fiche-hive-section" data-testid="hive-fiche-partage">
+        <p class="fiche-hive-kicker hint">Partage</p>
+        <p class="fiche-hive-section-line fiche-hive-card-meta">
+          <span data-testid="hive-fiche-partage-line">{{ partageLine }}</span>
+          <span class="fiche-hive-inline-sep" aria-hidden="true">·</span>
+          <ActionMenuPopover
+            label="Gérer"
+            trigger-variant="fiche"
+            :show-status-icon="false"
+            compact-on-phone
+            menu-aria-label="Partage Hive pour la série"
+            class="fiche-hive-partage-gerer"
+          >
+            <HiveBulkShareMenuItems
+              :media-id="mediaId"
+              :hive-enabled="hiveEnabled"
+              @changed="emit('changed')"
+              @open-empreintes="empreintesFoldOpen = true"
+            />
+          </ActionMenuPopover>
+        </p>
+      </section>
+      <section
+        v-if="showDemandSection"
+        class="fiche-hive-section"
+        data-testid="hive-fiche-demande"
+      >
+        <p class="fiche-hive-kicker hint">Demande</p>
+        <p class="fiche-hive-section-line hint" data-testid="hive-fiche-demande-line">{{ demandLine }}</p>
+        <p v-if="requestError" class="error fiche-hive-section-line" role="alert">{{ requestError }}</p>
+        <div class="fiche-hive-demand-actions">
+          <button
+            type="button"
+            class="btn"
+            data-testid="hive-fiche-request-open-mine"
+            :disabled="requestBusy"
+            @click="openMineRequests"
+          >
+            Voir mes demandes
+          </button>
+          <button
+            v-if="canRetractAll"
+            type="button"
+            class="btn linkish"
+            data-testid="hive-fiche-request-retract-all"
+            :disabled="requestBusy"
+            @click="retractAllRequests"
+          >
+            Ne plus demander
+          </button>
+        </div>
+      </section>
       <p v-if="ruches.length" class="fiche-hive-card-ruches">
         <span v-for="row in ruches" :key="row.ruche_id_hex" class="pill muted">{{ hiveRucheLabel(row) }}</span>
       </p>
-      <div class="fiche-hive-card-act">
-        <ActionMenuPopover
-          label="Gérer le partage"
-          trigger-variant="fiche"
-          :show-status-icon="false"
-          compact-on-phone
-          menu-aria-label="Partage Hive pour la série"
-        >
-          <HiveBulkShareMenuItems
-            :media-id="mediaId"
-            :hive-enabled="hiveEnabled"
-            @changed="emit('changed')"
-            @open-empreintes="emit('openEmpreintes')"
-          />
-        </ActionMenuPopover>
-      </div>
       <details
         class="fiche-hive-fold"
         data-testid="hive-empreintes-fold"
@@ -197,7 +287,7 @@ onMounted(async () => {
           :media-id="mediaId"
           :hive-enabled="hiveEnabled"
           @changed="emit('changed')"
-          @open-empreintes="emit('openEmpreintes')"
+          @open-empreintes="empreintesFoldOpen = true"
         />
       </ActionMenuPopover>
       <details
@@ -275,7 +365,7 @@ onMounted(async () => {
 }
 
 .fiche-hive-card-ico {
-  grid-row: 1 / span 3;
+  grid-row: 1 / span 4;
   color: var(--honey, #d9b46a);
   margin-top: 0.1rem;
 }
@@ -300,8 +390,42 @@ onMounted(async () => {
 
 .fiche-hive-card-meta {
   margin: 0;
-  grid-column: 2;
   font-size: 0.95rem;
+}
+
+.fiche-hive-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fiche-hive-section {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.fiche-hive-section-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.fiche-hive-inline-sep {
+  color: var(--muted);
+}
+
+.fiche-hive-partage-gerer :deep(.action-menu-trigger) {
+  width: auto;
+  min-width: 0;
+  min-height: var(--target-min);
+  padding: 0;
+  justify-content: flex-start;
 }
 
 .fiche-hive-card-ruches {
@@ -312,35 +436,35 @@ onMounted(async () => {
   grid-column: 2;
 }
 
-.fiche-hive-card-act {
-  grid-column: 1 / -1;
-  margin-top: 0.35rem;
+.fiche-hive-demand-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
 }
 
-.fiche-hive-card-act :deep(.action-menu-trigger) {
-  width: 100%;
-  justify-content: center;
+.btn.linkish {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  text-decoration: underline;
+  min-height: var(--target-min);
 }
 
 @media (min-width: 721px) {
   .fiche-hive-card {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
+    grid-template-columns: 20px minmax(0, 1fr);
   }
 
   .fiche-hive-card-ico {
-    grid-row: 1 / span 3;
+    grid-row: 1 / span 5;
   }
 
-  .fiche-hive-card-act {
-    grid-column: 3;
-    grid-row: 1 / span 3;
-    margin-top: 0;
-    align-self: start;
-  }
-
-  .fiche-hive-card-act :deep(.action-menu-trigger) {
-    width: auto;
-    min-width: 11.5rem;
+  .fiche-hive-demand-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
   }
 
   .fiche-hive-card-ruches,

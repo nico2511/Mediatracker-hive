@@ -43,6 +43,8 @@ type DialogPhase = "preview" | "running" | "success" | "error-worker" | "error-s
 
 const router = useRouter();
 
+defineProps<{ embedded?: boolean }>();
+
 const SQLITE_BACKUP_DOCS_URL = "https://www.sqlite.org/backup.html";
 
 const backups = ref<BackupRow[]>([]);
@@ -376,7 +378,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="backup-restore">
-    <h3 id="sauvegardes">
+    <h3 v-if="!embedded" id="sauvegardes">
       Sauvegardes
       <span v-if="backups.length" class="hint" style="font-weight: 400">{{ backups.length }}</span>
     </h3>
@@ -608,7 +610,7 @@ onBeforeUnmount(() => {
             Cette sauvegarde ne peut pas être restaurée : son schéma est plus récent que cette version de
             l'application.
           </p>
-          <label class="chk">
+          <label class="check chk">
             <input v-model="confirmChecked" type="checkbox" :disabled="schemaBlocked" />
             <span>Je remplace la base actuelle par celle du {{ previewTitleDate }}</span>
           </label>

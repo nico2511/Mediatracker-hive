@@ -402,8 +402,9 @@ def ha_follow(
     """Follow a TMDB id the same way the web form does. Already followed stays as-is."""
     del _principal
     from mediatracker.api.v1.media import MediaCreate, insert_followed
-    from mediatracker.library.scanner import attach_known_files
+    from mediatracker.core.attach_deferred import commit_follow_side_effects, schedule_attach_known_files
 
+    settings = request.app.state.settings
     media_type = "film" if body.type == "movie" else "series"
     existing = db.scalar(select(Media).where(Media.tmdb_id == body.tmdb_id, Media.type == media_type))
     if existing is not None and existing.followed:
@@ -421,19 +422,19 @@ def ha_follow(
         policy = "propose"
     row, _episodes = insert_followed(
         db,
-        request.app.state.settings.secret_key,
+        settings.secret_key,
         MediaCreate(type=media_type, tmdb_id=body.tmdb_id, new_episode_policy=policy),
+        settings=settings,
     )
-    attached = attach_known_files(db, request.app.state.settings, row)
-    if attached:
-        db.commit()
-    detail = _follow_detail(row.title, media_type, attached)
+    commit_follow_side_effects(db, settings)
+    schedule_attach_known_files(request.app.state.session_factory, settings, row.id)
+    detail = _follow_detail(row.title, media_type, 0)
     return FollowOut(
         already=False,
         title=row.title,
         tmdb_id=body.tmdb_id,
         type=body.type,
-        attached=attached,
+        attached=0,
         detail=detail,
     )
 

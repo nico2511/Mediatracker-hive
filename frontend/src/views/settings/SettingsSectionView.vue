@@ -28,6 +28,7 @@ import {
   type QualityProfileLike,
 } from "../../profileFallback";
 import { useServiceStatus } from "../../composables/useServiceStatus";
+import SettingsTmdbCatalogSection from "./SettingsTmdbCatalogSection.vue";
 import { sectionBySlug, SETTINGS_SECTION_SLUGS } from "./sections";
 
 const route = useRoute();
@@ -109,7 +110,7 @@ const storageHint = ref({
   series_dir: "/data/media/Series",
   downloads_dir: "/data/downloads",
   trash_dir: "/data/.trash",
-  backups_dir: "/config/backups",
+  backups_dir: "",
   warning: "",
 });
 const libraryHours = ref<number | undefined>(undefined);
@@ -480,6 +481,8 @@ async function loadSectionData(slug: string) {
       break;
     case "maj":
       await loadUpdate();
+      await loadNotifications();
+      notifyTargetsKnown.value = true;
       break;
     default:
       break;
@@ -522,7 +525,7 @@ async function loadStorage() {
       series_dir: layout.series_dir,
       downloads_dir: layout.downloads_dir,
       trash_dir: layout.trash_dir,
-      backups_dir: layout.backups_dir ?? "/config/backups",
+      backups_dir: layout.backups_dir ?? "",
       warning: layout.warning || "",
     };
   } catch {
@@ -1179,7 +1182,11 @@ const {
 const maskAllDebridExtras = computed(() => serviceStatusLoaded.value && !adConnected.value);
 const maskDownloadFeatures = computed(() => serviceStatusLoaded.value && !downloadReady.value);
 const maskJellyfinExtras = computed(() => serviceStatusLoaded.value && !jellyfinConfigured.value);
-const maskWatchtowerNotify = computed(() => serviceStatusLoaded.value && !watchtowerConfigured.value);
+const notifyTargetsKnown = ref(false);
+const hasActiveNotificationTarget = computed(() => targets.value.some((target) => target.enabled));
+const showNotifyOnUpdateNoTargetHint = computed(
+  () => notifyTargetsKnown.value && !hasActiveNotificationTarget.value,
+);
 
 const tmdbCardConfigured = computed(() => tmdbSet.value);
 const githubCardConfigured = computed(() => ghcrSet.value || githubSet.value);
@@ -1236,15 +1243,15 @@ const watchtowerUnavailableLine = computed(() => {
   const missingUrl = !watchtowerUrl.value.trim();
   const missingToken = !watchtowerTokenSet.value;
   if (missingUrl && missingToken) {
-    return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → Jetons d'API, carte Watchtower.";
+    return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → API et jetons, carte Watchtower.";
   }
   if (missingUrl) {
-    return "Indisponible : renseignez l'URL Watchtower dans Réglages → Jetons d'API, carte Watchtower.";
+    return "Indisponible : renseignez l'URL Watchtower dans Réglages → API et jetons, carte Watchtower.";
   }
   if (missingToken) {
     return "Indisponible : renseignez le jeton Watchtower (variable WATCHTOWER_HTTP_API_TOKEN) sur la carte Watchtower, pas un jeton Accès API.";
   }
-  return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → Jetons d'API, carte Watchtower.";
+  return "Indisponible : renseignez l'URL et le jeton Watchtower dans Réglages → API et jetons, carte Watchtower.";
 });
 
 const updateNowButtonLabel = computed(() => {
@@ -1905,7 +1912,7 @@ async function saveProfileFallback() {
 
       <p v-if="maskDownloadFeatures" class="hint" role="status">
         Disponible lorsque les téléchargements sont prêts →
-        <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+        <RouterLink to="/reglages/jetons">API et jetons</RouterLink>
       </p>
       <div v-if="!maskDownloadFeatures" class="stack">
       <h2 id="profils-qualite" class="settings-section-title">Profils de qualité</h2>
@@ -2061,15 +2068,18 @@ async function saveProfileFallback() {
               <RouterLink to="/reglages/corbeille">voir Corbeille</RouterLink>.
             </p>
             <div v-if="!maskDownloadFeatures" class="stack">
-              <label class="check">
-                <input v-model="autoDownloadDefault" type="checkbox" />
+              <label class="switch-line">
                 <span>Téléchargement automatique pour les nouveaux suivis</span>
+                <span class="switch">
+                  <input v-model="autoDownloadDefault" type="checkbox" />
+                  <span class="switch-ui" aria-hidden="true"></span>
+                </span>
               </label>
               <p class="hint">Activé par défaut. Chaque fiche peut le couper ensuite.</p>
             </div>
             <p v-if="maskDownloadFeatures" class="hint" role="status">
               Réglages liés au téléchargement depuis les sources →
-              <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+              <RouterLink to="/reglages/jetons">API et jetons</RouterLink>
             </p>
             <p v-if="error" class="error">{{ error }}</p>
             <p v-if="message">{{ message }}</p>
@@ -2080,7 +2090,7 @@ async function saveProfileFallback() {
       <h2 class="settings-section-title">Jellyfin</h2>
       <p v-if="maskJellyfinExtras" class="hint" role="status">
         Disponible après connexion de Jellyfin dans
-        <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>.
+        <RouterLink to="/reglages/jetons">API et jetons</RouterLink>.
       </p>
       <div v-else class="stack">
       <p class="hint">
@@ -2134,9 +2144,12 @@ async function saveProfileFallback() {
               <input v-model="jellyfinPrefix" placeholder="/srv/media" />
               <span class="hint">Encore lu si la correspondance ne couvre pas le chemin. Sinon laissez vide.</span>
             </label>
-            <label class="check">
-              <input v-model="autoRename" type="checkbox" />
+            <label class="switch-line">
               <span>Renommage automatique</span>
+              <span class="switch">
+                <input v-model="autoRename" type="checkbox" />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </span>
             </label>
             <p class="hint">
               Désactivé par défaut. Quand il est activé, les dossiers déjà identifiés par Jellyfin sont renommés
@@ -2215,6 +2228,7 @@ async function saveProfileFallback() {
           </form>
       </div>
     </section>
+    <SettingsTmdbCatalogSection v-else-if="section === 'tmdb-catalog'" />
     <section v-if="section === 'notifications'" class="settings-section panel stack">
       <h2 class="settings-section-title">Notifications</h2>
       <p class="hint">
@@ -2316,13 +2330,16 @@ async function saveProfileFallback() {
             <fieldset v-if="editingTargetId == null" class="checks">
               <legend>Événements</legend>
               <p class="hint">Nouveautés est décoché : un seul digest par actualisation, seulement si vous le cochez.</p>
-              <label v-for="event in notifyEvents" :key="event.type" class="check">
-                <input
-                  type="checkbox"
-                  :checked="selectedEvents.includes(event.type)"
-                  @change="toggleEvent(event.type, checkedFrom($event))"
-                />
+              <label v-for="event in notifyEvents" :key="event.type" class="switch-line">
                 <span>{{ event.label }}</span>
+                <span class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="selectedEvents.includes(event.type)"
+                    @change="toggleEvent(event.type, checkedFrom($event))"
+                  />
+                  <span class="switch-ui" aria-hidden="true"></span>
+                </span>
               </label>
             </fieldset>
             <button v-if="editingTargetId == null" type="submit">Ajouter la cible</button>
@@ -2345,13 +2362,16 @@ async function saveProfileFallback() {
             <p class="hint">Modifier les événements de la cible sélectionnée.</p>
             <fieldset class="checks">
               <legend>Événements</legend>
-              <label v-for="event in notifyEvents" :key="`edit-${event.type}`" class="check">
-                <input
-                  type="checkbox"
-                  :checked="selectedEvents.includes(event.type)"
-                  @change="toggleEvent(event.type, checkedFrom($event))"
-                />
+              <label v-for="event in notifyEvents" :key="`edit-${event.type}`" class="switch-line">
                 <span>{{ event.label }}</span>
+                <span class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="selectedEvents.includes(event.type)"
+                    @change="toggleEvent(event.type, checkedFrom($event))"
+                  />
+                  <span class="switch-ui" aria-hidden="true"></span>
+                </span>
               </label>
             </fieldset>
             <p class="actions">
@@ -2431,9 +2451,12 @@ async function saveProfileFallback() {
           « Garder ».
         </p>
         <form class="stack" @submit.prevent="saveAutoDeleteSettings">
-          <label class="check">
-            <input v-model="autoDeleteEnabled" type="checkbox" />
+          <label class="switch-line">
             <span>Suppression automatique</span>
+            <span class="switch">
+              <input v-model="autoDeleteEnabled" type="checkbox" />
+              <span class="switch-ui" aria-hidden="true"></span>
+            </span>
           </label>
           <label :class="{ 'cleanup-days-muted': !autoDeleteEnabled }">
             <span>Jours après le visionnage</span>
@@ -2587,13 +2610,16 @@ async function saveProfileFallback() {
       <h2 class="settings-section-title">AllDebrid</h2>
       <p v-if="maskAllDebridExtras" class="hint" role="status">
         Disponible après connexion de AllDebrid dans
-        <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>.
+        <RouterLink to="/reglages/jetons">API et jetons</RouterLink>.
       </p>
       <div v-if="!maskAllDebridExtras" class="stack">
       <form @submit.prevent="saveDebrid">
-            <label class="check">
-              <input v-model="alldebridAutoPurge" type="checkbox" />
+            <label class="switch-line">
               <span>Purger AllDebrid après un dépôt réussi</span>
+              <span class="switch">
+                <input v-model="alldebridAutoPurge" type="checkbox" />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </span>
             </label>
             <p class="hint">
               Activé par défaut. Quand un fichier est rangé, le lien enregistré, l'entrée d'historique
@@ -2611,40 +2637,59 @@ async function saveProfileFallback() {
           </form>
       </div>
     </section>
-    <section v-if="section === 'disque'" class="settings-section panel stack">
+    <section
+      v-if="section === 'disque'"
+      class="settings-section panel stack"
+      data-testid="settings-disque-section"
+    >
       <h2 class="settings-section-title">Disque et sauvegardes</h2>
       <p class="hint settings-lead">
-        La base est copiée chaque jour. Tu peux aussi télécharger une sauvegarde sur cet appareil, ou en importer
-        une (fichier <code>.db</code>).
+        Espace de stockage, fichiers de téléchargement en cours et copies quotidiennes de la base.
       </p>
-      <DiskSpaceCard heading />
-          <p class="hint">
-            Sous le seuil, les téléchargements passent en pause et une notification part. Les copies quotidiennes
-            sont dans <code>{{ storageHint.backups_dir }}</code>.
-          </p>
-          <form @submit.prevent="saveDisk">
-            <label>
-              <span>Espace libre minimum (Gio)</span>
-              <input
-                v-model.number="diskMinGb"
-                type="number"
-                :min="settingBoundMin(settingsRows, 'disk_min_free_gb', 0)"
-                :max="settingBoundMax(settingsRows, 'disk_min_free_gb', 1024)"
-                required
-              />
-              <span class="hint">
-                {{ hintWithDefault(settingsRows, "disk_min_free_gb", "0 désactive le garde-fou.") }}
-              </span>
-            </label>
-            <p class="hint">
-              Nombre de sauvegardes gardées :
-              <RouterLink to="/reglages/corbeille">voir Corbeille</RouterLink>.
-            </p>
-            <p v-if="diskError" class="error">{{ diskError }}</p>
-            <p v-if="diskMessage">{{ diskMessage }}</p>
-            <button type="submit">{{ saveSettingsLabel() }}</button>
-          </form>
-          <DatabaseBackupRestore />
+
+      <article class="stack">
+        <h3 class="settings-subsection-title">Espace disque</h3>
+        <DiskSpaceCard panel="disk" />
+        <p class="hint">
+          Sous le seuil d'espace libre, les téléchargements passent en pause et une notification est envoyée.
+        </p>
+        <form @submit.prevent="saveDisk">
+          <label>
+            <span>Espace libre minimum (Gio)</span>
+            <input
+              v-model.number="diskMinGb"
+              type="number"
+              :min="settingBoundMin(settingsRows, 'disk_min_free_gb', 0)"
+              :max="settingBoundMax(settingsRows, 'disk_min_free_gb', 1024)"
+              required
+            />
+            <span class="hint">
+              {{ hintWithDefault(settingsRows, "disk_min_free_gb", "0 désactive le garde-fou.") }}
+            </span>
+          </label>
+          <p v-if="diskError" class="error">{{ diskError }}</p>
+          <p v-if="diskMessage">{{ diskMessage }}</p>
+          <button type="submit">{{ saveSettingsLabel() }}</button>
+        </form>
+      </article>
+
+      <article class="stack">
+        <h3 class="settings-subsection-title">Téléchargements incomplets et orphelins</h3>
+        <DiskSpaceCard panel="incomplete" />
+      </article>
+
+      <article class="stack">
+        <h3 class="settings-subsection-title">Sauvegardes</h3>
+        <p class="hint">
+          Copies quotidiennes de la base dans <code>{{ storageHint.backups_dir }}</code>. Vous pouvez aussi en
+          télécharger une sur cet appareil ou en importer (fichier <code>.db</code>).
+        </p>
+        <p v-if="backupKeep != null" class="hint" data-backup-keep-readout>
+          Sauvegardes quotidiennes conservées : {{ backupKeep }}.
+          <RouterLink to="/reglages/corbeille">Modifier</RouterLink>
+        </p>
+        <DatabaseBackupRestore :embedded="true" />
+      </article>
     </section>
     <section v-if="section === 'application'" class="settings-section panel stack">
       <h2 class="settings-section-title">Application</h2>
@@ -2666,7 +2711,7 @@ async function saveProfileFallback() {
       <p class="hint">
             Watchtower vérifie les images toutes les heures ; vous pouvez aussi lancer une mise à jour immédiate
             ici. Les jetons GHCR, GitHub et Watchtower se configurent dans
-            <router-link to="/reglages/jetons">Jetons d'API</router-link>.
+            <router-link to="/reglages/jetons">API et jetons</router-link>.
           </p>
           <div class="settings-update-version panel stack">
             <h3 class="settings-subsection-title">Version installée</h3>
@@ -2732,12 +2777,19 @@ async function saveProfileFallback() {
             <button type="button" @click="checkUpdate">Vérifier la mise à jour</button>
             <button type="button" @click="restartApp">Redémarrer</button>
           </p>
-          <div v-if="!maskWatchtowerNotify" class="settings-setrow">
+          <div class="settings-setrow">
             <div>
-              <div class="settings-setrow-label">Me notifier quand Watchtower installe une nouvelle version</div>
+              <div class="settings-setrow-label">Me notifier quand une nouvelle version démarre</div>
               <p class="hint settings-setrow-hint">
-                Envoie une notification par les canaux configurés (ntfy, Home Assistant…) après chaque mise à jour
-                automatique.
+                Envoie une notification par les canaux configurés (ntfy, Home Assistant…) lorsque l'application
+                redémarre avec une image plus récente.
+              </p>
+              <p
+                v-if="showNotifyOnUpdateNoTargetHint"
+                class="hint settings-setrow-hint"
+                data-testid="notify-on-update-no-target-hint"
+              >
+                Aucune cible de notification active
               </p>
               <p v-if="updateNotifySaved" class="settings-saved">✓ Enregistré.</p>
             </div>
@@ -2753,8 +2805,8 @@ async function saveProfileFallback() {
             </label>
           </div>
     </section>
-    <section v-if="section === 'jetons'" class="settings-section panel stack">
-      <h2 class="settings-section-title">Jetons d'API</h2>
+    <section v-if="section === 'jetons'" class="settings-section settings-jetons-section stack">
+      <h2 class="settings-section-title">API et jetons</h2>
       <p class="hint settings-lead">
         Un service par carte. Les secrets sortants ne sont jamais réaffichés après enregistrement.
         Pour Watchtower, utilisez <code>WATCHTOWER_HTTP_API_TOKEN</code> — pas un jeton Accès API.
@@ -3004,13 +3056,16 @@ async function saveProfileFallback() {
             </label>
             <fieldset class="checks">
               <legend>Portées</legend>
-              <label v-for="scope in ['read', 'write', 'admin']" :key="scope" class="check">
-                <input
-                  type="checkbox"
-                  :checked="tokenScopes.includes(scope)"
-                  @change="toggleScope(scope, checkedFrom($event))"
-                />
+              <label v-for="scope in ['read', 'write', 'admin']" :key="scope" class="switch-line">
                 <span>{{ scope }}</span>
+                <span class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="tokenScopes.includes(scope)"
+                    @change="toggleScope(scope, checkedFrom($event))"
+                  />
+                  <span class="switch-ui" aria-hidden="true"></span>
+                </span>
               </label>
             </fieldset>
             <p v-if="tokenError" class="error">{{ tokenError }}</p>

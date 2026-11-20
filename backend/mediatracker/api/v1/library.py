@@ -25,19 +25,18 @@ from mediatracker.core.library_plan import (
     undo_rename,
 )
 from mediatracker.core.naming import sanitize
-from mediatracker.core.tmdb import token as tmdb_token
-from mediatracker.db.models import LibraryFile, Media, Setting, TrashEntry
+from mediatracker.core.tmdb.client import borrow_client
+from mediatracker.db.models import LibraryFile, Media, TrashEntry
 from mediatracker.integrations.jellyfin_sync import jellyfin_settings, schedule_library_refresh
-from mediatracker.integrations.tmdb import TmdbClient, TmdbError, borrow_tmdb
+from mediatracker.integrations.tmdb import TmdbClient, TmdbError
 from mediatracker.library.scanner import library_roots, match_file, scan_library
+from mediatracker.settings_int import trash_retention_days
 
 router = APIRouter(prefix="/library", tags=["library"])
 
 
-def _tmdb_for(token: str | None):
-    if not token:
-        return None, False
-    return borrow_tmdb(token, TmdbClient)
+def _tmdb_for(db: Session, settings):
+    return borrow_client(db, settings)
 
 
 class ScanOut(BaseModel):
@@ -177,8 +176,7 @@ def run_scan(
     del _principal
     settings = request.app.state.settings
     movies, series = library_roots(db, settings)
-    token = tmdb_token.read_tmdb_token(db, settings.secret_key)
-    client, owned = _tmdb_for(token)
+    client, owned = _tmdb_for(db, settings)
     try:
         report = scan_library(
             db, movies=movies, series=series, tmdb=client, skip=_scan_skip(db, settings), settings=settings
@@ -313,8 +311,8 @@ def match_library_file(
     if row is None:
         raise Problem(404, "Introuvable", "Fichier introuvable.")
     media_type = body.type or row.media_type
-    token = tmdb_token.read_tmdb_token(db, request.app.state.settings.secret_key)
-    client, owned = _tmdb_for(token)
+    settings = request.app.state.settings
+    client, owned = _tmdb_for(db, settings)
     try:
         match_file(
             db,
@@ -684,6 +682,8 @@ class IncompleteOut(BaseModel):
     folder_reserved_bytes: int = 0
     total_written_bytes: int = 0
     trash_ids: list[int] = Field(default_factory=list)
+    kept_recent_count: int = 0
+    keep_until: datetime | None = None
 
 
 class IncompleteIn(BaseModel):
@@ -981,6 +981,8 @@ def _incomplete_out(
         folder_reserved_bytes=snapshot.folder_reserved_bytes,
         total_written_bytes=snapshot.total_written_bytes,
         trash_ids=list(trash_ids),
+        kept_recent_count=getattr(snapshot, "kept_recent_count", 0),
+        keep_until=getattr(snapshot, "keep_until", None),
     )
 
 
@@ -1082,8 +1084,7 @@ def identify_library_folder(
     del _principal
     settings = request.app.state.settings
     folder, _root, kind = _locate(db, settings, body.path)
-    token = tmdb_token.read_tmdb_token(db, settings.secret_key)
-    tmdb, owned_tmdb = _tmdb_for(token)
+    tmdb, owned_tmdb = _tmdb_for(db, settings)
     jellyfin_items: list[dict] = []
     _url, api_key, user_id, _prefix, path_map = jellyfin_settings(db, settings)
     from mediatracker.integrations.jellyfin import JellyfinClient, JellyfinError
@@ -1142,9 +1143,8 @@ def rename_library_folder(
     title = (body.title or "").strip()
     year = body.year
     if body.tmdb_id is not None:
-        token = tmdb_token.read_tmdb_token(db, settings.secret_key)
-        if token:
-            client, owned = borrow_tmdb(token, TmdbClient)
+        client, owned = borrow_client(db, settings)
+        if client is not None:
             try:
                 fetched = client.fetch(body.tmdb_id, kind)
             except TmdbError as exc:
@@ -1270,16 +1270,6 @@ def follow_library_folder(
     return FollowFolderOut(media_id=media.id, followed=True, attached=attached, message=message)
 
 
-def _trash_days(db: Session, default: int) -> int:
-    row = db.get(Setting, "trash_retention_days")
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
-
-
 def _scan_skip(db: Session, settings) -> tuple[Path, ...]:
     """Downloads, the incomplete folder, and the trash. Never part of the library."""
     from mediatracker.core.storage import library_skip, storage_layout
@@ -1344,7 +1334,7 @@ def clean_empty_folders(
     except LibraryPlanError as exc:
         raise Problem(422, "Dossiers vides", exc.message) from exc
     moment = datetime.now(timezone.utc)
-    retention = _trash_days(db, request.app.state.settings.trash_retention_days)
+    retention = trash_retention_days(db, request.app.state.settings)
     for item in moved:
         db.add(
             TrashEntry(
@@ -1566,8 +1556,7 @@ def jellyfin_refresh(
     client = _align_client(db, settings)
     if client is None:
         raise Problem(422, "Jellyfin", "Jellyfin n'est pas configuré.")
-    token = tmdb_token.read_tmdb_token(db, settings.secret_key)
-    tmdb, owned = _tmdb_for(token) if token else (None, False)
+    tmdb, owned = _tmdb_for(db, settings)
     try:
         try:
             payload = refresh_cache(db, settings, client, full=full, tmdb=tmdb)

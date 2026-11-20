@@ -3,8 +3,15 @@ import { computed, ref, toRef } from "vue";
 
 import LineMoreActions from "./LineMoreActions.vue";
 import HiveContextMenuItems from "./HiveContextMenuItems.vue";
+import ProfileReplacementBanner, { type ProfileReplacementProposal } from "./ProfileReplacementBanner.vue";
 import StatusIcon from "./StatusIcon.vue";
 import { useProgressStream, type ProgressJob, type ProgressPayload } from "../composables/useProgressStream";
+
+interface ServedProfile {
+  profile_id: number;
+  profile_name: string;
+  repli: boolean;
+}
 
 interface FilmItem {
   id: number;
@@ -17,6 +24,8 @@ interface FilmItem {
   file_absent?: boolean;
   trash_entry_id?: number | null;
   download_busy?: boolean;
+  served_profile?: ServedProfile | null;
+  profile_replacement?: ProfileReplacementProposal | null;
 }
 
 const props = defineProps<{
@@ -35,6 +44,7 @@ const emit = defineEmits<{
   forceDownload: [];
   deleteFile: [];
   hiveShareChanged: [];
+  profileReplacementChanged: [];
 }>();
 
 const ACTIVE = new Set(["pending", "resolving", "queued", "downloading", "post_processing"]);
@@ -143,6 +153,12 @@ function toggleKeep() {
 
 <template>
   <div class="film-file-block fb">
+    <ProfileReplacementBanner
+      v-if="item.profile_replacement"
+      :item-id="item.id"
+      :proposal="item.profile_replacement"
+      @changed="emit('profileReplacementChanged')"
+    />
     <div class="fb-head">
       <span v-if="item.filename" class="fname">{{ item.filename }}</span>
       <span v-if="!filmNotYetAvailable" class="file-pill" :class="pillClass" role="status">
@@ -155,6 +171,9 @@ function toggleKeep() {
       </button>
       <span v-if="progressLine" class="file-progress-pct">{{ progressLine }}</span>
     </div>
+    <p v-if="item.served_profile?.repli" class="hint file-served-profile">
+      Profil utilisé : {{ item.served_profile.profile_name }} (repli)
+    </p>
     <p
       v-if="item.original_name && item.original_name !== item.filename"
       class="file-origin orig"

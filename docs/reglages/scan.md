@@ -13,7 +13,7 @@ URL : `/reglages/scan`
 
 L’ordre des sources se règle dans [Sources](sources.md).
 
-Sans téléchargement disponible (AllDebrid absent et Hive inutilisable), l’option **Séries en cours seulement** et le bloc **Téléchargement automatique pour les nouveaux suivis** sont masqués avec un renvoi vers [Services et jetons](jetons.md).
+Sans téléchargement disponible (AllDebrid absent et Hive inutilisable), l’option **Séries en cours seulement** et le bloc **Téléchargement automatique pour les nouveaux suivis** sont masqués avec un renvoi vers [API et jetons](jetons.md).
 
 ## Chemins (absolus dans le conteneur)
 

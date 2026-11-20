@@ -515,7 +515,10 @@ def correction_csv_rows(
         _load_tmdb_export_bindings()
         token = read_tmdb_token(db, secret_key)
         if token:
-            client, owned = borrow_tmdb(token, TmdbClient)
+            from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+            catalog = read_tmdb_catalog_settings(db)
+            client, owned = borrow_tmdb(token, TmdbClient, language=catalog.display_language)
 
     try:
         for raw in bundle.csv_rows:

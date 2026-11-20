@@ -109,6 +109,19 @@ def different_tmdb_ids(src: Path | str, dest: Path | str) -> str | None:
     return None
 
 
+def jellyfin_version_suffix_label(version_key: str) -> str:
+    """Libellé fichier pour une version Jellyfin : « HD VFF » depuis « HD+VFF »."""
+    text = re.sub(r"\s+", " ", (version_key or "").replace("+", " ").strip())
+    return sanitize(text)[:80] or "Version"
+
+
+def library_alternate_destination(primary: Path, version_key: str) -> Path:
+    """Même base de nom Jellyfin, suffixe « - {version} » avant l’extension."""
+    label = jellyfin_version_suffix_label(version_key)
+    suffix = primary.suffix
+    return primary.with_name(f"{primary.stem} - {label}{suffix}")
+
+
 def atomic_move(src: Path, dest: Path) -> None:
     """Rename on one filesystem. A cross-device copy is refused."""
     dest.parent.mkdir(parents=True, exist_ok=True)

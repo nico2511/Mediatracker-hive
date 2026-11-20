@@ -405,6 +405,34 @@ def _keep_best(
     settings: Settings,
 ) -> None:
     """The library already has this episode. Keep the better video and trash the other."""
+    from mediatracker.core.profile_replacement import (
+        file_incoming_for_replacement,
+        replacing_proposal_for_download,
+        revert_replacing_proposal,
+    )
+
+    proposal = replacing_proposal_for_download(db, row)
+    if proposal is not None:
+        kept = file_incoming_for_replacement(db, settings, media, item, source, dest, occupant, now)
+        if kept is None or not kept.is_file():
+            revert_replacing_proposal(db, proposal, now=now)
+            _fail(db, row, "FILE_MISSING", "Le remplacement n'a pas pu être rangé.", now)
+            return
+        _finish_download(db, row, item, media, kept, source, now, settings, store_release=True)
+        _record_hive_received_fingerprint(db, settings, row, item, kept, now)
+        return
+
+    from mediatracker.hive.coexist_filing import explicit_hive_requested_version_key, file_alongside_incumbent
+
+    version_key = explicit_hive_requested_version_key(db, row, settings)
+    if version_key:
+        if file_alongside_incumbent(
+            db, row, item, media, source, occupant, now, settings, version_key=version_key
+        ):
+            return
+        _fail(db, row, "FILE_MISSING", "La version demandée n'a pas pu être rangée à côté du fichier existant.", now)
+        return
+
     from mediatracker.core.library_video import better_video
 
     link = db.get(Link, row.link_id) if row.link_id else None
@@ -490,29 +518,26 @@ def _record_hive_received_fingerprint(
     record_catalog_fingerprint_for_local_file(db, item, dest, sha256_hex=catalog_sha, now=now)
 
 
-def _finish_download(
+def _finalize_download_row(
     db: Session,
     row: Download,
     item: MediaItem,
     media: Media,
     dest: Path,
-    source: Path,
     now: datetime,
     settings: Settings,
     *,
     store_release: bool,
+    source: Path | None = None,
+    library_path_for_import: str | None = None,
 ) -> None:
     from mediatracker.core.forget import clear_forget_traces
 
-    item.file_path = str(dest)
-    item.downloaded = True
-    item.downloaded_at = now
-    item.state = "downloaded"
     clear_forget_traces(item)
     link = db.get(Link, row.link_id) if row.link_id else None
     from mediatracker.library.release_name import copy_original, file_source_for_link, remember_original
 
-    if store_release:
+    if store_release and source is not None:
         remember_original(
             item,
             name=(link.filename if link is not None and link.filename else None) or source.name,
@@ -536,16 +561,50 @@ def _finish_download(
         stop_following_downloaded_film(db, media, reason="downloaded")
     else:
         stop_following_complete_series(db, media, today=now.date())
-    record_library_imported(db, media, item, str(dest))
+    import_path = library_path_for_import or str(dest)
+    record_library_imported(db, media, item, import_path)
     from mediatracker.integrations.jellyfin_sync import schedule_library_refresh
     from mediatracker.library.scanner import remember_filed
 
     filed = remember_filed(db, dest, media, item, now)
     copy_original(item, filed)
+    from mediatracker.core.profile_replacement import on_download_terminal, record_served_profile_on_finish
+
+    record_served_profile_on_finish(db, item, row)
+    on_download_terminal(db, settings, media, item, row, success=True, new_dest=dest, now=now)
     schedule_library_refresh(db, now)
     from mediatracker.core.cleanup_classify import request_classify
 
     request_classify(db)
+
+
+def _finish_download(
+    db: Session,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    dest: Path,
+    source: Path,
+    now: datetime,
+    settings: Settings,
+    *,
+    store_release: bool,
+) -> None:
+    item.file_path = str(dest)
+    item.downloaded = True
+    item.downloaded_at = now
+    item.state = "downloaded"
+    _finalize_download_row(
+        db,
+        row,
+        item,
+        media,
+        dest,
+        now,
+        settings,
+        store_release=store_release,
+        source=source,
+    )
 
 
 def _library_row(db: Session, path: Path) -> LibraryFile | None:

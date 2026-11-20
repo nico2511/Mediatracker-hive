@@ -12,6 +12,7 @@ import { candidateFacts, mediaKind, tmdbPage, tmdbSearch } from "../labels";
 import type { QuickTarget } from "../quick";
 import { fileSizeLine, formatBytes, jobLine } from "../diskFormat";
 import { cleanDisplayTitle } from "../titles";
+import { fixedRetentionSnapshot } from "../fixedRetention";
 
 interface Candidate {
   tmdb_id: number;
@@ -165,6 +166,8 @@ interface IncompleteReport {
   folder_reserved_bytes: number;
   total_written_bytes: number;
   trash_ids?: number[];
+  kept_recent_count?: number;
+  keep_until?: string | null;
 }
 
 interface AlignChange {
@@ -241,6 +244,8 @@ const regroup = ref<RegroupReport | null>(null);
 const route = useRoute();
 const router = useRouter();
 const { jellyfinConfigured, serviceStatusLoaded } = useServiceStatus();
+
+const incompleteOrphanKeepDays = computed(() => fixedRetentionSnapshot()?.incomplete_orphan_keep_days ?? null);
 const jellyfinAlignVisible = computed(() => serviceStatusLoaded.value && jellyfinConfigured.value);
 
 type LibraryTab = "a-traiter" | "nettoyage" | "contenu";
@@ -614,20 +619,65 @@ const incompleteSelectedBytes = computed(() =>
   incompleteSelected.value.reduce((sum, file) => sum + (file.written_bytes || file.size), 0),
 );
 
+const incompleteCorbeilleRoute = computed(() => route.query.incomplets === "corbeille");
+
+const incompleteCorbeilleEmpty = computed(
+  () =>
+    incompleteCorbeilleRoute.value &&
+    !incomplete.value?.files.length &&
+    (incomplete.value?.kept_recent_count ?? 0) > 0,
+);
+
+const incompletePanelVisible = computed(() => {
+  if (!incomplete.value) {
+    return false;
+  }
+  if (incomplete.value.files.length || incomplete.value.auto_message || incompleteStep.value === "done") {
+    return true;
+  }
+  if (incompleteCorbeilleEmpty.value) {
+    return true;
+  }
+  return false;
+});
+
+function formatIncompleteKeepUntil(value: string | null | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function incompleteKeptHint(report: IncompleteReport | null): string {
+  const count = report?.kept_recent_count ?? 0;
+  if (!count) {
+    return "";
+  }
+  const noun = count === 1 ? "fichier récent encore gardé" : "fichiers récents encore gardés";
+  const until = formatIncompleteKeepUntil(report?.keep_until);
+  return until ? `${count} ${noun} jusqu'au ${until}.` : `${count} ${noun}.`;
+}
+
 function syncIncompleteSelection() {
   incompleteSelection.value = (incomplete.value?.files ?? []).map((file) => file.path);
 }
 
 function openIncompleteFromRoute() {
-  if (route.query.incomplets !== "corbeille") {
+  if (!incompleteCorbeilleRoute.value) {
     return;
   }
   activeTab.value = "nettoyage";
-  if (!incomplete.value?.files.length) {
-    return;
-  }
   setSectionOpen("incomplete", true);
-  incompleteStep.value = incomplete.value.files.length ? "list" : "done";
+  if (incomplete.value?.files.length) {
+    incompleteStep.value = "list";
+    syncIncompleteSelection();
+  } else {
+    incompleteStep.value = "list";
+  }
 }
 
 async function loadIncomplete() {
@@ -817,7 +867,9 @@ async function applyIncomplete() {
     syncIncompleteSelection();
     await analyze();
     if ((result.failed ?? 0) > 0) {
-      error.value = result.errors?.join(" ") || note;
+      const detail = result.errors?.length ? result.errors.join(" ") : note;
+      error.value = detail;
+      incompleteStatus.value = detail;
     }
   } catch (err) {
     error.value = userFacingApiError(err, "Nettoyage des incomplets impossible.");
@@ -1424,7 +1476,7 @@ onMounted(async () => {
     </section>
 
     <section
-      v-if="incomplete && (incomplete.files.length || incomplete.auto_message || incompleteStep === 'done')"
+      v-if="incompletePanelVisible"
       v-show="activeTab === 'nettoyage'"
       class="library-section panel stack"
       data-incomplete-panel
@@ -1434,8 +1486,8 @@ onMounted(async () => {
         <button
           type="button"
           class="library-section-toggle"
-          :aria-expanded="sectionExpanded('incomplete', Boolean(incomplete.files.length))"
-          @click="toggleSection('incomplete', Boolean(incomplete.files.length))"
+          :aria-expanded="sectionExpanded('incomplete', Boolean(incomplete.files.length) || incompleteCorbeilleEmpty)"
+          @click="toggleSection('incomplete', Boolean(incomplete.files.length) || incompleteCorbeilleEmpty)"
         >
           <span class="library-section-chevron" aria-hidden="true" />
           <span class="library-section-label">Téléchargements incomplets</span>
@@ -1443,20 +1495,26 @@ onMounted(async () => {
         </button>
       </h2>
       <div
-        v-show="sectionExpanded('incomplete', Boolean(incomplete.files.length))"
+        v-show="sectionExpanded('incomplete', Boolean(incomplete.files.length) || incompleteCorbeilleEmpty)"
         class="library-section-body stack"
       >
       <p v-if="incomplete.auto_message" class="hint" data-incomplete-auto>{{ incomplete.auto_message }}</p>
       <p v-if="incomplete.auto_enabled" class="hint">
         La liste est recalculée à chaque affichage. Le passage automatique, au plus une fois par heure,
         suit les mêmes règles que le bouton : orphelins déjà en bibliothèque, fichiers de 64 Ko ou moins
-        et contrôles aria2 tout de suite ; les autres au bout de 3 jours. Un téléchargement en cours,
+        et contrôles aria2 tout de suite ; les autres au bout de
+        {{ incompleteOrphanKeepDays ?? "…" }} jour{{ incompleteOrphanKeepDays === 1 ? "" : "s" }}.
+        Un téléchargement en cours,
         ou un fichier encore ouvert par aria2, est laissé.
       </p>
       <p v-else-if="incompleteStep !== 'preview'" class="hint">
         Aperçu : rien n'est supprimé avant votre confirmation. Les fichiers vont à la corbeille, ils ne sont pas effacés.
       </p>
-      <p v-if="incompleteStatus" class="hint success" data-incomplete-result>
+      <p
+        v-if="incompleteStatus"
+        :class="(incomplete?.failed ?? 0) > 0 ? 'error' : 'hint success'"
+        data-incomplete-result
+      >
         {{ incompleteStatus }}
         <button v-if="incompleteUndoIds.length" type="button" class="linkish" :disabled="busy" @click="undoIncompleteTrash">
           Annuler
@@ -1487,6 +1545,13 @@ onMounted(async () => {
             Appliquer : déplacer {{ incompleteSelected.length }} fichier(s)
           </button>
           <button type="button" :disabled="busy" @click="backToIncompleteList">Revenir à la liste</button>
+        </p>
+      </template>
+      <template v-else-if="incompleteCorbeilleEmpty">
+        <h3>Rien à mettre à la corbeille</h3>
+        <p class="hint" data-incomplete-corbeille-empty>
+          Aucun incomplet éligible pour le moment.
+          <span v-if="incompleteKeptHint(incomplete)"> {{ incompleteKeptHint(incomplete) }}</span>
         </p>
       </template>
       <template v-else-if="incompleteStep === 'done' && !incomplete.files.length">

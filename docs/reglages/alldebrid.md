@@ -2,7 +2,7 @@
 
 URL : `/reglages/alldebrid`
 
-La **clé API** ou la liaison **PIN** se configurent sur **Réglages → Services et jetons**, carte AllDebrid.
+La **clé API** ou la liaison **PIN** se configurent sur **Réglages → API et jetons**, carte AllDebrid.
 
 Tant qu’AllDebrid n’est pas connecté, cette page n’affiche que le renvoi vers la carte.
 

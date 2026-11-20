@@ -7,21 +7,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
-from mediatracker.db.models import Media, Setting
+from mediatracker.db.models import Media
+from mediatracker.settings_int import int_setting as _int_setting
 
 REMOTE_SEARCH_COOLDOWN_HOURS_KEY = "remote_search_cooldown_hours"
 REMOTE_SEARCH_COOLDOWN = timedelta(hours=6)
 _REMOTE_SEARCH_COOLDOWN_HOURS_DEFAULT = int(REMOTE_SEARCH_COOLDOWN.total_seconds() // 3600)
-
-
-def _int_setting(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def remote_search_cooldown_hours(db: Session, settings: Settings) -> int:
@@ -53,6 +44,20 @@ def remote_search_allowed(media: Media, now: datetime, *, cooldown: timedelta) -
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     return now - last >= cooldown
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def remote_search_reserved_same_pass(media: Media, now: datetime) -> bool:
+    """True when ``begin_remote_search`` already reserved the slot for this instant (same orchestration pass)."""
+    last = media.last_remote_search_at
+    if last is None:
+        return False
+    return _aware_utc(last) == _aware_utc(now)
 
 
 def begin_remote_search(media: Media, now: datetime, db: Session, settings: Settings) -> bool:

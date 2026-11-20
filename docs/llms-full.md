@@ -28,6 +28,7 @@ Ce fichier est généré automatiquement à partir de `docs/` (hors interne, arc
 - [Sources](#docs-reglages-sources) — `docs/reglages/sources.md`
 - [Réglages de scan](#docs-reglages-scan) — `docs/reglages/scan.md`
 - [Jellyfin](#docs-reglages-jellyfin) — `docs/reglages/jellyfin.md`
+- [Catalogue TMDB](#docs-reglages-tmdb-catalog) — `docs/reglages/tmdb-catalog.md`
 - [Notifications](#docs-reglages-notifications) — `docs/reglages/notifications.md`
 - [Corbeille](#docs-reglages-corbeille) — `docs/reglages/corbeille.md`
 - [AllDebrid](#docs-reglages-alldebrid) — `docs/reglages/alldebrid.md`
@@ -35,7 +36,7 @@ Ce fichier est généré automatiquement à partir de `docs/` (hors interne, arc
 - [Hive](#docs-reglages-hive) — `docs/reglages/hive.md`
 - [Application](#docs-reglages-application) — `docs/reglages/application.md`
 - [Mise à jour et redémarrage](#docs-reglages-maj) — `docs/reglages/maj.md`
-- [Services et jetons](#docs-reglages-jetons) — `docs/reglages/jetons.md`
+- [API et jetons](#docs-reglages-jetons) — `docs/reglages/jetons.md`
 - [Réinitialiser la base](#docs-reglages-reset) — `docs/reglages/reset.md`
 - [Médias](#docs-medias) — `docs/medias.md`
 - [TMDB](#docs-tmdb) — `docs/tmdb.md`
@@ -220,12 +221,17 @@ flowchart LR
   sources --> S --> A --> R --> P
 ```
 
-1. Un **scan** ou une action manuelle interroge les sources dans l’**ordre** défini (`download_source_order`).
-2. Le lien retenu respecte le **profil de qualité** de la fiche, la **préférence d’hébergeurs** et les hébergeurs refusés par l’application (`BLOCKED_SOURCE_HOSTERS` — non configurables).
-3. **AllDebrid** débloque le lien ; MediaTracker ne expose **pas** aria2 sur le réseau (RPC local + secret en `/config`).
-4. À la fin, le fichier est **déplacé** vers Films / Séries (structure façon Jellyfin), la bibliothèque est rescannée, Jellyfin peut être notifié.
+1. Un **scan** ou une action manuelle interroge les sources dans l’**ordre** défini (`download_source_order`), d’abord celles qui publient des **pages de liens** (Wawacity, Free-Télécharger, etc.).
+2. Si aucune page « liens » n’est retenue pour la fiche, un **repli scan** (activé par défaut, `scan_episode_sources_fallback`) peut interroger les sources **épisode** (Comet, Torrentio, addons Stremio) pour les épisodes ou le film attendus, via l’identifiant **IMDb** et le **profil** de la fiche (mêmes critères que le déblocage Comet/Torrentio). Les aimants retenus sont ceux déjà signalés **en cache** chez AllDebrid lorsque le débrideur expose ce contrôle ; un job `pending` est alors créé comme pour un lien hoster découvert au scan. Le repli respecte `remote_search_cooldown_hours` et l’ordre global des sources.
+3. Le lien retenu respecte le **profil de qualité** de la fiche, la **préférence d’hébergeurs** et les hébergeurs refusés par l’application (`BLOCKED_SOURCE_HOSTERS` — non configurables).
+4. **AllDebrid** débloque le lien ; MediaTracker ne expose **pas** aria2 sur le réseau (RPC local + secret en `/config`).
+5. À la fin, le fichier est **déplacé** vers Films / Séries (structure façon Jellyfin), la bibliothèque est rescannée, Jellyfin peut être notifié.
 
 Page **Téléchargements** : file des jobs, progression aria2, actions d’annulation / relance selon l’état.
+
+### Proposition de version principale
+
+Si un fichier local vient d’un **profil de repli**, un contrôle source ordinaire peut constater qu’une version du **profil principal** est déjà référencée (cache de liens ou catalogue Hive), sans recherche réseau dédiée. La fiche média affiche un bandeau **Remplacer** / **Ignorer**. Le remplacement réutilise la file téléchargement (`forced`) ; l’ancien fichier n’est envoyé à la corbeille qu’après rangement réussi du nouveau. Voir [Profils de qualité — Remplacement proposé](#docs-reglages-qualite-remplacement-propose-repli--principal).
 
 ### Sources disponibles
 
@@ -244,7 +250,7 @@ Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio,strem
 
 Une ancienne entrée dédiée aux flux DDL UwU+ est **migrée automatiquement** vers la liste **Addons Stremio** (même URL, une ligne d’addon).
 
-Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](#docs-reglages-sources)), ordre des **hébergeurs** (`hoster_preference`).
+Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](#docs-reglages-sources)), repli scan vers Comet/Torrentio (`scan_episode_sources_fallback`), ordre des **hébergeurs** (`hoster_preference`).
 
 #### Wawacity — films
 
@@ -309,7 +315,7 @@ Chemin source : `docs/reglages/README.md`
 
 Dans l’application : **Réglages** (`/reglages`), puis une section du menu. Chaque section a une URL directe du type `/reglages/<slug>`.
 
-L’index est regroupé en cinq blocs (Général, Services et jetons, Téléchargement, Médiathèque, Stockage), comme dans l’interface.
+L’index est regroupé en quatre blocs (Général, Téléchargement, Médiathèque, Stockage), comme dans l’interface.
 
 Les clés listées dans les pages ci-dessous correspondent aux réglages persistés en base. Après le premier enregistrement dans l’interface, **les valeurs affichées en UI remplacent** les variables d’environnement de départ.
 
@@ -320,12 +326,7 @@ Les clés listées dans les pages ci-dessous correspondent aux réglages persist
 | `compte` | Compte | [compte.md](#docs-reglages-compte) |
 | `application` | Application | [application.md](#docs-reglages-application) |
 | `maj` | Mise à jour et redémarrage | [maj.md](#docs-reglages-maj) |
-
-### Services et jetons
-
-| Slug | Titre dans l’UI | Documentation |
-| --- | --- | --- |
-| `jetons` | Services et jetons | [jetons.md](#docs-reglages-jetons) |
+| `jetons` | API et jetons | [jetons.md](#docs-reglages-jetons) |
 
 ### Téléchargement
 
@@ -344,6 +345,7 @@ Guide Hive (usage des ruches) : [../hive.md](#docs-hive).
 | Slug | Titre dans l’UI | Documentation |
 | --- | --- | --- |
 | `jellyfin` | Jellyfin | [jellyfin.md](#docs-reglages-jellyfin) |
+| `tmdb-catalog` | Catalogue TMDB | [tmdb-catalog.md](#docs-reglages-tmdb-catalog) |
 | `notifications` | Notifications | [notifications.md](#docs-reglages-notifications) |
 
 Guide Jellyfin (webhook, import d’historique détaillé) : [../jellyfin.md](#docs-jellyfin).
@@ -371,7 +373,7 @@ Chemin source : `docs/reglages/compte.md`
 
 URL : `/reglages/compte`
 
-- Changement de mot de passe (8 caractères minimum, mot de passe actuel requis).
+- Changement de mot de passe (12 caractères minimum, règles de robustesse, mot de passe actuel requis). La variable `ADMIN_PASSWORD` au premier démarrage est soumise aux mêmes règles.
 - **Déconnecter toutes les autres sessions** : invalide les cookies sur les autres navigateurs ; la session courante reste active.
 
 ## Profils de qualité
@@ -412,6 +414,15 @@ Dans le formulaire, les résolutions proposées incluent **HDLight** (720p lége
 
 Le moteur classe les résolutions du plus bas au plus haut : SD, HDLight, HD, **HDLight1080**, 1080p, 4K. Une sortie HDLight 1080p est donc **au-dessus** du HD 720p, mais **en dessous** du 1080p « plein » pour le profil par défaut (qui exige 1080p et rejette HDLight1080).
 
+### Remplacement proposé (repli → principal)
+
+Lorsqu’un fichier sur disque provient d’un **profil de repli** (profil enregistré au rangement ou dernier téléchargement terminé), les contrôles source habituels peuvent repérer une version **acceptée par le profil principal** déjà connue (liens en cache, catalogue Hive). L’application **propose** alors un remplacement sur la fiche — jamais automatique.
+
+- **Remplacer** : lance un téléchargement du profil principal via la file existante ; l’ancien fichier part à la **corbeille** seulement après un rangement réussi du nouveau.
+- **Ignorer** : masque la proposition pour cette version ; une autre version principale pourra en créer une nouvelle.
+
+Aucune proposition si le fichier est marqué **Garder (hors nettoyage)** ou déjà issu du profil principal. Le job en repli **ne remonte pas** tout seul au principal (comportement inchangé).
+
 ## Sources
 
 Chemin source : `docs/reglages/sources.md`
@@ -422,7 +433,7 @@ URL : `/reglages/sources`
 
 Page dédiée (composant séparé de l’écran générique). Les mêmes URL peuvent être préremplies à l’étape **Sources** de l’assistant (`/configuration`) — voir [Premier démarrage](#docs-premier-demarrage).
 
-Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la page et renvoie vers [Services et jetons](#docs-reglages-jetons) ou [Hive](#docs-reglages-hive).
+Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la page et renvoie vers [API et jetons](#docs-reglages-jetons) ou [Hive](#docs-reglages-hive).
 
 ### Présentation
 
@@ -434,6 +445,8 @@ Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la
 
 - Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré.
 - État en ligne / panne : affiché sur chaque carte ; API `GET /api/v1/settings/sources/status`.
+- Une source **désactivée** n’est utilisée ni par le téléchargement automatique, ni par **Réparer** et **Vérifier tout** ; sa carte n’affiche ni bouton **Tester** ni état de panne. L’interrupteur enregistre aussitôt `download_source_order` ; en cas d’échec, il revient à sa position et un message s’affiche.
+- Une valeur inconnue dans l’ordre enregistré est ignorée : les autres sources restent telles quelles, sans retour à l’ordre par défaut.
 
 ### Sans clé AllDebrid
 
@@ -449,8 +462,9 @@ Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la
 | `source_cache_seconds` | 900 | 0–3600 | Cache des résultats de recherche |
 | `source_error_backoff_min` | 180 | 30–1440 | Repousse après erreur source |
 | `remote_search_cooldown_hours` | 6 | 1–72 | Délai entre deux recherches distantes d’une même fiche |
+| `scan_episode_sources_fallback` | true | bool | Repli scan Comet / Torrentio / addons Stremio si le sondage « liens » n’a retenu aucune page |
 
-`remote_search_cooldown_hours` s’applique **par fiche** : retéléchargement, repli de profil, relecture source, y compris actions manuelles (pas de dérogation si une recherche réseau est nécessaire).
+`remote_search_cooldown_hours` s’applique **par fiche** : retéléchargement, repli de profil, relecture source, repli scan épisode, y compris actions manuelles (pas de dérogation si une recherche réseau est nécessaire).
 
 ### Hébergeurs (liens HTML)
 
@@ -514,7 +528,7 @@ URL : `/reglages/scan`
 
 L’ordre des sources se règle dans [Sources](#docs-reglages-sources).
 
-Sans téléchargement disponible (AllDebrid absent et Hive inutilisable), l’option **Séries en cours seulement** et le bloc **Téléchargement automatique pour les nouveaux suivis** sont masqués avec un renvoi vers [Services et jetons](#docs-reglages-jetons).
+Sans téléchargement disponible (AllDebrid absent et Hive inutilisable), l’option **Séries en cours seulement** et le bloc **Téléchargement automatique pour les nouveaux suivis** sont masqués avec un renvoi vers [API et jetons](#docs-reglages-jetons).
 
 ### Chemins (absolus dans le conteneur)
 
@@ -560,7 +574,7 @@ Chemin source : `docs/reglages/jellyfin.md`
 
 URL : `/reglages/jellyfin`
 
-**URL** et **clé API** se renseignent sur **Réglages → Services et jetons**, carte Jellyfin. Tant que Jellyfin n’est pas « connecté » (URL + clé enregistrées), cette page n’affiche que le renvoi vers la carte.
+**URL** et **clé API** se renseignent sur **Réglages → API et jetons**, carte Jellyfin. Tant que Jellyfin n’est pas « connecté » (URL + clé enregistrées), cette page n’affiche que le renvoi vers la carte.
 
 Guide détaillé (webhook, chemins Docker, dépannage) : [../jellyfin.md](#docs-jellyfin).
 
@@ -581,7 +595,7 @@ Après chaque fichier déposé, MediaTracker demande aussi un rafraîchissement 
 
 L’import hors ligne (copie de base Jellyfin ou CSV) ne figure plus dans le menu principal **Bibliothèque**. Il est regroupé avec la configuration Jellyfin :
 
-1. Renseigner URL et clé sur **Services et jetons**, carte Jellyfin.
+1. Renseigner URL et clé sur **API et jetons**, carte Jellyfin.
 2. Sur la même carte, **Importer l’historique** ouvre l’écran d’import (route dédiée sous `/bibliotheque/…`).
 
 Deux modes sur cet écran : **Bases Jellyfin** (recommandé) et **Fichier CSV**. Le suivi reste désactivé tant que vous ne le réactivez pas après l’import.
@@ -591,6 +605,34 @@ Deux modes sur cet écran : **Bases Jellyfin** (recommandé) et **Fichier CSV**.
 ### Bibliothèque
 
 Avec Jellyfin connecté, l’onglet **À traiter** de la **Bibliothèque** peut proposer l’**alignement Jellyfin** (fusion ou rattachement de fiches selon l’état vu côté serveur). Voir [scan.md](#docs-reglages-scan).
+
+## Catalogue TMDB
+
+Chemin source : `docs/reglages/tmdb-catalog.md`
+
+<a id="docs-reglages-tmdb-catalog"></a>
+
+URL : `/reglages/tmdb-catalog`
+
+Cette page règle la **langue d’affichage**, la **région** et un filtre optionnel sur les **langues originales** pour les écrans alimentés par l’API TMDB (Accueil, Découvrir, plateformes, genres).
+
+### Réglages
+
+| Clé | Rôle | Défaut |
+|-----|------|--------|
+| `tmdb_display_language` | Libellés TMDB (métadonnées, recherche, discover) au format `xx-YY` | `fr-FR` |
+| `tmdb_region` | Code pays ISO 3166-1 alpha-2 (dates de sortie, `watch_region`, fournisseurs) | `FR` |
+| `tmdb_original_languages` | Liste ISO 639-1 séparée par des virgules ; vide = toutes les langues | *(vide)* |
+
+### Effet dans l’application
+
+- **Accueil** et **Découvrir** : discover TMDB avec la région et, si des langues sont cochées, le paramètre `with_original_language` ou un filtre côté serveur sur les résultats de recherche catalogue.
+- **Identification** (bibliothèque, recherche `/metadata/tmdb`, rattachement de fiche) : **non filtrée** par les langues originales ; seule la langue d’affichage s’applique.
+- **Jeton TMDB** : toujours sur la page [API et jetons](#docs-reglages-jetons).
+
+### Distinction
+
+Le réglage `catalog_language` (page Sources) concerne les **versions de release** des sources (VFF, VOSTFR, etc.), pas l’affichage TMDB.
 
 ## Notifications
 
@@ -683,7 +725,7 @@ Chemin source : `docs/reglages/alldebrid.md`
 
 URL : `/reglages/alldebrid`
 
-La **clé API** ou la liaison **PIN** se configurent sur **Réglages → Services et jetons**, carte AllDebrid.
+La **clé API** ou la liaison **PIN** se configurent sur **Réglages → API et jetons**, carte AllDebrid.
 
 Tant qu’AllDebrid n’est pas connecté, cette page n’affiche que le renvoi vers la carte.
 
@@ -705,9 +747,13 @@ Chemin source : `docs/reglages/disque.md`
 
 URL : `/reglages/disque`
 
+Page en trois blocs : **espace disque**, **téléchargements incomplets et orphelins**, **sauvegardes**.
+
 ### Espace disque
 
-Carte **espace disque** (volumes données et configuration).
+- **Résumé** : volumes (total / utilisé / libre), espace libre global et date du dernier calcul, avec bouton **Actualiser**.
+- **Détail des dossiers** : repliable par défaut ; chemins et tailles par dossier (bibliothèque, téléchargements, etc.).
+- **Espace libre minimum (Gio)** :
 
 | Clé | Défaut | Plage | Rôle |
 | --- | --- | --- | --- |
@@ -719,11 +765,20 @@ Comportement :
 - **Avant de lancer un nouveau téléchargement** (aria2) : le serveur exige l’espace libre **minimum réglé**, plus la taille estimée du fichier (avec une marge fixe), sinon le job reste en attente (`DISK_FULL`) sans démarrer aria2.
 - Quand l’espace redevient suffisant, les téléchargements en pause pour cause de disque sont repris.
 
-Le nombre de sauvegardes quotidiennes conservées se règle dans [Corbeille](#docs-reglages-corbeille) (`backup_keep`).
+La carte **espace disque** de la page **Santé** reprend les mêmes données avec un affichage plus détaillé.
 
-### Sauvegarde / restauration
+### Téléchargements incomplets et orphelins
 
-Bloc **Sauvegarde / restauration** : liste des copies dans `/config/backups`, téléchargement d’un fichier `.db`, import avec aperçu et confirmation.
+- Nombre de fichiers incomplets listés par l’API disque.
+- **Mettre à la corbeille** : lien vers la Bibliothèque (filtre corbeille) uniquement s’il existe des fichiers éligibles (`incomplete_trash_count` ou orphelins).
+- Sinon : message **Rien à mettre à la corbeille**, avec éventuellement le décompte des fichiers récents gardés et leur date limite.
+- Liste des fichiers incomplets (nom, taille, état du job).
+
+### Sauvegardes
+
+- Dossier des copies quotidiennes (`backups_dir` côté serveur).
+- **Sauvegardes quotidiennes conservées** : valeur lue depuis le réglage `backup_keep` ; la modification se fait dans [Corbeille](#docs-reglages-corbeille) (lien **Modifier**).
+- Bloc **Sauvegarde / restauration** : liste des copies, téléchargement d’un fichier `.db`, import avec aperçu et confirmation.
 
 Voir [Sauvegarde](#docs-sauvegarde).
 
@@ -737,9 +792,13 @@ URL : `/reglages/hive`
 
 Page composant dédié (pas dans `SettingsSectionView`).
 
-Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_request_on_miss`, `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
+Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_only`, `hive_request_on_miss`, `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
+
+**Ruche seule** (`hive_only`, défaut désactivé) : lorsque c’est activé, seule la source Hive est utilisable pour le téléchargement automatique, la recherche planifiée et le fil d’actualité des sources — même si une clé AllDebrid est configurée. Les tests manuels dans Réglages → Sources restent possibles. L’API refuse d’activer ce réglage si Hive est coupé (erreur 422) ; si Hive est désactivé ensuite, le réglage est sans effet. Le signal **cherche** après un miss suit toujours `hive_request_on_miss`.
 
 Guide utilisateur : [Hive](#docs-hive).
+
+L’écran **Membres** d’une ruche affiche, sous chaque nom, la version MediaTracker apprise par gossip (`instance` sur `/hive/ruche/{id}/gossip/sync`). Aucun réglage supplémentaire : la valeur locale est annoncée à chaque synchronisation pair.
 
 ## Application
 
@@ -760,14 +819,14 @@ Chemin source : `docs/reglages/maj.md`
 URL : `/reglages/maj`
 
 - **Version installée** : version, image, date de build, dernière vérification.
-- **Vérifier la mise à jour** : comparaison registre / GitHub (jetons sur [Services et jetons](#docs-reglages-jetons), carte GitHub).
-- **Mettre à jour maintenant** : délègue à Watchtower si URL et jeton Watchtower sont configurés (même carte **Services et jetons**).
+- **Vérifier la mise à jour** : comparaison registre / GitHub (jetons sur [API et jetons](#docs-reglages-jetons), carte GitHub).
+- **Mettre à jour maintenant** : délègue à Watchtower si URL et jeton Watchtower sont configurés (même carte **API et jetons**).
 - **Redémarrer** : redémarrage applicatif.
-- **Me notifier quand Watchtower installe une nouvelle version** (`notify_on_update`) : notification via les canaux définis dans [Notifications](#docs-reglages-notifications) — interrupteur masqué si Watchtower n’est pas configuré.
+- **Me notifier quand une nouvelle version démarre** (`notify_on_update`) : notification via les canaux définis dans [Notifications](#docs-reglages-notifications) lorsque l’application redémarre avec une image plus récente.
 
 Voir [Mises à jour](#docs-mises-a-jour).
 
-## Services et jetons
+## API et jetons
 
 Chemin source : `docs/reglages/jetons.md`
 
@@ -869,13 +928,16 @@ Une rangée de boutons restreint la liste côté interface (sans nouvel appel AP
 | Bouton | Effet |
 | --- | --- |
 | **Tous** | Aucun filtre d’état |
-| **Disponibles** | Fiches dont la disponibilité est « disponible » (fichier obtenu via le suivi) |
-| **En attente** | En attente de téléchargement, pas encore vues |
+| **Lien trouvé** | Fiches dont `availability` vaut `available` : une source a trouvé un lien, sans fichier sur le disque |
+| **En attente** | En attente de téléchargement, pas encore vues (hors « pas encore disponible ») |
 | **Sur le disque** | Fichier présent sur le NAS (y compris partiel pour une série) |
 | **En pause** | Suivi en pause |
-| **Suivi par Jellyfin** | Fiches issues de l’identification bibliothèque (`follow_origin` identification) |
 
-Sur **Suivi par Jellyfin**, l’action **Ne plus suivre ces fiches** appelle `POST /api/v1/media/unfollow-identified` : les fiches identifiées passent en non suivies, les fichiers restent en place.
+Un bouton **?** à côté de chaque libellé affiche une phrase d’aide ; sur téléphone, un encadré sous le filtre d’état actif résume le critère.
+
+Le bouton **Sélectionner** est à part de cette rangée (à droite sur grand écran, sur sa propre ligne sur téléphone).
+
+Lorsque le filtre **Origine** vaut **Identifiés bibliothèque**, l’action **Ne plus suivre ces fiches** appelle `POST /api/v1/media/unfollow-identified` : les fiches identifiées passent en non suivies, les fichiers restent en place. Une ancienne URL ou un ancien état `etat=identified` est traduit en `origine=identification`.
 
 ### Recherche, filtres avancés et tri
 
@@ -913,7 +975,7 @@ Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / S
 | Vu | Marqué comme vu |
 | Sur le disque | Fichier présent |
 | Partiel | Série incomplète sur disque (libellé personnalisé possible) |
-| Disponible | Fichier obtenu via le suivi |
+| Disponible | Source a trouvé un lien (`availability` disponible), sans fichier sur le disque |
 | Pas encore disponible | Aucune source trouvée pour l’instant |
 | En attente | En attente de téléchargement |
 
@@ -1127,7 +1189,7 @@ Après chaque fichier déposé, MediaTracker demande aussi un **rafraîchissemen
 
 MediaTracker peut reprendre ce que vous aviez déjà marqué comme **vu** dans Jellyfin, sans rester connecté au serveur Jellyfin pendant l’import.
 
-**Entrée dans l’application** : **Réglages → Services et jetons**, carte Jellyfin — bouton **Importer l’historique** (après URL et clé API). Voir aussi [Réglages — Jellyfin](#docs-reglages-jellyfin).
+**Entrée dans l’application** : **Réglages → API et jetons**, carte Jellyfin — bouton **Importer l’historique** (après URL et clé API). Voir aussi [Réglages — Jellyfin](#docs-reglages-jellyfin).
 
 Deux modes sur l’écran d’import :
 
@@ -1208,9 +1270,27 @@ L’entrée de menu **Hive** n’apparaît que lorsque Hive est activé.
 
 - **Créer une ruche** : depuis Réglages Hive ou la navigation Hive.
 - **Inviter** : lien d’invitation généré par l’application ; page **Rejoindre** (`/hive/rejoindre`).
-- **Membres** (`/hive/ruches/<id>/membres`) : validation des demandes (créateur de la ruche), quotas, exclusion.
+- **Membres** (`/hive/ruches/<id>/membres`) : validation des demandes (créateur de la ruche), quotas, exclusion. Chaque membre affiche une pastille de version MediaTracker (connue via le gossip pair, sans toucher à la liste signée des membres) : **à jour** si le protocole Hive annoncé est au moins égal au vôtre, **ancienne version** sinon, **version inconnue** pour un pair qui n’a pas encore annoncé.
 
 Le mode **tirage seul** (`pull_only`) : l’instance peut recevoir des fichiers sans en envoyer (affiché dans l’interface si applicable).
+
+#### Réinitialiser le catalogue (créateur)
+
+Le créateur dispose du bouton **Réinitialiser le catalogue** dans **Réglages → Hive** (bloc de chaque ruche, à côté de Membres) et, sur la page **Membres**, d’une zone de danger dédiée. L’action exige de retaper le nom court de la ruche (`Ruche` + les huit premiers caractères de l’identifiant hexadécimal).
+
+Effet :
+
+- Le créateur incrémente une **époque de catalogue** (`catalog_epoch`) incluse dans la **liste des membres signée** (avec horodatage optionnel `catalog_reset_at`), republie cette liste, puis purge localement les entrées catalogue et les signaux de la ruche avant de republier ses partages manuels déjà actifs.
+- Chaque membre, en recevant une liste dont l’époque est supérieure à la sienne, applique la même purge locale (catalogue, signaux, vecteurs de version), republie ses partages existants, et **ignore** tout gossip catalogue ou signal signé d’une époque antérieure.
+- Les **fichiers**, **fiches médias**, **membres**, réglages d’exclusion/partage par fichier et **téléchargements en cours** ne sont pas modifiés.
+
+API admin : `POST /api/v1/hive/ruches/{id}/catalog-reset` avec `{ "confirm_name": "<nom court>" }`. Les champs `catalog_epoch` et `catalog_reset_at` sont aussi exposés sur `GET /api/v1/hive/ruches/{id}/detail`.
+
+Les entrées et signaux publiés localement portent désormais le champ signé `catalog_epoch` (absent ou invalide = 0). La capacité gossip `catalog_epoch` est annoncée via `instance` ; l’absence de cette capacité chez un pair ancien n’empêche pas la synchronisation.
+
+#### Gossip et version d’instance
+
+Lors du `POST /hive/ruche/{id}/gossip/sync`, chaque instance émet toujours un objet `instance` (en plus du vecteur de catalogue et, le cas échéant, de l’instantané de charge `load`) : version d’affichage, numéro de protocole Hive et capacités déclarées. Ces données sont mises en cache localement pour l’interface ; elles ne remplacent pas la liste de membres signée.
 
 ### Catalogue et partage
 
@@ -1218,6 +1298,7 @@ Le mode **tirage seul** (`pull_only`) : l’instance peut recevoir des fichiers 
 - **Repartage automatique** : option **Repartager automatiquement les fichiers reçus** (`hive_catalog_auto_share`, **désactivée** par défaut).
 - **Accueil** : section **Dernières dispos Hive** lorsque des entrées existent.
 - Sur une **fiche média**, un seul bloc **Hive** regroupe partage, exclusions par ruche et état de préparation.
+- Sur une **fiche série**, ce bloc affiche une ligne **Partage** (`x/y épisodes partagés`, lien **Gérer**) et, si des épisodes figurent dans **Mes demandes**, une ligne **Demande** (`n épisodes demandés · m en transfert`) avec **Voir mes demandes** et **Ne plus demander**, qui retire d’un coup toutes les demandes en attente ou en transfert de la série. Sur une fiche film, la demande garde sa carte dédiée.
 
 Avant qu’un fichier soit visible des pairs, l’instance calcule une **empreinte** (empreinte SHA par blocs du fichier) via un processus dédié dans le conteneur.
 
@@ -1225,9 +1306,14 @@ Avant qu’un fichier soit visible des pairs, l’instance calcule une **emprein
 
 Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Reçues**, **Recherché**.
 
+**Mes demandes** regroupe vos suivis par fiche (une carte par série ou par film). Les séries se déplient pour lister chaque épisode demandé avec son état ; les fiches avec un transfert en cours remontent en tête.
+
 - Rien n’est partagé tant que vous ne l’avez pas décidé ; une **demande** prévient les membres qui possèdent déjà le fichier (demandes **anonymes** côté ruche).
+- **Reçues** affiche une seule ligne par épisode ou film demandé, même si plusieurs membres ou plusieurs versions sont demandés ; **Accepter** ou **Refuser** s’applique à toutes les demandes regroupées sur cette ligne.
+- Quand la version demandée change (qualité ou langue), l’ancienne demande est retirée de la ruche avant la publication de la nouvelle.
 - Si aucun pair ne l’a, le titre peut figurer dans **Recherché** pour qu’un autre membre se le procure puis le partage.
 - **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid).
+- **Réglages → Hive → Source de téléchargement → Ruche seule** (`hive_only`) : le téléchargement automatique et les sondages n’utilisent que Hive ; les sources distantes restent testables à la main dans Réglages → Sources.
 
 ### Téléchargements
 
@@ -1238,6 +1324,25 @@ Hive est une **source** comme les autres dans l’ordre de téléchargement (`hi
 3. Le fichier apparaît dans **Téléchargements** puis est rangé comme un téléchargement AllDebrid classique.
 
 Il n’y a **pas** d’écran de transferts Hive séparé : tout passe par la file **Téléchargements** habituelle.
+
+#### Choix manuel d’une version avec fichier déjà présent
+
+Lorsque vous demandez **explicitement** une version dans le catalogue Hive (y compris une version hors profil), alors qu’un fichier occupe déjà le créneau sur le disque :
+
+- la demande n’est **pas** refusée ;
+- le nouveau fichier est rangé **à côté** de l’existant, avec le suffixe Jellyfin ` - {version}` (ex. `Titre (2026) - 1080p VOSTFR.mkv`) ;
+- le fichier déjà lié à la fiche **reste** celui de l’épisode ou du film ; l’autre copie est enregistrée dans l’index bibliothèque pour ne pas être traitée comme orpheline ;
+- il n’y a **pas** de départage qualité ni de passage à la corbeille.
+
+Les téléchargements **automatiques** et le **remplacement proposé** après un repli de profil conservent le comportement habituel (un seul fichier retenu).
+
+#### Bon samaritain (Recherché)
+
+Si vous prenez en charge une demande **Recherché** pour un autre membre, la recherche locale (sources et Hive) n’utilise que le **profil de qualité par défaut** de l’instance, **sans** enchaîner les profils de repli.
+
+#### Visibilité Recherché
+
+Une entrée **Recherché** est masquée dès qu’un fichier est présent sur le créneau concerné, **quelle que soit la version** (y compris une copie secondaire en multi-versions).
 
 Si le pair est injoignable ou **occupé** (limite de transferts, fenêtre horaire, débit saturé), MediaTracker peut **classer** les sources disponibles d’après les instantanés de charge reçus des pairs, choisir un pair moins chargé, puis **basculer** vers un autre pair ou une autre source de l’ordre **Réglages → Sources**.
 
@@ -1352,7 +1457,7 @@ Exemples : [exemples/](exemples/README.md).
 - Affiche la version / SHA de l’image courante et compare au registre GHCR (jeton **GHCR** optionnel) ou à GitHub (**jeton GitHub** en repli).
 - **Mettre à jour maintenant** : `POST` vers `{watchtower_url}/v1/update?image=…` avec le jeton Bearer.
 - **Redémarrer** : redémarrage du processus applicatif sans forcément retélécharger l’image.
-- Option **Me notifier quand Watchtower installe une nouvelle version** (`notify_on_update`).
+- Option **Me notifier quand une nouvelle version démarre** (`notify_on_update`).
 
 En cas d’erreur 401 : le jeton Watchtower ne correspond pas à celui du conteneur.
 

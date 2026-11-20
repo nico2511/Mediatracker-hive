@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from mediatracker.config import Settings
 from mediatracker.db.models import Setting
 from mediatracker.events import record_event
+from mediatracker.settings_int import int_setting as _int_setting
 
 SINCE_KEY = "system.aria2_unreachable_since"
 ALERTED_KEY = "system.aria2_unreachable_alerted"
@@ -125,16 +126,6 @@ def _write_text(db: Session, key: str, value: str) -> None:
         return
     row.value = value
     row.updated_at = moment
-
-
-def _int_setting(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or row.value in (None, ""):
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def _aware(value: datetime) -> datetime:

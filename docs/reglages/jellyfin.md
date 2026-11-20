@@ -2,7 +2,7 @@
 
 URL : `/reglages/jellyfin`
 
-**URL** et **clé API** se renseignent sur **Réglages → Services et jetons**, carte Jellyfin. Tant que Jellyfin n’est pas « connecté » (URL + clé enregistrées), cette page n’affiche que le renvoi vers la carte.
+**URL** et **clé API** se renseignent sur **Réglages → API et jetons**, carte Jellyfin. Tant que Jellyfin n’est pas « connecté » (URL + clé enregistrées), cette page n’affiche que le renvoi vers la carte.
 
 Guide détaillé (webhook, chemins Docker, dépannage) : [../jellyfin.md](../jellyfin.md).
 
@@ -23,7 +23,7 @@ Après chaque fichier déposé, MediaTracker demande aussi un rafraîchissement 
 
 L’import hors ligne (copie de base Jellyfin ou CSV) ne figure plus dans le menu principal **Bibliothèque**. Il est regroupé avec la configuration Jellyfin :
 
-1. Renseigner URL et clé sur **Services et jetons**, carte Jellyfin.
+1. Renseigner URL et clé sur **API et jetons**, carte Jellyfin.
 2. Sur la même carte, **Importer l’historique** ouvre l’écran d’import (route dédiée sous `/bibliotheque/…`).
 
 Deux modes sur cet écran : **Bases Jellyfin** (recommandé) et **Fichier CSV**. Le suivi reste désactivé tant que vous ne le réactivez pas après l’import.

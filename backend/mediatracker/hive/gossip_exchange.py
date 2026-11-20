@@ -30,6 +30,7 @@ from mediatracker.hive.peer_gossip import (
     signals_page_for_peer,
     version_vector_for_ruche,
 )
+from mediatracker.hive.peer_info import build_local_instance_snapshot, ingest_peer_info
 from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
 from mediatracker.hive.transfer_load import build_local_load_snapshot, ingest_peer_load
 
@@ -95,6 +96,7 @@ def pull_member_list_from_peer(
             payload=payload,
             signature_b64=sig,
             now=now,
+            settings=settings,
         )
     except MemberListError:
         return False
@@ -140,6 +142,7 @@ def send_gossip_hint_to_peer(
     outbound = entries_page_for_peer(db, ruche_id=ruche_id, peer_vector={}, limit=50).entries
     sig_out = signals_page_for_peer(db, ruche_id=ruche_id, peer_vector={}, limit=50).entries
     load = build_local_load_snapshot(db, now)
+    instance = build_local_instance_snapshot(now)
     release_sqlite_before_network(db)
     resp = gossip_sync_once(
         base_url=peer_base_url,
@@ -151,10 +154,12 @@ def send_gossip_hint_to_peer(
         signal_vector=signal_vector,
         signals=sig_out,
         load=load,
+        instance=instance,
     )
     if resp.status_code == 200 and peer_instance_id:
         try:
-            peer_load = resp.json().get("load")
+            body = resp.json()
+            peer_load = body.get("load")
             ingest_peer_load(
                 db,
                 ruche_id=ruche_id,
@@ -162,6 +167,14 @@ def send_gossip_hint_to_peer(
                 load=peer_load,
                 now=now,
             )
+            if body.get("instance") is not None:
+                ingest_peer_info(
+                    db,
+                    ruche_id=ruche_id,
+                    origin_instance_id=peer_instance_id,
+                    instance=body.get("instance"),
+                    now=now,
+                )
         except Exception:
             pass
     return resp.status_code == 200
@@ -189,6 +202,7 @@ def pull_gossip_from_peer(
         outbound = _entries_outbound(db, ruche_id=ruche_id, peer_vector=vector)
         sig_out = _signals_outbound(db, ruche_id=ruche_id, peer_vector=signal_vector)
         outbound_load = build_local_load_snapshot(db, now)
+        outbound_instance = build_local_instance_snapshot(now)
         release_sqlite_before_network(db)
         resp = gossip_sync_once(
             base_url=peer_base_url,
@@ -201,6 +215,7 @@ def pull_gossip_from_peer(
             signals=sig_out,
             signal_cursor=signal_cursor.as_dict() if signal_cursor else None,
             load=outbound_load,
+            instance=outbound_instance,
         )
         if resp.status_code != 200:
             break
@@ -211,6 +226,14 @@ def pull_gossip_from_peer(
                 ruche_id=ruche_id,
                 origin_instance_id=peer_instance_id,
                 load=body.get("load"),
+                now=now,
+            )
+        if peer_instance_id and body.get("instance") is not None:
+            ingest_peer_info(
+                db,
+                ruche_id=ruche_id,
+                origin_instance_id=peer_instance_id,
+                instance=body.get("instance"),
                 now=now,
             )
         items = body.get("entries")

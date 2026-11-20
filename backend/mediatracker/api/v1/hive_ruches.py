@@ -13,6 +13,7 @@ from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
 from mediatracker.config import Settings
 from mediatracker.db.models import HiveRuche
+from mediatracker.hive.catalog_epoch import ruche_confirm_name
 from mediatracker.hive.identity import hive_enabled_in_db
 from mediatracker.hive.invitations import create_invitation, revoke_invitation
 from mediatracker.hive.member_list import current_members_as_records, latest_member_list_version
@@ -27,8 +28,10 @@ from mediatracker.hive.membership import (
     pending_for_ruche,
     preview_invitation_link,
     reject_join_pending,
+    reset_ruche_catalog,
     ruches_for_instance,
 )
+from mediatracker.hive.peer_info import build_local_instance_snapshot, peer_info_row
 from mediatracker.hive.peer_membership import confirm_membership_from_creator, submit_join_over_http
 from mediatracker.hive.transfer_policy import DEFAULT_WEEKLY_QUOTA
 
@@ -434,12 +437,17 @@ class MemberUiOut(BaseModel):
     display_name: str
     pull_only: bool
     is_self: bool
+    app_version: str | None = None
+    hive_protocol: int = 0
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class RucheDetailOut(BaseModel):
     ruche_id_hex: str
     is_creator: bool
     weekly_quota_bytes: int
+    catalog_epoch: int = 0
+    catalog_reset_at: str | None = None
     members: list[MemberUiOut]
 
 
@@ -462,26 +470,94 @@ def get_ruche_detail(
     if ruche is None:
         raise Problem(404, "Introuvable", "Ruche introuvable.")
     quota = int(ruche.weekly_quota_bytes) if ruche.weekly_quota_bytes else DEFAULT_WEEKLY_QUOTA
+    now = _now()
+    local_instance = build_local_instance_snapshot(now)
     members_ui: list[MemberUiOut] = []
     for m in current_members_as_records(db, ruche_id):
         doc = m.get("nom_doc") if isinstance(m.get("nom_doc"), dict) else {}
         if not isinstance(doc, dict):
             doc = {}
         name = doc.get("nom") if isinstance(doc.get("nom"), str) else None
+        mid = str(m["id"])
+        is_self = mid == instance_id
+        if is_self:
+            app_version = str(local_instance["version"])
+            hive_protocol = int(local_instance["hive_protocol"])
+            capabilities = list(local_instance.get("capabilities") or [])
+        else:
+            info = peer_info_row(db, ruche_id=ruche_id, origin_instance_id=mid)
+            if info is None:
+                app_version = None
+                hive_protocol = 0
+                capabilities = []
+            else:
+                app_version = info.app_version
+                hive_protocol = info.hive_protocol
+                capabilities = list(info.capabilities)
         members_ui.append(
             MemberUiOut(
-                instance_id=str(m["id"]),
+                instance_id=mid,
                 display_name=(name or str(m["id"])[:8]),
                 pull_only=str(m.get("address") or "") == "tirage",
-                is_self=str(m["id"]) == instance_id,
+                is_self=is_self,
+                app_version=app_version,
+                hive_protocol=hive_protocol,
+                capabilities=capabilities,
             )
         )
+    reset_at = ruche.catalog_reset_at.isoformat() if ruche.catalog_reset_at is not None else None
     return RucheDetailOut(
         ruche_id_hex=ruche_id_hex,
         is_creator=ruche.creator_instance_id == instance_id,
         weekly_quota_bytes=quota,
+        catalog_epoch=int(ruche.catalog_epoch or 0),
+        catalog_reset_at=reset_at,
         members=members_ui,
     )
+
+
+class CatalogResetIn(BaseModel):
+    confirm_name: str = Field(min_length=1, max_length=80)
+
+
+@router.post("/ruches/{ruche_id_hex}/catalog-reset", status_code=204)
+def post_catalog_reset(
+    ruche_id_hex: str,
+    body: CatalogResetIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("admin")),
+) -> None:
+    """Réinitialise le catalogue de la ruche sur toutes les instances (créateur, nom confirmé)."""
+    del _principal
+    _require_hive(db)
+    settings = _settings(request)
+    try:
+        ruche_id = bytes.fromhex(ruche_id_hex)
+    except ValueError as exc:
+        raise Problem(404, "Introuvable", "Ruche introuvable.") from exc
+    try:
+        reset_ruche_catalog(
+            db,
+            settings,
+            ruche_id=ruche_id,
+            confirm_name=body.confirm_name,
+            now=_now(),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        code = str(exc)
+        if code == "not_creator":
+            raise Problem(403, "Interdit", "Seul le créateur peut réinitialiser le catalogue.") from exc
+        if code == "confirm_name_mismatch":
+            expected = ruche_confirm_name(ruche_id)
+            raise Problem(
+                400,
+                "Requête invalide",
+                f"Le nom ne correspond pas. Saisissez exactement : {expected}",
+            ) from exc
+        raise Problem(422, "Requête invalide", str(exc)) from exc
 
 
 class QuotaPatchIn(BaseModel):

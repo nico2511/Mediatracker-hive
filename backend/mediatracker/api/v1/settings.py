@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.client_constants import ClientConstants, client_constants
 from mediatracker.config import Settings
 from mediatracker.core.download_sources_status import download_source_statuses
 from mediatracker.core.hosters import blocked_hoster_names
@@ -29,9 +30,15 @@ class SettingOut(BaseModel):
     default: Any = None
 
 
+class ClientConstantsOut(BaseModel):
+    hive_join_wait_hours: int
+    hive_media_sharing_summary_id_limit: int
+
+
 class SettingsOut(BaseModel):
     settings: list[SettingOut]
     source_defaults: SourceUrlDefaults
+    client_constants: ClientConstantsOut
 
 
 class FixedRetentionOut(BaseModel):
@@ -41,11 +48,19 @@ class FixedRetentionOut(BaseModel):
     incomplete_orphan_keep_days: int
 
 
+def _client_constants_out(row: ClientConstants) -> ClientConstantsOut:
+    return ClientConstantsOut(
+        hive_join_wait_hours=row.hive_join_wait_hours,
+        hive_media_sharing_summary_id_limit=row.hive_media_sharing_summary_id_limit,
+    )
+
+
 def _settings_response(db: Session, app_settings: Settings, secret_key: str) -> SettingsOut:
     items = list_settings(db, app_settings, secret_key)
     return SettingsOut(
         settings=[SettingOut.model_validate(item) for item in items],
         source_defaults=source_url_defaults(),
+        client_constants=_client_constants_out(client_constants()),
     )
 
 

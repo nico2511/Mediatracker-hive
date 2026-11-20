@@ -12,7 +12,7 @@ from mediatracker.config import Settings
 from mediatracker.core.naming import atomic_move, filing_folder, library_destination
 from mediatracker.core.pipeline.constants import VIDEO_EXT
 from mediatracker.core.storage import storage_layout
-from mediatracker.db.models import HiveFileFingerprint, Media, MediaItem
+from mediatracker.db.models import Download, HiveFileFingerprint, Media, MediaItem
 from mediatracker.library.identity import release_conflicts
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ def file_verified_part(
     item: MediaItem,
     fiche: dict,
     now: datetime,
+    download: Download | None = None,
 ) -> tuple[Path | None, str | None]:
     """Déplace le fichier vérifié. Retourne (dest, code_erreur)."""
     if not part.is_file():
@@ -94,11 +95,25 @@ def file_verified_part(
             tmdb_id=media.tmdb_id,
         )
     )
+    from mediatracker.core.profile_replacement import (
+        file_incoming_for_replacement,
+        replacing_proposal_for_download,
+        replacing_proposal_for_item,
+    )
+
+    proposal = replacing_proposal_for_download(db, download) if download is not None else None
+    if proposal is None and item.id is not None:
+        proposal = replacing_proposal_for_item(db, item.id)
+    force_incoming = proposal is not None
+
     if occupant is not None and occupant.is_file():
-        if item.file_path and Path(item.file_path).resolve() == occupant.resolve():
+        if not force_incoming and item.file_path and Path(item.file_path).resolve() == occupant.resolve():
             return occupant, None
-        if _same_path(part, occupant):
+        if _same_path(part, occupant) and not force_incoming:
             return occupant, None
+        if force_incoming:
+            kept = file_incoming_for_replacement(db, settings, media, item, part, dest, occupant, now)
+            return (kept, None) if kept is not None else (None, "move_failed")
         from mediatracker.core.library_video import better_video
 
         keep_incumbent = better_video(
@@ -139,11 +154,34 @@ def finalize_received_hive_file(
     cle: dict,
     sha256_hex: str,
     now: datetime | None = None,
+    download: Download | None = None,
 ) -> str | None:
     """Range le fichier reçu et synchronise empreinte / partage. Retourne un code d’erreur ou None."""
     moment = now or datetime.now(timezone.utc)
-    dest, err = file_verified_part(db, settings, part=part, media=media, item=item, fiche=fiche, now=moment)
+    dest, err = file_verified_part(
+        db,
+        settings,
+        part=part,
+        media=media,
+        item=item,
+        fiche=fiche,
+        now=moment,
+        download=download,
+    )
     if err is not None or dest is None:
+        if download is not None:
+            from mediatracker.core.profile_replacement import on_download_terminal
+
+            on_download_terminal(
+                db,
+                settings,
+                media,
+                item,
+                download,
+                success=False,
+                new_dest=None,
+                now=moment,
+            )
         return err or "filing_failed"
 
     item.file_path = str(dest.resolve())
@@ -186,4 +224,9 @@ def finalize_received_hive_file(
         if hive_catalog_auto_share_enabled(db):
             grant_share_intent(db, item.id)
         sync_hive_catalog_item(db, settings, item.id, now=moment)
+    if download is not None:
+        from mediatracker.core.profile_replacement import on_download_terminal, record_served_profile_on_finish
+
+        record_served_profile_on_finish(db, item, download)
+        on_download_terminal(db, settings, media, item, download, success=True, new_dest=dest, now=moment)
     return None

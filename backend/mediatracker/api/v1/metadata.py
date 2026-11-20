@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
-from mediatracker.core.tmdb import token as tmdb_token
+from mediatracker.core.tmdb.client import borrow_client
 from mediatracker.db.models import LibraryFile, Media
-from mediatracker.integrations.tmdb import TmdbClient, TmdbError, borrow_tmdb
+from mediatracker.integrations.tmdb import TmdbError
 
 router = APIRouter(prefix="/metadata/tmdb", tags=["metadata"])
 
@@ -50,10 +50,10 @@ def search_tmdb(
     detail: bool = Query(default=False),
 ) -> TmdbSearchOut:
     del _principal
-    token = tmdb_token.read_tmdb_token(db, request.app.state.settings.secret_key)
-    if not token:
+    settings = request.app.state.settings
+    client, owned = borrow_client(db, settings)
+    if client is None:
         raise Problem(422, "TMDB", "Renseignez le jeton TMDB dans les réglages pour chercher un titre.")
-    client, owned = borrow_tmdb(token, TmdbClient)
     try:
         hits = client.search_multi(q.strip()) if type == "multi" else client.search(q.strip(), type)
     except TmdbError as exc:
@@ -63,7 +63,7 @@ def search_tmdb(
         if owned:
             client.close()
     if detail:
-        hits = _with_detail(token, hits[:8]) + hits[8:]
+        hits = _with_detail(db, settings, hits[:8]) + hits[8:]
     followed = {
         (row.type, row.tmdb_id): row.followed
         for row in db.scalars(select(Media).where(Media.tmdb_id.is_not(None))).all()
@@ -95,8 +95,10 @@ def search_tmdb(
     )
 
 
-def _with_detail(token: str, hits: list):
-    client, owned = borrow_tmdb(token, TmdbClient)
+def _with_detail(db: Session, settings, hits: list):
+    client, owned = borrow_client(db, settings)
+    if client is None:
+        return hits
     detailed = []
     try:
         for hit in hits:
@@ -122,10 +124,10 @@ def read_tmdb_title(
     del _principal
     if media_type not in {"film", "series"}:
         raise Problem(422, "Requête invalide", "Type attendu : film ou series.")
-    token = tmdb_token.read_tmdb_token(db, request.app.state.settings.secret_key)
-    if not token:
+    settings = request.app.state.settings
+    client, owned = borrow_client(db, settings)
+    if client is None:
         raise Problem(422, "TMDB", "Renseignez le jeton TMDB dans les réglages.")
-    client, owned = borrow_tmdb(token, TmdbClient)
     try:
         hit = client.glance(tmdb_id, media_type)
     except TmdbError as exc:

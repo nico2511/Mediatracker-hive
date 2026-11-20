@@ -10,9 +10,11 @@ import FicheStateActions from "../components/FicheStateActions.vue";
 import TrailerPlayerDialog from "../components/TrailerPlayerDialog.vue";
 import { trailerSubtitle } from "../trailerSubtitle";
 import FilmFileBlock from "../components/FilmFileBlock.vue";
+import ProfileReplacementBanner from "../components/ProfileReplacementBanner.vue";
 import LineMoreActions from "../components/LineMoreActions.vue";
 import SourceRank from "../components/SourceRank.vue";
 import {ApiError, api, userFacingApiError} from "../api";
+import { removeMediaFromListSnapshot } from "../pwa/offlineSnapshot";
 import TmdbIdChangeDialog from "../components/TmdbIdChangeDialog.vue";
 import type { TmdbIdChangePreview } from "../tmdbIdChange";
 import { readTmdbIdChangePreview } from "../tmdbIdChange";
@@ -28,6 +30,7 @@ import {
   type QualityProfileLike,
 } from "../profileFallback";
 import { fetchSettings } from "../settings";
+import { applySettingNumber } from "../settingsMeta";
 import {
   absentWithoutSourceCount,
   absentWithoutSourceLabel,
@@ -129,6 +132,14 @@ interface Episode {
   file_status?: string;
   file_absent?: boolean;
   trash_entry_id?: number | null;
+  served_profile?: { profile_id: number; profile_name: string; repli: boolean } | null;
+  profile_replacement?: {
+    id: number;
+    principal_profile_id: number;
+    principal_profile_name: string;
+    repli_profile_id: number;
+    repli_profile_name: string;
+  } | null;
 }
 
 interface Season {
@@ -199,7 +210,7 @@ const prefsContextStatus = ref<"loading" | "ready" | "error">("loading");
 const prefsContextError = ref("");
 const keepMedia = ref(false);
 const autoDays = ref("");
-const globalAutoDeleteDays = ref(14);
+const globalAutoDeleteDays = ref<number | null>(null);
 const filmItem = ref<Episode | null>(null);
 const { hiveEnabled } = useHiveEnabled();
 const hiveSeriesCatalogue = provideHiveSeriesCatalogue(
@@ -208,6 +219,7 @@ const hiveSeriesCatalogue = provideHiveSeriesCatalogue(
 );
 const hiveShare = ref<HiveShareUiState | null>(null);
 const hiveItemRequest = ref<{ announced: boolean; promptAvailable: boolean; retracted: boolean } | null>(null);
+const hiveSeriesRequests = ref<HiveMyRequestItem[]>([]);
 const hiveEpisodeShares = ref<Record<number, HiveShareUiState>>({});
 const hiveEmpreintesSignal = ref(0);
 
@@ -293,19 +305,25 @@ const hiveSharePolling = useHiveSharePolling({
 
 async function refreshHiveItemRequest() {
   hiveItemRequest.value = null;
-  if (!hiveEnabled.value || !media.value?.followed || primaryItemId.value == null) {
-    return;
-  }
-  const itemRow =
-    media.value.type === "film"
-      ? filmItem.value
-      : seasons.value.flatMap((g) => g.episodes).find((ep) => ep.id === primaryItemId.value);
-  if (itemRow?.downloaded || itemRow?.watched) {
+  hiveSeriesRequests.value = [];
+  if (!hiveEnabled.value || !media.value?.followed) {
     return;
   }
   try {
     const resp = await api<{ items: HiveMyRequestItem[] }>("/api/v1/hive/requests/mine");
-    const row = resp.items?.find((entry) => entry.media_item_id === primaryItemId.value);
+    const items = resp.items ?? [];
+    if (media.value.type === "series") {
+      hiveSeriesRequests.value = items.filter((entry) => entry.media_id === media.value!.id);
+      return;
+    }
+    if (primaryItemId.value == null) {
+      return;
+    }
+    const itemRow = filmItem.value;
+    if (itemRow?.downloaded || itemRow?.watched) {
+      return;
+    }
+    const row = items.find((entry) => entry.media_item_id === primaryItemId.value);
     if (!row) {
       return;
     }
@@ -316,7 +334,13 @@ async function refreshHiveItemRequest() {
     };
   } catch {
     hiveItemRequest.value = null;
+    hiveSeriesRequests.value = [];
   }
+}
+
+async function onHiveSeriesShareChanged() {
+  await onHiveShareMenuChanged();
+  await refreshHiveItemRequest();
 }
 
 async function refreshHiveShareState() {
@@ -388,10 +412,7 @@ async function loadPrefsContext() {
       fetchSettings(),
       api<{ profiles: QualityProfileOption[] }>("/api/v1/quality-profiles"),
     ]);
-    const globalDays = settingsBody.settings.find((row) => row.key === "auto_delete_days");
-    if (globalDays && typeof globalDays.value === "number") {
-      globalAutoDeleteDays.value = globalDays.value;
-    }
+    globalAutoDeleteDays.value = applySettingNumber(settingsBody.settings, "auto_delete_days") ?? null;
     const orderRow = settingsBody.settings.find((row) => row.key === PROFILE_FALLBACK_ORDER_KEY);
     globalFallbackOrderIds.value = parseProfileFallbackOrder(
       orderRow && typeof orderRow.value === "string" ? orderRow.value : "",
@@ -411,7 +432,9 @@ onMounted(async () => {
   await Promise.all([loadPrefsContext(), reload()]);
 });
 
-const autoDaysPlaceholder = computed(() => `global (${globalAutoDeleteDays.value})`);
+const autoDaysPlaceholder = computed(() =>
+  globalAutoDeleteDays.value === null ? "global" : `global (${globalAutoDeleteDays.value})`,
+);
 
 const conservationRetentionHint = computed(() => {
   if (!media.value?.cleanup_reason || keepMedia.value) {
@@ -786,6 +809,7 @@ async function removeFiche(trash: boolean) {
   message.value = "";
   try {
     await api(`/api/v1/media/${id}?trash=${trash ? "true" : "false"}`, { method: "DELETE" });
+    removeMediaFromListSnapshot(id);
     await router.push("/medias");
   } catch (err) {
     error.value = userFacingApiError(err, "Suppression de la fiche impossible.");
@@ -1760,9 +1784,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
       :hive-enabled="hiveEnabled"
       :episode-states="hiveEpisodeShares"
       :media-id="media.id"
-      :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+      :media-requests="hiveSeriesRequests"
       :open-signal="hiveEmpreintesSignal"
-      @changed="onHiveShareMenuChanged"
+      @changed="onHiveSeriesShareChanged"
     />
 
     <div v-if="media.followed && media.type === 'series'" class="fiche-series-layout stack">
@@ -1868,9 +1892,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
           :hive-enabled="hiveEnabled"
           :episode-states="hiveEpisodeShares"
           :media-id="media.id"
-          :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+          :media-requests="hiveSeriesRequests"
           :open-signal="hiveEmpreintesSignal"
-          @changed="onHiveShareMenuChanged"
+          @changed="onHiveSeriesShareChanged"
         />
       </div>
 
@@ -1943,9 +1967,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
           :hive-enabled="hiveEnabled"
           :episode-states="hiveEpisodeShares"
           :media-id="media.id"
-          :hive-request-announced="Boolean(hiveItemRequest?.announced)"
+          :media-requests="hiveSeriesRequests"
           :open-signal="hiveEmpreintesSignal"
-          @changed="onHiveShareMenuChanged"
+          @changed="onHiveSeriesShareChanged"
         />
         <div class="fiche-verif-line">
           <button type="button" class="link-button" @click="suiviOpen = !suiviOpen">Détails ▾</button>
@@ -2025,6 +2049,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
       v-if="
         hiveEnabled &&
         media.followed &&
+        media.type !== 'series' &&
         primaryItemId &&
         hiveItemRequest &&
         (hiveItemRequest.announced || hiveItemRequest.promptAvailable || hiveItemRequest.retracted) &&
@@ -2077,6 +2102,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
         @force-download="forceDownload({ item_id: filmItem!.id })"
         @delete-file="deleteFiles('episode', { item_id: filmItem!.id })"
         @hive-share-changed="onHiveShareMenuChanged"
+        @profile-replacement-changed="reload"
       />
     </article>
 
@@ -2208,6 +2234,13 @@ function episodeStatusIconName(episodeRow: Episode): string {
           </p>
           <ul class="episode-list eps fiche-eps">
             <li v-for="(episodeRow, epIndex) in group.episodes" :key="episodeRow.id" class="episode-row ep fiche-ep">
+              <ProfileReplacementBanner
+                v-if="episodeRow.profile_replacement"
+                :item-id="episodeRow.id"
+                :proposal="episodeRow.profile_replacement"
+                class="ep-profile-repl"
+                @changed="reload"
+              />
               <span class="episode-code ep-code">{{ episodeRow.episode == null ? "—" : slot(group.number, episodeRow.episode) }}</span>
               <div class="ep-main">
                 <div class="episode-row-head ep-title">
@@ -2223,6 +2256,9 @@ function episodeStatusIconName(episodeRow: Episode): string {
                     <span>{{ episodeStatusText(episodeRow) }}</span>
                   </span>
                   <span v-if="episodeRow.filename" class="file-name file" :title="episodeRow.filename">{{ episodeRow.filename }}</span>
+                  <span v-if="episodeRow.served_profile?.repli" class="hint file-served-profile">
+                    Profil utilisé : {{ episodeRow.served_profile.profile_name }} (repli)
+                  </span>
                   <span v-if="formatDate(episodeRow.air_date)" class="hint">
                     Diffusion {{ formatDate(episodeRow.air_date) }}
                   </span>
@@ -2429,13 +2465,16 @@ function episodeStatusIconName(episodeRow: Episode): string {
             <p class="hint">Profil principal fixé en tête ; cochez et ordonnez les profils de repli pour cette fiche.</p>
             <ul class="fiche-fallback-pick" aria-label="Profils de repli disponibles">
               <li v-for="profile in selectableFallbackProfiles" :key="profile.id">
-                <label>
-                  <input
-                    type="checkbox"
-                    :checked="isCustomFallbackChecked(profile.id)"
-                    @change="onCustomFallbackToggle(profile.id, $event)"
-                  />
-                  {{ profileOptionLabel(profile) }}
+                <label class="switch-line">
+                  <span>{{ profileOptionLabel(profile) }}</span>
+                  <span class="switch switch-small">
+                    <input
+                      type="checkbox"
+                      :checked="isCustomFallbackChecked(profile.id)"
+                      @change="onCustomFallbackToggle(profile.id, $event)"
+                    />
+                    <span class="switch-ui" aria-hidden="true"></span>
+                  </span>
                 </label>
               </li>
             </ul>
@@ -2708,9 +2747,12 @@ function episodeStatusIconName(episodeRow: Episode): string {
               Arrête les vérifications et les notifications liées à cette fiche. L'état « vu » et les fichiers restent en
               place, sauf si vous choisissez la corbeille ci-dessous.
             </p>
-            <label class="check">
-              <input v-model="trashOnUnfollow" type="checkbox" :disabled="!media.followed" />
+            <label class="switch-line">
               <span>Mettre aussi les fichiers à la corbeille en arrêtant le suivi</span>
+              <span class="switch">
+                <input v-model="trashOnUnfollow" type="checkbox" :disabled="!media.followed" />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </span>
             </label>
             <p v-if="!media.followed" class="hint fiche-suivi-unavail">
               <StatusIcon name="pause" label="Indisponible" />

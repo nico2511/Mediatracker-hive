@@ -154,11 +154,19 @@ class ImportJobStatusOut(BaseModel):
 async def _read_csv(upload: UploadFile) -> str:
     if not upload.filename or not upload.filename.lower().endswith(".csv"):
         raise Problem(422, "Requête invalide", "Envoyez un fichier .csv.")
-    raw = await upload.read()
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        piece = await upload.read(64 * 1024)
+        if not piece:
+            break
+        total += len(piece)
+        if total > JELLYFIN_HISTORY_CSV_MAX_BYTES:
+            raise Problem(413, "Fichier trop volumineux", "Le CSV dépasse la taille maximale (5 Mo).")
+        chunks.append(piece)
+    raw = b"".join(chunks)
     if not raw:
         raise Problem(422, "Requête invalide", "Fichier vide.")
-    if len(raw) > JELLYFIN_HISTORY_CSV_MAX_BYTES:
-        raise Problem(413, "Fichier trop volumineux", "Le CSV dépasse la taille maximale (5 Mo).")
     try:
         return raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.db.models import HiveEntry, HiveMember, HiveOriginReachability, HiveSignal, HiveVersions
 from mediatracker.hive.access import is_active_member
+from mediatracker.hive.catalog_epoch import local_catalog_epoch, payload_catalog_epoch
 from mediatracker.hive.catalog_validity import remote_catalog_offer_plausible
 from mediatracker.hive.crypto_id import public_key_from_pem, verify_document_signature
 from mediatracker.hive.source_offer_mask import clear_mask_for_offer, maybe_lift_source_offer_mask
@@ -180,6 +181,8 @@ def ingest_signed_entries(
         try:
             verify_remote_entry(db, ruche_id=ruche_id, payload=payload, signature_b64=sig)
         except (ValueError, Exception):
+            continue
+        if payload_catalog_epoch(payload) < local_catalog_epoch(db, ruche_id):
             continue
         cle = payload.get("cle")
         fiche = payload.get("fiche")

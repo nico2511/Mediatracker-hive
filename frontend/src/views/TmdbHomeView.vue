@@ -11,7 +11,9 @@ import type { HomePersonalDashboardSlice } from "../homeDashboardTypes";
 import type { HomeSectionKey } from "../homeFilters";
 import { mediaKind, tmdbPage } from "../labels";
 import type { QuickTarget } from "../quick";
+import { fetchSettings } from "../settings";
 import { tmdbTrialRatingLabel } from "../tmdbTrialRating";
+import { tmdbCatalogHomeHint } from "./settings/tmdbCatalogMeta";
 
 interface TmdbCard {
   tmdb_id: number;
@@ -50,6 +52,8 @@ const expanded = ref<Partial<Record<SectionKey, boolean>>>({});
 const personalExpanded = ref<Partial<Record<HomeSectionKey, boolean>>>({});
 const progressSort = ref<"name" | "watched">("name");
 const wide = ref(true);
+const catalogHint = ref("Rangées alimentées par TMDB.");
+const hiveFollowBusy = ref<Record<string, boolean>>({});
 let mediaQuery: MediaQueryList | null = null;
 
 function syncWide() {
@@ -98,17 +102,24 @@ function fromTmdb(card: TmdbCard, follow = false) {
   );
 }
 
+function hiveFollowKey(card: TmdbCard): string {
+  return card.hive_work_key?.trim() || `tmdb-${card.tmdb_id}`;
+}
+
 async function followHive(card: TmdbCard) {
-  const key = card.hive_work_key?.trim();
-  if (!key) {
+  const key = hiveFollowKey(card);
+  if (hiveFollowBusy.value[key] || !card.hive_work_key?.trim()) {
     return;
   }
+  hiveFollowBusy.value[key] = true;
   error.value = "";
   try {
-    await api(`/api/v1/hive/catalogue/${key}/follow`, { method: "POST" });
+    await api(`/api/v1/hive/catalogue/${card.hive_work_key.trim()}/follow`, { method: "POST" });
     await load();
   } catch (err) {
     error.value = userFacingApiError(err, "Impossible de suivre cette œuvre.");
+  } finally {
+    hiveFollowBusy.value[key] = false;
   }
 }
 
@@ -151,10 +162,23 @@ async function load() {
   }
 }
 
+async function loadCatalogHint() {
+  try {
+    const page = await fetchSettings();
+    const map = new Map(page.settings?.map((row) => [row.key, row.value]));
+    const region = String(map.get("tmdb_region") || "FR");
+    const language = String(map.get("tmdb_display_language") || "fr-FR");
+    catalogHint.value = tmdbCatalogHomeHint(region, language);
+  } catch {
+    catalogHint.value = "Rangées alimentées par TMDB.";
+  }
+}
+
 onMounted(() => {
   mediaQuery = window.matchMedia("(min-width: 720px)");
   syncWide();
   mediaQuery.addEventListener("change", syncWide);
+  void loadCatalogHint();
   void load();
 });
 
@@ -169,7 +193,7 @@ onUnmounted(() => {
       <h1>Accueil</h1>
       <router-link v-if="!wide" to="/decouvrir" class="discover-entry">Découvrir</router-link>
     </div>
-    <p class="hint">Rangées alimentées par TMDB (France, fr-FR).</p>
+    <p class="hint">{{ catalogHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="loading" class="hint">Chargement…</p>
 
@@ -433,8 +457,18 @@ onUnmounted(() => {
               </template>
               <template v-if="!card.followed" #actions>
                 <p class="card-actions">
-                  <button type="button" class="icon-button" title="Suivre" @click="followHive(card)">
-                    <StatusIcon name="followed" label="Suivre" />
+                  <button
+                    type="button"
+                    class="icon-button"
+                    data-testid="hive-follow"
+                    :title="hiveFollowBusy[hiveFollowKey(card)] ? 'En cours…' : 'Suivre'"
+                    :disabled="hiveFollowBusy[hiveFollowKey(card)]"
+                    @click="followHive(card)"
+                  >
+                    <StatusIcon
+                      name="followed"
+                      :label="hiveFollowBusy[hiveFollowKey(card)] ? 'En cours…' : 'Suivre'"
+                    />
                   </button>
                 </p>
               </template>

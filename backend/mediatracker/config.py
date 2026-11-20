@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     source_request_delay_seconds: int = 5
     source_error_backoff_min: int = 180
     remote_search_cooldown_hours: int = 6
+    scan_episode_sources_fallback: bool = True
     scan_ongoing_only: bool = True
     scan_air_window_days: int = 3
     # When TMDB has no digital date, availability = theatrical + this many months.
@@ -113,6 +114,9 @@ class Settings(BaseSettings):
     catalog_retention_days: int = 60
     catalog_quality: str = "HD"
     catalog_language: str = "VFF"
+    tmdb_display_language: str = "fr-FR"
+    tmdb_region: str = "FR"
+    tmdb_original_languages: str = ""
     # Unset means DATA_DIR/media, DATA_DIR/media/Films, DATA_DIR/media/Series,
     # DATA_DIR/downloads and DATA_DIR/.trash. MOVIES_DIR overrides library_movies_path.
     media_dir: Path | None = None
@@ -170,6 +174,7 @@ class Settings(BaseSettings):
     # Adresses du proxy inverse autorisées à renseigner X-Forwarded-* (uvicorn forwarded_allow_ips).
     forwarded_allow_ips: str = "127.0.0.1"
     hive_enabled: bool = False
+    hive_only: bool = False
     hive_public_address: str | None = None
     hive_instance_name: str | None = None
     hive_name_document: str | None = None

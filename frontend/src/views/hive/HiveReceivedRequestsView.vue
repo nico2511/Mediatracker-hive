@@ -67,12 +67,12 @@ defineExpose({ reload: load, itemCount: () => items.value.length });
       Ces demandes sont des suivis en attente, anonymes : vous ne voyez pas qui cherche. Votre bibliothèque n’est révélée
       qu’après acceptation, qui lance le partage habituel.
     </p>
-    <label class="panel hive-received-auto row sp">
+    <label class="panel hive-received-auto switch-line sp">
       <span>
-        <span class="label">Partager automatiquement les demandes</span>
+        <span class="label">Partager automatiquement les demandes · {{ autoAccept ? "Activé" : "Désactivé" }}</span>
         <span class="hint block">Si un membre demande un fichier que vous possédez, le partage se fait sans validation.</span>
       </span>
-      <span class="row">
+      <span class="switch">
         <input
           v-model="autoAccept"
           type="checkbox"
@@ -80,7 +80,7 @@ defineExpose({ reload: load, itemCount: () => items.value.length });
           :disabled="autoBusy"
           @change="onAutoAcceptToggle"
         />
-        <span>{{ autoAccept ? "Activé" : "Désactivé" }}</span>
+        <span class="switch-ui" aria-hidden="true"></span>
       </span>
     </label>
     <p v-if="note" class="ok">{{ note }}</p>

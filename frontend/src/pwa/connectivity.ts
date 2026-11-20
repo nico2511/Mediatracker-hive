@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from "vue";
 
+import { prefetchAppSettingsCaches } from "../appSettingsCaches";
 import { listQueueItems } from "./offlineQueue";
 import { syncAllQueueItems, type SyncResultRow } from "./offlineSync";
 
@@ -82,6 +83,7 @@ function scheduleProbe(): void {
   probeTimer = window.setTimeout(() => {
     void probeServer().then((ok) => {
       if (ok) {
+        void prefetchAppSettingsCaches();
         void tryFlushQueue();
       }
     });
@@ -125,6 +127,7 @@ export function useConnectivity() {
   async function retryConnection(): Promise<void> {
     const ok = await probeServer();
     if (ok) {
+      void prefetchAppSettingsCaches();
       await tryFlushQueue();
     }
   }

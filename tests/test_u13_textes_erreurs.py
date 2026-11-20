@@ -10,11 +10,12 @@ MEDIA_LIST = FRONT / "views" / "MediaListView.vue"
 LIBRARY = FRONT / "views" / "LibraryView.vue"
 
 
-def test_identified_filter_label_mentions_jellyfin():
+def test_media_list_filter_labels_clarified():
     media_list = MEDIA_LIST.read_text(encoding="utf-8")
     library = LIBRARY.read_text(encoding="utf-8")
     assert "Suivi via identification" not in media_list
-    assert "Suivi par Jellyfin" in media_list
+    assert "Suivi par Jellyfin" not in media_list
+    assert "Lien trouvé" in media_list
     assert "Suivi via identification" not in library
 
 

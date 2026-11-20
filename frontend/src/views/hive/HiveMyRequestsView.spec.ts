@@ -28,7 +28,7 @@ describe("HiveMyRequestsView", () => {
               media_id: 11,
               media_item_id: 21,
               work_key: "w1",
-              title: "Le Miel d'Hiver",
+              title: "Film Exemple G",
               type: "film",
               season: null,
               episode: null,
@@ -39,7 +39,7 @@ describe("HiveMyRequestsView", () => {
               media_id: 12,
               media_item_id: 22,
               work_key: "w2",
-              title: "Rayons d'Atelier",
+              title: "Série Exemple H",
               type: "series",
               season: 1,
               episode: 4,
@@ -58,7 +58,7 @@ describe("HiveMyRequestsView", () => {
     const w = mount(HiveMyRequestsView);
     await flushPromises();
 
-    expect(w.get("[data-testid=hive-mine-list]").text()).toContain("Le Miel d'Hiver");
+    expect(w.get("[data-testid=hive-mine-list]").text()).toContain("Film Exemple G");
     expect(w.get("[data-testid=hive-mine-announce]").exists()).toBe(true);
     expect(w.get("[data-testid=hive-mine-retract]").exists()).toBe(true);
   });

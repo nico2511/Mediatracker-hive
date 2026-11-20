@@ -7,7 +7,6 @@ export type SettingsGroupId =
 
 export const SETTINGS_GROUPS: { id: SettingsGroupId; title: string }[] = [
   { id: "general", title: "Général" },
-  { id: "services", title: "Services et jetons" },
   { id: "telechargement", title: "Téléchargement" },
   { id: "mediatheque", title: "Médiathèque" },
   { id: "stockage", title: "Stockage" },
@@ -23,13 +22,14 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
   { slug: "compte", title: "Compte", group: "general" },
   { slug: "application", title: "Application", group: "general" },
   { slug: "maj", title: "Mise à jour et redémarrage", group: "general" },
-  { slug: "jetons", title: "Services et jetons", group: "services" },
+  { slug: "jetons", title: "API et jetons", group: "general" },
   { slug: "sources", title: "Sources", group: "telechargement" },
   { slug: "qualite", title: "Profils de qualité", group: "telechargement" },
   { slug: "scan", title: "Réglages de scan", group: "telechargement" },
   { slug: "alldebrid", title: "AllDebrid", group: "telechargement" },
   { slug: "hive", title: "Hive", group: "telechargement" },
   { slug: "jellyfin", title: "Jellyfin", group: "mediatheque" },
+  { slug: "tmdb-catalog", title: "Catalogue TMDB", group: "mediatheque" },
   { slug: "notifications", title: "Notifications", group: "mediatheque" },
   { slug: "disque", title: "Disque et sauvegardes", group: "stockage" },
   { slug: "corbeille", title: "Corbeille", group: "stockage" },

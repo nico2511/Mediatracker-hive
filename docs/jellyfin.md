@@ -34,7 +34,7 @@ Après chaque fichier déposé, MediaTracker demande aussi un **rafraîchissemen
 
 MediaTracker peut reprendre ce que vous aviez déjà marqué comme **vu** dans Jellyfin, sans rester connecté au serveur Jellyfin pendant l’import.
 
-**Entrée dans l’application** : **Réglages → Services et jetons**, carte Jellyfin — bouton **Importer l’historique** (après URL et clé API). Voir aussi [Réglages — Jellyfin](reglages/jellyfin.md).
+**Entrée dans l’application** : **Réglages → API et jetons**, carte Jellyfin — bouton **Importer l’historique** (après URL et clé API). Voir aussi [Réglages — Jellyfin](reglages/jellyfin.md).
 
 Deux modes sur l’écran d’import :
 

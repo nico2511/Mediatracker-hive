@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings, get_settings
-from mediatracker.core.cleanup import _int_setting, format_bytes
+from mediatracker.core.cleanup import format_bytes
 from mediatracker.core.library_plan import LibraryPlanError, _folder_title, _prune_empty, _rollback_paths, _tag
 from mediatracker.core.naming import atomic_move, different_tmdb_ids, filing_folder, library_destination
 from mediatracker.core.quality_profile import RESOLUTION_RANK, normalize_resolution
@@ -27,6 +27,7 @@ from mediatracker.core.storage import is_under
 from mediatracker.db.models import LibraryFile, LibraryRename, Media, TrashEntry
 from mediatracker.library.parse import is_video, parse_release, season_number, show_key
 from mediatracker.library.release_name import retarget_path
+from mediatracker.settings_int import trash_retention_days
 
 _EXTRAS = frozenset({"poster.jpg", "fanart.jpg", "landscape.jpg", "banner.jpg", "tvshow.nfo", "movie.nfo"})
 _SIDECAR_TAILS = (
@@ -517,7 +518,7 @@ def _only_sidecars(folder: Path) -> bool:
 
 
 def _retention_days(db: Session, settings: Settings) -> int:
-    return _int_setting(db, "trash_retention_days", settings.trash_retention_days)
+    return trash_retention_days(db, settings)
 
 
 def _send_to_trash(

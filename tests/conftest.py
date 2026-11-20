@@ -120,6 +120,15 @@ def reset_classify_throttle():
 
 
 @pytest.fixture(autouse=True)
+def drain_deferred_library_attach():
+    from mediatracker.core.attach_deferred import join_pending, reset_for_tests
+
+    reset_for_tests()
+    yield
+    join_pending()
+
+
+@pytest.fixture(autouse=True)
 def secret_key_env(monkeypatch):
     """Tests must not depend on a SECRET_KEY exported in the runner environment."""
     monkeypatch.setenv("SECRET_KEY", "test-secret-key-0123456789")
@@ -137,7 +146,7 @@ def settings(tmp_path, monkeypatch):
     return Settings(
         secret_key="test-secret-key-0123456789",
         admin_username="admin",
-        admin_password="test-admin-password",
+        admin_password="Choix-Solide-42!",
         database_url=f"sqlite:///{tmp_path / 'app.db'}",
         data_dir=tmp_path / "data",
         config_dir=tmp_path / "config",
@@ -176,7 +185,7 @@ def wizard_client(tmp_path):
     application.state.engine.dispose()
 
 
-def login(client, username="admin", password="test-admin-password"):
+def login(client, username="admin", password="Choix-Solide-42!"):
     response = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200, response.text
     return response

@@ -23,6 +23,7 @@ from mediatracker.events.deliver import page_url
 from mediatracker.integrations.tmdb import TmdbClient, TmdbHit
 from mediatracker.providers.base import CapabilityNotSupported, ReleaseListing, SourceFetchError
 from mediatracker.providers.sources.throttle import backoff_delay
+from mediatracker.settings_int import int_setting as _int_setting
 
 logger = logging.getLogger(__name__)
 
@@ -461,16 +462,6 @@ def _text(db: Session, key: str) -> str:
     if row is None or not row.value:
         return ""
     return row.value
-
-
-def _int_setting(db: Session, key: str, default: int) -> int:
-    raw = _text(db, key)
-    if not raw:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
 
 
 def _streak(db: Session) -> int:

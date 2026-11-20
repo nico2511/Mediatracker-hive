@@ -4,13 +4,14 @@
 ## Sections
 - docs/installation.md — Installation — Ce guide décrit l’installation de MediaTracker avec Docker et Docker Compose sur un NAS ou un serveur Linux.
 - docs/premier-demarrage.md — Premier démarrage — Route : /configuration (accessible sans session tant qu’aucun compte n’existe, ou pour terminer l’assistant).
-- docs/telechargements.md — Chaîne de téléchargement — 1. Un scan ou une action manuelle interroge les sources dans l’ordre défini (downloadsourceorder).
+- docs/telechargements.md — Chaîne de téléchargement — 1. Un scan ou une action manuelle interroge les sources dans l’ordre défini (downloadsourceorder), d’abord celles qui publient des pages de liens (Wawacity, Free-Télécharger, etc.).
 - docs/reglages/README.md — Réglages — Dans l’application : Réglages (/reglages), puis une section du menu. Chaque section a une URL directe du type /reglages/<slug>.
 - docs/reglages/compte.md — Compte — URL : /reglages/compte
 - docs/reglages/qualite.md — Profils de qualité — URL : /reglages/qualite
 - docs/reglages/sources.md — Sources — URL : /reglages/sources
 - docs/reglages/scan.md — Réglages de scan — URL : /reglages/scan
 - docs/reglages/jellyfin.md — Jellyfin — URL : /reglages/jellyfin
+- docs/reglages/tmdb-catalog.md — Catalogue TMDB — URL : /reglages/tmdb-catalog
 - docs/reglages/notifications.md — Notifications — URL : /reglages/notifications
 - docs/reglages/corbeille.md — Corbeille — URL : /reglages/corbeille. L’URL /reglages/nettoyage redirige vers cette page.
 - docs/reglages/alldebrid.md — AllDebrid — URL : /reglages/alldebrid
@@ -18,7 +19,7 @@
 - docs/reglages/hive.md — Hive — URL : /reglages/hive
 - docs/reglages/application.md — Application — URL : /reglages/application
 - docs/reglages/maj.md — Mise à jour et redémarrage — URL : /reglages/maj
-- docs/reglages/jetons.md — Services et jetons — URL : /reglages/jetons
+- docs/reglages/jetons.md — API et jetons — URL : /reglages/jetons
 - docs/reglages/reset.md — Réinitialiser la base — URL : /reglages/reset
 - docs/medias.md — Médias — Pour le jeton TMDB, le suivi depuis Suivre et la correction d’identifiant, voir TMDB. Pour le partage entre instances, voir Hive.
 - docs/tmdb.md — TMDB — MediaTracker appelle l’API TMDB v4 avec un jeton de lecture (tmdbreadtoken) :

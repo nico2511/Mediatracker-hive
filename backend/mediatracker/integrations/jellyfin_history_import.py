@@ -381,7 +381,10 @@ def apply_import(
     shared_client = None
     shared_owned = False
     if shared_token:
-        shared_client, shared_owned = borrow_tmdb(shared_token, TmdbClient)
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+        catalog = read_tmdb_catalog_settings(db)
+        shared_client, shared_owned = borrow_tmdb(shared_token, TmdbClient, language=catalog.display_language)
     try:
         for outcome in pending_outcomes:
             ensured = _ensure_item(
@@ -860,7 +863,10 @@ def _resolve_series_via_tmdb(
     client = tmdb_client
     owned = False
     if client is None:
-        client, owned = borrow_tmdb(tmdb_token, TmdbClient)
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+        catalog = read_tmdb_catalog_settings(db)
+        client, owned = borrow_tmdb(tmdb_token, TmdbClient, language=catalog.display_language)
 
     def _find(source: str, external: str) -> tuple[int | None, str | None]:
         cache_key = (source, external)
@@ -942,7 +948,10 @@ def _resolve_import_tmdb(
     client = tmdb_client
     owned = False
     if client is None:
-        client, owned = borrow_tmdb(tmdb_token, TmdbClient)
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+        catalog = read_tmdb_catalog_settings(db)
+        client, owned = borrow_tmdb(tmdb_token, TmdbClient, language=catalog.display_language)
 
     def _find(source: str, external: str) -> tuple[int | None, str | None]:
         cache_key = (source, external)

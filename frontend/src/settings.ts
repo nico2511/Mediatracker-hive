@@ -7,9 +7,15 @@ export interface SourceUrlDefaults {
   torrentio_base_url: string;
 }
 
+export interface ClientConstants {
+  hive_join_wait_hours: number;
+  hive_media_sharing_summary_id_limit: number;
+}
+
 export interface SettingsPage {
   settings: SettingRow[];
   source_defaults?: SourceUrlDefaults;
+  client_constants?: ClientConstants;
 }
 
 let cached: SettingsPage | null = null;

@@ -19,6 +19,7 @@ from mediatracker.core.source_poll import next_due
 from mediatracker.db.models import Download, JellyfinPushJob, Media, Setting, WebhookDelivery
 from mediatracker.integrations.jellyfin_sync import LAST_POLL_AT, REFRESH_AT
 from mediatracker.library.scanner import LAST_SCAN_KEY
+from mediatracker.settings_int import int_setting as _int_setting
 
 ACTIVE_TICK_SECONDS = 2.0
 MAX_IDLE_SLEEP_SECONDS = 60.0
@@ -186,16 +187,6 @@ def _parse_setting_time(db: Session, key: str) -> datetime | None:
     except ValueError:
         return None
     return _aware(parsed)
-
-
-def _int_setting(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def _aware(value: datetime) -> datetime:

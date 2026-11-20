@@ -3,9 +3,12 @@ import { createApp } from "vue";
 import App from "./App.vue";
 import router from "./router";
 import "./styles.css";
+import { prefetchAppSettingsCaches } from "./appSettingsCaches";
 import { bindInstallPrompt } from "./pwa/pwaInstall";
 import { initConnectivity, tryFlushQueue } from "./pwa/connectivity";
 import { registerServiceWorker } from "./pwa/registerServiceWorker";
+
+void prefetchAppSettingsCaches();
 
 bindInstallPrompt();
 registerServiceWorker();

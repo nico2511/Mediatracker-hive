@@ -33,6 +33,7 @@ from mediatracker.hive.peer_gossip import (
     version_vector_for_ruche,
 )
 from mediatracker.hive.peer_inbound import authenticate_join_peer, authenticate_member_peer
+from mediatracker.hive.peer_info import build_local_instance_snapshot, ingest_peer_info
 from mediatracker.hive.peer_join import process_peer_join_preview, process_peer_join_request
 from mediatracker.hive.peer_rate_limit import PeerRateLimited
 from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
@@ -341,6 +342,14 @@ def mount_hive_router(app) -> None:
                     load=doc.get("load"),
                     now=now,
                 )
+            if doc.get("instance") is not None:
+                ingest_peer_info(
+                    session,
+                    ruche_id=ruche_id,
+                    origin_instance_id=ctx.hive_id,
+                    instance=doc.get("instance"),
+                    now=now,
+                )
             ingest_signed_entries(session, ruche_id=ruche_id, items=entries_in, now=now)
             ingest_signed_signals(session, ruche_id=ruche_id, items=signals_in, now=now)
             settings = request.app.state.settings
@@ -355,6 +364,7 @@ def mount_hive_router(app) -> None:
                 parallel_gate=parallel_gate if isinstance(parallel_gate, TransferParallelGate) else None,
                 send_bandwidth=send_bandwidth if isinstance(send_bandwidth, TransferBandwidthLimiter) else None,
             )
+            our_instance = build_local_instance_snapshot(now)
             if is_hint:
                 session.commit()
                 hint_body: dict[str, object] = {
@@ -366,6 +376,7 @@ def mount_hive_router(app) -> None:
                     "signals": [],
                     "signal_has_more": False,
                     "signal_cursor": None,
+                    "instance": our_instance,
                 }
                 if our_load is not None:
                     hint_body["load"] = our_load
@@ -390,6 +401,7 @@ def mount_hive_router(app) -> None:
                 "signals": sig_page.entries,
                 "signal_has_more": sig_page.has_more,
                 "signal_cursor": sig_page.cursor,
+                "instance": our_instance,
             }
             if our_load is not None:
                 sync_body["load"] = our_load

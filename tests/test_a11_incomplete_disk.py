@@ -7,7 +7,7 @@ from pathlib import Path
 from tests.conftest import csrf, login
 
 from mediatracker.core.disk_usage import download_index, measure_paths, walk_tree
-from mediatracker.core.incomplete import busy_names, incomplete_snapshot
+from mediatracker.core.incomplete import busy_names, incomplete_snapshot, library_index
 from mediatracker.db.models import Download, Media, MediaItem
 
 NOW = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
@@ -56,6 +56,7 @@ def test_incomplete_list_total_matches_disk_card_and_skips_active_job(client, ap
         assert "Flux.mkv.aria2" not in names
         assert orphan.name in names and sparse.name in names
 
+        library = library_index(db, app.state.settings)
         disk = measure_paths(
             {
                 "movies": Path(app.state.settings.data_dir) / "media" / "Films",
@@ -66,9 +67,14 @@ def test_incomplete_list_total_matches_disk_card_and_skips_active_job(client, ap
             now=NOW,
             jobs=download_index(db),
             busy=busy_names(db),
+            library=library,
         )
         incomplete_row = next(row for row in disk["folders"] if row["key"] == "incomplete")
         assert incomplete_row["written_bytes"] == snap.folder_written_bytes
+        assert incomplete_row["incomplete_trash_count"] == len(snap.files)
+        for row in incomplete_row["files"]:
+            if row["name"] in names:
+                assert row["orphan"] is True
 
         listed = client.get("/api/v1/library/incomplete")
         assert listed.status_code == 200, listed.text
@@ -88,6 +94,51 @@ def test_incomplete_list_total_matches_disk_card_and_skips_active_job(client, ap
         assert applied.status_code == 200, applied.text
         assert applied.json()["moved"] == 1
         assert applied.json()["trash_ids"]
+    finally:
+        db.close()
+
+
+def test_disk_card_orphan_flag_follows_verdict_not_busy_alone(client, app):
+    login(client)
+    incomplete = _layout(app)
+    incomplete.mkdir(parents=True, exist_ok=True)
+    recent = incomplete / "Carte.Recente.S01E01.mkv"
+    recent.write_bytes(b"r" * 80_000)
+    eligible = incomplete / "Carte.Ancienne.S01E01.mkv"
+    eligible.write_bytes(b"e" * 80_000)
+    old = NOW.timestamp() - 5 * 86400
+    young = NOW.timestamp() - 3600
+    os.utime(recent, (young, young))
+    os.utime(eligible, (old, old))
+
+    db = app.state.session_factory()
+    try:
+        library = library_index(db, app.state.settings)
+        disk = measure_paths(
+            {
+                "movies": Path(app.state.settings.data_dir) / "media" / "Films",
+                "series": Path(app.state.settings.data_dir) / "media" / "Series",
+                "incomplete": incomplete,
+                "trash": Path(app.state.settings.data_dir) / "Corbeille",
+            },
+            now=NOW,
+            jobs=download_index(db),
+            busy=busy_names(db),
+            library=library,
+        )
+        row = next(item for item in disk["folders"] if item["key"] == "incomplete")
+        assert row["incomplete_trash_count"] == 1
+        assert row["incomplete_kept_recent_count"] == 1
+        assert row["incomplete_keep_until"] is not None
+        by_name = {Path(item["name"]).name: item["orphan"] for item in row["files"]}
+        assert by_name.get(eligible.name) is True
+        assert by_name.get(recent.name) is False
+
+        snap = incomplete_snapshot(db, app.state.settings, now=NOW)
+        assert {Path(item.path).name for item in snap.files} == {eligible.name}
+        assert snap.kept_recent_count == 1
+        assert snap.keep_until is not None
+        assert row["incomplete_trash_count"] == len(snap.files)
     finally:
         db.close()
 

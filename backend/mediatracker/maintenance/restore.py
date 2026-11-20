@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.bootstrap import ensure_ready
 from mediatracker.config import Settings
+from mediatracker.core.installed_version import align_installed_fingerprint
 from mediatracker.db.migrate import run_migrations
 from mediatracker.db.session import create_session_factory
 from mediatracker.maintenance.backup import copy_sqlite_file, restore_sqlite_into_live, sqlite_path
@@ -178,6 +179,7 @@ def _replace_live_database(
         app.state.session_factory = factory
         session = factory()
         try:
+            align_installed_fingerprint(session)
             ensure_ready(session, settings)
             session.commit()
         finally:

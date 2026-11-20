@@ -172,6 +172,7 @@ def confirm_membership_from_creator(
         payload=list_payload,
         signature_b64=list_sig,
         now=now,
+        settings=settings,
     )
     db.flush()
     member_ids = {str(m.get("id")) for m in list_payload.get("members", []) if isinstance(m, dict)}

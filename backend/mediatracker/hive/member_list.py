@@ -11,11 +11,16 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from mediatracker.config import Settings
 from mediatracker.db.models import (
     HiveKnownIdentityName,
     HiveMember,
     HiveMemberList,
     HiveRuche,
+)
+from mediatracker.hive.catalog_epoch import (
+    apply_catalog_epoch_increase_if_needed,
+    sync_ruche_catalog_fields_from_payload,
 )
 from mediatracker.hive.crypto_id import (
     hive_public_id_from_public_key,
@@ -50,13 +55,24 @@ def _member_record(
     }
 
 
-def build_member_list_payload(*, ruche_id: bytes, version: int, members: list[dict]) -> dict:
-    return {
+def build_member_list_payload(
+    *,
+    ruche_id: bytes,
+    version: int,
+    members: list[dict],
+    catalog_epoch: int = 0,
+    catalog_reset_at: str | None = None,
+) -> dict:
+    payload: dict = {
         "v": 1,
         "ruche_id": ruche_id.hex(),
         "version": version,
         "members": members,
+        "catalog_epoch": int(catalog_epoch),
     }
+    if isinstance(catalog_reset_at, str) and catalog_reset_at.strip():
+        payload["catalog_reset_at"] = catalog_reset_at.strip()
+    return payload
 
 
 def sign_member_list(private_key: Ed25519PrivateKey, payload: dict) -> str:
@@ -134,6 +150,7 @@ def apply_member_list(
     payload: dict,
     signature_b64: str,
     now: datetime,
+    settings: Settings | None = None,
 ) -> HiveMemberList:
     rid = payload.get("ruche_id")
     if not isinstance(rid, str) or bytes.fromhex(rid) != ruche_id:
@@ -152,6 +169,10 @@ def apply_member_list(
     if version <= prev:
         raise MemberListError("stale_version")
     validate_member_documents(db, members, now=now)
+    if settings is not None:
+        apply_catalog_epoch_increase_if_needed(
+            db, settings, ruche_id=ruche_id, payload=payload, now=now
+        )
 
     db.execute(delete(HiveMember).where(HiveMember.ruche_id == ruche_id))
     for m in members:
@@ -180,6 +201,7 @@ def apply_member_list(
         published_at=now,
     )
     db.add(row)
+    sync_ruche_catalog_fields_from_payload(db, ruche_id=ruche_id, payload=payload)
     return row
 
 
@@ -205,6 +227,7 @@ def apply_member_list_as_peer(
     payload: dict,
     signature_b64: str,
     now: datetime,
+    settings: Settings | None = None,
 ) -> HiveMemberList | None:
     """Importe une liste signée par le créateur (instance invitée)."""
     rid = payload.get("ruche_id")
@@ -221,6 +244,10 @@ def apply_member_list_as_peer(
     if version <= prev:
         return None
     validate_member_documents(db, members, now=now)
+    if settings is not None:
+        apply_catalog_epoch_increase_if_needed(
+            db, settings, ruche_id=ruche_id, payload=payload, now=now
+        )
 
     db.execute(delete(HiveMember).where(HiveMember.ruche_id == ruche_id))
     for m in members:
@@ -250,6 +277,7 @@ def apply_member_list_as_peer(
     )
     db.add(row)
     db.flush()
+    sync_ruche_catalog_fields_from_payload(db, ruche_id=ruche_id, payload=payload)
     return row
 
 

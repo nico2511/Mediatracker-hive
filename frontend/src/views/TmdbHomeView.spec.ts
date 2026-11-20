@@ -9,7 +9,7 @@ vi.mock("../api", () => ({
 }));
 
 vi.mock("../components/PosterCard.vue", () => ({
-  default: { template: "<div><slot name='meta' /></div>" },
+  default: { template: "<div><slot name='meta' /><slot name='actions' /></div>" },
 }));
 vi.mock("../components/HomeGridSection.vue", () => ({
   default: {
@@ -44,7 +44,15 @@ const TMDB_HOME = {
   physical_films: [],
   new_series: [],
   on_air_series: [],
-  hive_dispos: [],
+  hive_dispos: [
+    {
+      tmdb_id: 99,
+      media_type: "film",
+      title: "Dispo Démo",
+      hive_work_key: "wk-demo-99",
+      followed: false,
+    },
+  ],
 };
 
 const DASHBOARD = {
@@ -158,6 +166,36 @@ describe("TmdbHomeView", () => {
     await flushPromises();
     expect(wide.find(".discover-entry").exists()).toBe(false);
     vi.unstubAllGlobals();
+  });
+
+  it("ignore un double clic sur Suivre Hive pendant la requête", async () => {
+    let resolveFollow: (() => void) | undefined;
+    let followPosts = 0;
+    const followGate = new Promise<void>((resolve) => {
+      resolveFollow = resolve;
+    });
+    apiMock.mockImplementation((path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/tmdb-trial/home") {
+        return Promise.resolve(TMDB_HOME);
+      }
+      if (path === "/api/v1/dashboard") {
+        return Promise.resolve(DASHBOARD);
+      }
+      if (path.startsWith("/api/v1/hive/catalogue/") && init?.method === "POST") {
+        followPosts += 1;
+        return followGate.then(() => undefined);
+      }
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const wrapper = mount(TmdbHomeView);
+    await flushPromises();
+    const followBtn = wrapper.find('[data-testid="hive-follow"]');
+    expect(followBtn.exists()).toBe(true);
+    await followBtn!.trigger("click");
+    await followBtn!.trigger("click");
+    expect(followPosts).toBe(1);
+    resolveFollow?.();
+    await flushPromises();
   });
 
   it("affiche les blocs personnels au-dessus des rangées TMDB", async () => {

@@ -178,7 +178,7 @@ describe("SettingsSourcesSection", () => {
     const wrapper = mountSources();
     await flushPromises();
     expect(wrapper.text()).toContain("Renseigne ta clé AllDebrid");
-    expect(wrapper.text()).toContain("Services et jetons");
+    expect(wrapper.text()).toContain("API et jetons");
     expect(wrapper.find(".source-order-panel").exists()).toBe(false);
   });
 
@@ -510,7 +510,7 @@ describe("SettingsSourcesSection", () => {
     await flushPromises();
     expect(wrapper.find(".source-rhythm-panel").exists()).toBe(false);
     expect(wrapper.text()).toContain("Disponible après connexion d'AllDebrid");
-    expect(wrapper.text()).toContain("Services et jetons");
+    expect(wrapper.text()).toContain("API et jetons");
     expect(wrapper.text()).toContain("Comet");
     expect(wrapper.text()).not.toContain("Wawacity");
   });
@@ -613,6 +613,7 @@ describe("SettingsSourcesSection", () => {
     await checkbox.setValue(true);
     await flushPromises();
     const order = patchSettingsMock.mock.calls.at(-1)?.[0] as { values: Record<string, string> };
+    expect(Object.keys(order.values)).toEqual(["download_source_order"]);
     expect(order.values.download_source_order).toContain("free_telecharger");
     expect(order.values.download_source_order).toContain("comet");
   });
@@ -682,9 +683,127 @@ describe("SettingsSourcesSection", () => {
     await cometToggle.setValue(false);
     await flushPromises();
     const saved = patchSettingsMock.mock.calls.at(-1)?.[0] as { values: Record<string, string> };
+    expect(Object.keys(saved.values)).toEqual(["download_source_order"]);
     expect(saved.values.download_source_order).toContain("wawacity");
     expect(saved.values.download_source_order).toContain("hive");
     expect(saved.values.download_source_order).not.toContain("comet");
+  });
+
+  it("n’envoie que download_source_order sur l’interrupteur et rétablit en cas d’échec", async () => {
+    fetchSettingsMock.mockResolvedValue({
+      settings: [
+        { key: "download_source_order", value: "wawacity,comet,free_telecharger", secret: false, set: true },
+      ],
+      source_defaults: {
+        comet_base_urls: ["https://comet-defaut.example"],
+        torrentio_base_url: "https://torrentio-defaut.example",
+      },
+    });
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/integrations/alldebrid/account") {
+        return { connected: adConnectedFlag.value };
+      }
+      if (url === "/api/v1/settings/sources/status") {
+        return {
+          sources: [
+            ...defaultSources,
+            {
+              source: "free_telecharger",
+              label: "Free-Télécharger",
+              enabled: true,
+              available: true,
+              rank: 3,
+              state: "ok",
+              message: "",
+              since: null,
+              last_probe_at: null,
+              last_probe_link_count: null,
+              last_probe_duration_ms: null,
+              last_probe_issue: null,
+              last_probe_reason: null,
+              last_success_at: null,
+            },
+          ],
+          available_sources: ["wawacity", "comet", "free_telecharger"],
+          download_ready: true,
+          blocked_message: null,
+        };
+      }
+      if (url === "/api/v1/providers?kind=source") {
+        return { items: [] };
+      }
+      if (url === "/api/v1/hive/ruches") {
+        return [];
+      }
+      if (url === "/api/v1/wawacity/domain") {
+        return { current: null, candidate: null, previous: null };
+      }
+      return {};
+    });
+    patchSettingsMock.mockRejectedValue(new ApiError(500, "erreur serveur"));
+    const wrapper = mountSources();
+    await flushPromises();
+    const ftCard = wrapper.findAll(".source-card").find((card) => card.text().includes("Free-Télécharger"));
+    expect(ftCard).toBeTruthy();
+    const checkbox = ftCard!.find('input[type="checkbox"]');
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    await checkbox.setValue(false);
+    await flushPromises();
+    const payload = patchSettingsMock.mock.calls.at(-1)?.[0] as { values: Record<string, string> };
+    expect(Object.keys(payload.values)).toEqual(["download_source_order"]);
+    expect(payload.values.download_source_order).not.toContain("free_telecharger");
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.text()).toMatch(/Erreur du serveur|Enregistrement impossible/);
+  });
+
+  it("masque Tester et l’état en panne sur une carte désactivée", async () => {
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/integrations/alldebrid/account") {
+        return { connected: adConnectedFlag.value };
+      }
+      if (url === "/api/v1/settings/sources/status") {
+        return {
+          sources: [
+            {
+              source: "free_telecharger",
+              label: "Free-Télécharger",
+              enabled: false,
+              available: true,
+              rank: 0,
+              state: "down",
+              message: "Panne simulée",
+              since: "2026-11-09T18:00:00Z",
+              last_probe_at: null,
+              last_probe_link_count: null,
+              last_probe_duration_ms: null,
+              last_probe_issue: null,
+              last_probe_reason: null,
+              last_success_at: null,
+            },
+            ...defaultSources,
+          ],
+          available_sources: ["wawacity", "comet", "free_telecharger"],
+          download_ready: true,
+          blocked_message: null,
+        };
+      }
+      if (url === "/api/v1/providers?kind=source") {
+        return { items: [] };
+      }
+      if (url === "/api/v1/hive/ruches") {
+        return [];
+      }
+      if (url === "/api/v1/wawacity/domain") {
+        return { current: null, candidate: null, previous: null };
+      }
+      return {};
+    });
+    const wrapper = mountSources();
+    await flushPromises();
+    const card = wrapper.find(".source-card.is-off");
+    expect(card.text()).toContain("Désactivée");
+    expect(card.text()).not.toContain("Panne simulée");
+    expect(card.findAll("button").filter((btn) => btn.text() === "Tester")).toHaveLength(0);
   });
 
   it("aligne le recul après erreur sur les bornes serveur (30–1440)", async () => {
@@ -695,6 +814,25 @@ describe("SettingsSourcesSection", () => {
     const input = label!.find('input[type="number"]');
     expect(input.attributes("min")).toBe("30");
     expect(input.attributes("max")).toBe("1440");
+  });
+
+  it("enregistre le repli scan épisode avec le panneau rythme", async () => {
+    fetchSettingsMock.mockResolvedValue({
+      settings: [
+        { key: "download_source_order", value: "wawacity,comet", secret: false, set: true },
+        { key: "scan_episode_sources_fallback", value: false, secret: false, set: true },
+      ],
+      source_defaults: { comet_base_urls: [], torrentio_base_url: "https://torrentio.example" },
+    });
+    const wrapper = mountSources();
+    await flushPromises();
+    const rhythmBtn = wrapper
+      .findAll("button")
+      .find((btn) => btn.text().includes("Enregistrer le rythme"));
+    await rhythmBtn!.trigger("click");
+    await flushPromises();
+    const values = (patchSettingsMock.mock.calls.at(-1)?.[0] as { values: Record<string, unknown> }).values;
+    expect(values.scan_episode_sources_fallback).toBe(false);
   });
 
   it("n’envoie pas null ni NaN pour le rythme si l’enregistrement part avant le chargement", async () => {

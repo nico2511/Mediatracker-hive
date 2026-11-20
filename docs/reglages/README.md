@@ -2,7 +2,7 @@
 
 Dans l’application : **Réglages** (`/reglages`), puis une section du menu. Chaque section a une URL directe du type `/reglages/<slug>`.
 
-L’index est regroupé en cinq blocs (Général, Services et jetons, Téléchargement, Médiathèque, Stockage), comme dans l’interface.
+L’index est regroupé en quatre blocs (Général, Téléchargement, Médiathèque, Stockage), comme dans l’interface.
 
 Les clés listées dans les pages ci-dessous correspondent aux réglages persistés en base. Après le premier enregistrement dans l’interface, **les valeurs affichées en UI remplacent** les variables d’environnement de départ.
 
@@ -13,12 +13,7 @@ Les clés listées dans les pages ci-dessous correspondent aux réglages persist
 | `compte` | Compte | [compte.md](compte.md) |
 | `application` | Application | [application.md](application.md) |
 | `maj` | Mise à jour et redémarrage | [maj.md](maj.md) |
-
-## Services et jetons
-
-| Slug | Titre dans l’UI | Documentation |
-| --- | --- | --- |
-| `jetons` | Services et jetons | [jetons.md](jetons.md) |
+| `jetons` | API et jetons | [jetons.md](jetons.md) |
 
 ## Téléchargement
 
@@ -37,6 +32,7 @@ Guide Hive (usage des ruches) : [../hive.md](../hive.md).
 | Slug | Titre dans l’UI | Documentation |
 | --- | --- | --- |
 | `jellyfin` | Jellyfin | [jellyfin.md](jellyfin.md) |
+| `tmdb-catalog` | Catalogue TMDB | [tmdb-catalog.md](tmdb-catalog.md) |
 | `notifications` | Notifications | [notifications.md](notifications.md) |
 
 Guide Jellyfin (webhook, import d’historique détaillé) : [../jellyfin.md](../jellyfin.md).

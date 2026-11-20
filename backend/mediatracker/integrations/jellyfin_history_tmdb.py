@@ -55,7 +55,10 @@ def resolve_exact_tmdb_candidate(
     if client is None and search_hook is None and db is not None and secret_key:
         token = _read_tmdb_token(db, secret_key)
         if token:
-            client, owned = borrow_tmdb(token, TmdbClient)
+            from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+            catalog = read_tmdb_catalog_settings(db)
+            client, owned = borrow_tmdb(token, TmdbClient, language=catalog.display_language)
     try:
         return _resolve_exact_tmdb_candidate(
             query=query,

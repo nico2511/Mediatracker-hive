@@ -51,6 +51,7 @@ const sourceOrder = ref("");
 const statuses = ref<SourceStatus[]>([]);
 const availableSourceIds = ref<string[]>([]);
 const blockedMessage = ref("");
+const hiveOnlyActive = ref(false);
 const expanded = reactive<Record<string, boolean>>({});
 
 const settingsRows = ref<SettingRow[]>([]);
@@ -59,6 +60,7 @@ const requestDelay = ref<number | undefined>(undefined);
 const cacheSeconds = ref<number | undefined>(undefined);
 const errorBackoffMin = ref<number | undefined>(undefined);
 const remoteSearchCooldownHours = ref<number | undefined>(undefined);
+const scanEpisodeSourcesFallback = ref(true);
 const hosterOrder = ref<string[]>([]);
 const hosterPreferenceStored = ref("");
 
@@ -224,6 +226,31 @@ function setEnabled(id: string, on: boolean) {
   sourceOrder.value = merged;
 }
 
+async function onToggleEnabled(id: string, on: boolean) {
+  const previous = sourceOrder.value;
+  setEnabled(id, on);
+  if (sourceOrder.value === previous) {
+    return;
+  }
+  message.value = "";
+  error.value = "";
+  saving.value = true;
+  try {
+    await patchSettings({
+      values: {
+        download_source_order: resolvedDownloadSourceOrder(),
+      },
+    });
+    message.value = "Enregistré.";
+    await refresh();
+  } catch (err) {
+    sourceOrder.value = previous;
+    error.value = userFacingApiError(err, "Enregistrement impossible.");
+  } finally {
+    saving.value = false;
+  }
+}
+
 function statusDotClass(source: string): string {
   const row = statusBySource.value.get(source);
   if (!row?.state) {
@@ -382,6 +409,14 @@ async function loadSettings() {
     remoteSearchCooldownHours.value = cooldown;
   }
   for (const row of body.settings) {
+    if (row.key === "scan_episode_sources_fallback") {
+      scanEpisodeSourcesFallback.value = row.value === true || row.value === "true";
+    }
+  }
+  for (const row of body.settings) {
+    if (row.key === "hive_only") {
+      hiveOnlyActive.value = row.value === true || row.value === "true";
+    }
     if (row.key === "download_source_order") {
       const next = settingAsCommaList(row.value);
       if (next) {
@@ -483,6 +518,7 @@ async function saveCore() {
         source_cache_seconds: cacheSeconds.value,
         source_error_backoff_min: errorBackoffMin.value,
         remote_search_cooldown_hours: remoteSearchCooldownHours.value,
+        scan_episode_sources_fallback: scanEpisodeSourcesFallback.value,
         hoster_preference: resolvedHosterPreference(),
         wawacity_base_url: wawacityUrl.value,
         wawacity_user_agent: wawacityAgent.value,
@@ -681,9 +717,13 @@ const SOURCE_BLURBS: Record<string, string> = {
 
     <p v-if="!downloadReady && blockedMessage" class="hint source-blocked-banner" role="status">
       {{ blockedMessage }}
-      <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+      <RouterLink to="/reglages/jetons">API et jetons</RouterLink>
       ou
       <RouterLink to="/reglages/hive">Hive</RouterLink>.
+    </p>
+
+    <p v-if="hiveOnlyActive" class="hint" role="status" data-testid="hive-only-sources-banner">
+      Ruche seule est activée : seules les sources Hive sont utilisées.
     </p>
 
     <template v-if="downloadReady">
@@ -726,7 +766,7 @@ const SOURCE_BLURBS: Record<string, string> = {
 
     <p v-if="serviceStatusLoaded && showAdGateLine" class="hint source-ad-gate" role="status">
       Disponible après connexion d'AllDebrid →
-      <RouterLink to="/reglages/jetons">Services et jetons</RouterLink>
+      <RouterLink to="/reglages/jetons">API et jetons</RouterLink>
     </p>
 
     <section v-if="!serviceStatusLoaded || adConnected" class="panel stack source-rhythm-panel">
@@ -773,6 +813,13 @@ const SOURCE_BLURBS: Record<string, string> = {
           :max="settingBoundMax(settingsRows, 'remote_search_cooldown_hours', 72)"
         />
       </label>
+      <label class="switch-line">
+        <span>Repli scan Comet / Torrentio / addons Stremio si aucune page « liens »</span>
+        <span class="switch">
+          <input v-model="scanEpisodeSourcesFallback" type="checkbox" />
+          <span class="switch-ui" aria-hidden="true"></span>
+        </span>
+      </label>
       <HosterOrderList v-model="hosterOrder" />
       <button type="button" class="btn" :disabled="saving" @click="saveCore">Enregistrer le rythme</button>
     </section>
@@ -796,19 +843,22 @@ const SOURCE_BLURBS: Record<string, string> = {
         <label class="source-enabled switch-line">
           <span>{{ isEnabled(id) ? "Activée" : "Désactivée" }}</span>
           <span class="switch">
-            <input type="checkbox" :checked="isEnabled(id)" @change="setEnabled(id, ($event.target as HTMLInputElement).checked); saveCore()" />
+            <input type="checkbox" :checked="isEnabled(id)" @change="onToggleEnabled(id, ($event.target as HTMLInputElement).checked)" />
             <span class="switch-ui" aria-hidden="true"></span>
           </span>
         </label>
       </header>
       <p v-if="lastProbeLine(id)" class="hint source-card-meta">{{ lastProbeLine(id) }}</p>
       <p v-if="lastSuccessLine(id)" class="hint source-card-meta">{{ lastSuccessLine(id) }}</p>
-      <p v-if="statusBySource.get(id)?.state === 'down' && statusBySource.get(id)?.message" class="error">
+      <p
+        v-if="isEnabled(id) && statusBySource.get(id)?.state === 'down' && statusBySource.get(id)?.message"
+        class="error"
+      >
         {{ statusBySource.get(id)?.message }}
       </p>
       <div class="source-card-actions">
         <button
-          v-if="!serviceStatusLoaded || isSourceAvailable(id)"
+          v-if="isEnabled(id) && (!serviceStatusLoaded || isSourceAvailable(id))"
           type="button"
           class="btn btn-sm"
           :disabled="probeBusy"

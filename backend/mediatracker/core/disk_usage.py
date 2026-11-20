@@ -20,7 +20,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
-from mediatracker.core.incomplete import busy_names, download_linked_basenames, incomplete_disk_orphan
+from mediatracker.core.incomplete import (
+    busy_names,
+    download_linked_basenames,
+    incomplete_disk_file_orphan,
+    incomplete_orphan_tally,
+    library_index,
+)
 from mediatracker.core.storage import device_id, incomplete_dir, storage_layout
 from mediatracker.db.models import Download, Setting
 
@@ -112,6 +118,7 @@ def measure_paths(
     mount=None,
     jobs: dict[str, dict] | None = None,
     busy: set[str] | None = None,
+    library: set[tuple] | None = None,
 ) -> dict:
     """Count the four folders and the volume each one sits on.
 
@@ -131,20 +138,28 @@ def measure_paths(
         path = paths[key]
         written, reserved, missing, files = walker(path)
         dev = device_of(path)
-        folders.append(
-            {
-                "key": key,
-                "label": label,
-                "path": str(path),
-                "bytes": written,
-                "written_bytes": written,
-                "reserved_bytes": reserved,
-                "missing": missing,
-                "device": "" if dev is None else str(dev),
-                "mount": mount_of(path),
-                "files": _with_jobs(files, known, active) if key == "incomplete" else [],
-            }
-        )
+        row = {
+            "key": key,
+            "label": label,
+            "path": str(path),
+            "bytes": written,
+            "written_bytes": written,
+            "reserved_bytes": reserved,
+            "missing": missing,
+            "device": "" if dev is None else str(dev),
+            "mount": mount_of(path),
+            "files": (
+                _with_jobs(files, known, active, root=path, library=library, now=now)
+                if key == "incomplete"
+                else []
+            ),
+        }
+        if key == "incomplete" and library is not None:
+            trash_count, kept_recent, keep_until = incomplete_orphan_tally(path, active, library, now)
+            row["incomplete_trash_count"] = trash_count
+            row["incomplete_kept_recent_count"] = kept_recent
+            row["incomplete_keep_until"] = None if keep_until is None else keep_until.isoformat()
+        folders.append(row)
     volumes = _volumes(folders, usage_of)
     guard = next((row for row in volumes if _on_volume(row, "incomplete", folders)), None)
     if guard is None and volumes:
@@ -246,13 +261,25 @@ def _keep_largest(largest: list[dict], item: dict) -> None:
     del largest[_LARGEST:]
 
 
-def _with_jobs(files: list[dict], jobs: dict[str, dict], busy: set[str]) -> list[dict]:
+def _with_jobs(
+    files: list[dict],
+    jobs: dict[str, dict],
+    busy: set[str],
+    *,
+    root: Path | None = None,
+    library: set[tuple] | None = None,
+    now: datetime | None = None,
+) -> list[dict]:
     labeled: list[dict] = []
+    moment = now or datetime.now(timezone.utc)
     for row in files:
         display = str(row["name"])
         base = Path(display).name
         lookup = base[: -len(".aria2")] if base.endswith(".aria2") else base
         job = jobs.get(lookup) or jobs.get(base)
+        orphan = False
+        if root is not None and library is not None:
+            orphan = incomplete_disk_file_orphan(root / display, busy, library, moment)
         labeled.append(
             {
                 "name": row["name"],
@@ -260,7 +287,7 @@ def _with_jobs(files: list[dict], jobs: dict[str, dict], busy: set[str]) -> list
                 "reserved_bytes": row["reserved_bytes"],
                 "job_id": None if job is None else job["job_id"],
                 "job_state": "" if job is None else job["job_state"],
-                "orphan": incomplete_disk_orphan(display, busy),
+                "orphan": orphan,
             }
         )
     return labeled
@@ -292,9 +319,16 @@ def _run(factory, settings: Settings) -> None:
             paths = _layout_paths(layout)
             jobs = download_index(db)
             busy = busy_names(db)
+            library = library_index(db, settings)
         finally:
             db.close()
-        report = measure_paths(paths, now=datetime.now(timezone.utc), jobs=jobs, busy=busy)
+        report = measure_paths(
+            paths,
+            now=datetime.now(timezone.utc),
+            jobs=jobs,
+            busy=busy,
+            library=library,
+        )
         db = factory()
         try:
             _save(db, report, datetime.now(timezone.utc))

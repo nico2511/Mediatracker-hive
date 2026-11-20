@@ -1,4 +1,4 @@
-# Services et jetons
+# API et jetons
 
 URL : `/reglages/jetons`
 

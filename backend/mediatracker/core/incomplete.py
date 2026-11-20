@@ -20,13 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
-from mediatracker.core.cleanup import _int_setting, format_bytes
+from mediatracker.core.cleanup import format_bytes
 from mediatracker.core.naming import atomic_move
 from mediatracker.core.storage import incomplete_dir, is_under, library_skip, storage_layout
 from mediatracker.db.models import Download, Setting, TrashEntry
 from mediatracker.events import record_event
 from mediatracker.library.parse import is_video, parse_release, show_key
 from mediatracker.retention import INCOMPLETE_ORPHAN_KEEP_DAYS
+from mediatracker.settings_int import trash_retention_days
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ class IncompleteSnapshot:
     folder_written_bytes: int
     folder_reserved_bytes: int
     total_written_bytes: int
+    kept_recent_count: int = 0
+    keep_until: datetime | None = None
 
 
 def preview_incomplete(
@@ -108,9 +111,22 @@ def incomplete_snapshot(
     *,
     now: datetime | None = None,
 ) -> IncompleteSnapshot:
-    files, _kept, folder_written, folder_reserved = _survey(db, settings, now=now)
+    moment = now or datetime.now(timezone.utc)
+    files, _kept, folder_written, folder_reserved = _survey(db, settings, now=moment)
     total = sum(item.written_bytes for item in files)
-    return IncompleteSnapshot(tuple(files), folder_written, folder_reserved, total)
+    layout = storage_layout(db, settings)
+    root = incomplete_dir(layout)
+    busy = busy_names(db)
+    library = library_index(db, settings)
+    _trash, kept_recent, keep_until = incomplete_orphan_tally(root, busy, library, moment)
+    return IncompleteSnapshot(
+        tuple(files),
+        folder_written,
+        folder_reserved,
+        total,
+        kept_recent,
+        keep_until,
+    )
 
 
 def apply_incomplete(
@@ -261,7 +277,7 @@ def describe_pass(
 
 
 def _retention_days(db: Session, settings: Settings) -> int:
-    return _int_setting(db, "trash_retention_days", settings.trash_retention_days)
+    return trash_retention_days(db, settings)
 
 
 def _enabled(db: Session) -> bool:
@@ -428,17 +444,61 @@ def _forget_incomplete_files(db: Session, settings: Settings, paths: list[Path])
         logger.info("Session aria2 non mise à jour pour les orphelins incomplets.")
 
 
-def incomplete_disk_orphan(file_name: str, busy: set[str]) -> bool:
-    """Whether the disk card may label the file as orphelin (no active download)."""
-    name = Path(file_name).name
-    if name.endswith(".aria2"):
-        video = name[: -len(".aria2")]
-        if video in busy or name in busy:
-            return False
-        return True
-    if name in busy:
+def library_index(db: Session, settings: Settings) -> set[tuple]:
+    layout = storage_layout(db, settings)
+    return _library_index(layout.movies_dir, layout.series_dir, library_skip(layout))
+
+
+def incomplete_disk_file_orphan(path: Path, busy: set[str], library: set[tuple], now: datetime) -> bool:
+    """True when the library would list the file as a corbeille candidate (_verdict trash)."""
+    verdict = _verdict(path, busy, library, now)
+    if verdict is None:
         return False
-    return True
+    action, _reason = verdict
+    if action != "trash":
+        return False
+    from mediatracker.core.disk_usage import file_allocation
+
+    written, reserved = file_allocation(path)
+    return written > 0 or reserved > 0
+
+
+def incomplete_orphan_tally(
+    root: Path,
+    busy: set[str],
+    library: set[tuple],
+    now: datetime,
+) -> tuple[int, int, datetime | None]:
+    """Trash-eligible count, recent orphans still kept, and latest end of that grace period."""
+    if not root.is_dir():
+        return 0, 0, None
+    from mediatracker.core.disk_usage import file_allocation
+
+    trash_eligible = 0
+    kept_recent = 0
+    keep_until: datetime | None = None
+    for path in sorted(root.rglob("*"), key=lambda item: item.name):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        verdict = _verdict(path, busy, library, now)
+        if verdict is None:
+            continue
+        action, reason = verdict
+        if action == "trash":
+            written, reserved = file_allocation(path)
+            if written == 0 and reserved == 0:
+                continue
+            trash_eligible += 1
+        elif action == "keep" and reason == _KEEP_RECENT:
+            kept_recent += 1
+            try:
+                mtime = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            except OSError:
+                continue
+            end = mtime + timedelta(days=KEEP_DAYS)
+            if keep_until is None or end > keep_until:
+                keep_until = end
+    return trash_eligible, kept_recent, keep_until
 
 
 def _survey(

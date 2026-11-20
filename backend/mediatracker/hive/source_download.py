@@ -38,8 +38,10 @@ def resolve_hive_match_for_item(
         return HiveMatchResolution("miss", detail="Cette version est déjà marquée comme vue.")
     from mediatracker.core.file_status import FileStatusIndex
 
+    vk_early = version_key.strip() if isinstance(version_key, str) and version_key.strip() else None
+    explicit_version = vk_early is not None
     file_status = FileStatusIndex.load(db, [item]).for_item(item)
-    if file_status == "present" or (item.downloaded and item.file_path):
+    if not explicit_version and (file_status == "present" or (item.downloaded and item.file_path)):
         return HiveMatchResolution("miss", detail="Cette œuvre est déjà dans votre bibliothèque.")
     from mediatracker.core.profile_attempt_orchestration import (
         POLL_PROFILE_MISSING,
@@ -71,10 +73,8 @@ def resolve_hive_match_for_item(
         from mediatracker.core.profile_attempt_orchestration import ProfileChain
 
         chain = ProfileChain((attempt,))
-    vk = version_key.strip() if isinstance(version_key, str) and version_key.strip() else None
+    vk = vk_early
     from mediatracker.hive.source_catalog import catalogue_request_miss_detail
-
-    explicit_version = vk is not None
     pick = pick_hive_catalog_for_item(
         db,
         media,
@@ -113,9 +113,25 @@ def resolve_hive_match_for_item(
     if row is not None:
         from mediatracker.hive.download_aria2 import attach_or_refresh_hive_fetch
 
-        if attach_or_refresh_hive_fetch(db, settings, download=row, match=match, now=now) is None:
+        if (
+            attach_or_refresh_hive_fetch(
+                db, settings, download=row, match=match, now=now, requested_version_key=vk if explicit_version else None
+            )
+            is None
+        ):
             return HiveMatchResolution("pending", match=match)
-    elif enqueue_hive_download_match(db, settings, media, item, match, now=now) is None:
+    elif (
+        enqueue_hive_download_match(
+            db,
+            settings,
+            media,
+            item,
+            match,
+            now=now,
+            requested_version_key=vk if explicit_version else None,
+        )
+        is None
+    ):
         return HiveMatchResolution("pending", match=match)
     return HiveMatchResolution("queued", match=match)
 

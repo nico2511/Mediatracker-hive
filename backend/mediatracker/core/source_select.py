@@ -274,6 +274,26 @@ def explain_misses(
     return " ".join(unique[:3])
 
 
+_EMPTY_SEARCH_MESSAGE = "Aucun résultat sur les sources de recherche pour ce titre."
+
+
+def no_version_message(
+    results: Sequence[SourceResult],
+    profile_name: str,
+    detail: str = "",
+) -> str:
+    """User-facing poll message when no catalog page is kept for the attempt."""
+    stripped = (detail or "").strip()
+    if not results:
+        if stripped:
+            return stripped
+        return _EMPTY_SEARCH_MESSAGE
+    message = f"Aucune version ne correspond au profil « {profile_name} »."
+    if stripped:
+        message = f"{message} {stripped}"
+    return message
+
+
 def _page_rank(
     result: SourceResult,
     *,

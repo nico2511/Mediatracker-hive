@@ -152,13 +152,16 @@ function openVersions() {
         <div class="hive-picker-scroll">
           <ul class="hive-picker-list">
             <li v-for="r in ruches" :key="r.ruche_id_hex">
-              <label class="hive-picker-row row">
-                <input
-                  type="checkbox"
-                  :checked="!excluded.has(r.ruche_id_hex)"
-                  @change="setRucheShare(r.ruche_id_hex, ($event.target as HTMLInputElement).checked)"
-                />
+              <label class="hive-picker-row switch-line">
                 <span>{{ hiveRucheLabel(r) }}</span>
+                <span class="switch switch-small">
+                  <input
+                    type="checkbox"
+                    :checked="!excluded.has(r.ruche_id_hex)"
+                    @change="setRucheShare(r.ruche_id_hex, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span class="switch-ui" aria-hidden="true"></span>
+                </span>
               </label>
             </li>
           </ul>

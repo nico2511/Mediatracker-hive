@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.client_constants import HIVE_JOIN_WAIT_HOURS
 from mediatracker.db.models import HiveInvitation, HiveRuche
 from mediatracker.hive.crypto_id import (
     canonical_json_bytes,
@@ -21,7 +22,7 @@ from mediatracker.hive.crypto_id import (
     verify_document_signature,
 )
 
-INVITATION_TTL = timedelta(hours=48)
+INVITATION_TTL = timedelta(hours=HIVE_JOIN_WAIT_HOURS)
 LINK_PREFIX = "mtrhive:1:"
 
 

@@ -138,13 +138,15 @@ def resolve_catalog_posters(
         return 0, 0
     client = tmdb
     if client is None:
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
         from mediatracker.core.tmdb.token import read_tmdb_token
         from mediatracker.integrations.tmdb import shared_tmdb
 
         token = read_tmdb_token(db, settings.secret_key)
         if not token:
             return 0, 0
-        client = shared_tmdb(token)
+        catalog = read_tmdb_catalog_settings(db)
+        client = shared_tmdb(token, language=catalog.display_language)
     genres: dict[str, dict[int, str]] = {}
     # Keys looked up in this pass -> (hit or None, genre names). Same key, same answer.
     resolved: dict[str, tuple[TmdbHit | None, dict[int, str]]] = {}

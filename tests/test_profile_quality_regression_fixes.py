@@ -15,7 +15,9 @@ from mediatracker.core.source_poll import (
     _failed_is_poll_requeue_eligible,
     _requeue_failed_download,
 )
+from mediatracker.core.source_select import no_version_message
 from mediatracker.db.models import Download, Media, QualityProfile
+from mediatracker.providers.base import SourceResult
 
 NOW = datetime(2026, 11, 15, 8, 0, tzinfo=timezone.utc)
 
@@ -28,6 +30,41 @@ def test_last_poll_rejected_by_profile_detects_message():
     assert _last_poll_rejected_by_profile(media)
     media.last_poll_result = "found"
     assert not _last_poll_rejected_by_profile(media)
+
+
+def test_last_poll_rejected_by_profile_ignores_empty_search_message():
+    media = SimpleNamespace(
+        last_poll_result="nothing",
+        last_poll_message="Aucun résultat sur les sources de recherche pour ce titre.",
+    )
+    assert not _last_poll_rejected_by_profile(media)
+
+
+def test_no_version_message_empty_search():
+    assert no_version_message([], "Profil neutre", "") == (
+        "Aucun résultat sur les sources de recherche pour ce titre."
+    )
+
+
+def test_no_version_message_preserves_source_failure_detail():
+    detail = "Catalogue neutre : erreur (indisponible)."
+    assert no_version_message([], "Profil neutre", detail) == detail
+
+
+def test_no_version_message_profile_rejection():
+    results = [
+        SourceResult(
+            title="Série neutre",
+            ref="demo",
+            quality="720p",
+            language="VO",
+        )
+    ]
+    detail = "« Série neutre » est en 720p VO, hors du profil « Profil neutre »."
+    message = no_version_message(results, "Profil neutre", detail)
+    assert message == f"Aucune version ne correspond au profil « Profil neutre ». {detail}"
+    media = SimpleNamespace(last_poll_result="nothing", last_poll_message=message)
+    assert _last_poll_rejected_by_profile(media)
 
 
 def test_from_hosters_journals_refused_when_poll_blocked_profile():

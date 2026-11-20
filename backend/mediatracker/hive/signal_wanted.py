@@ -12,7 +12,14 @@ from mediatracker.api.errors import Problem
 from mediatracker.config import Settings
 from mediatracker.core.follow import FollowError, FollowInput, follow
 from mediatracker.core.tmdb import token as tmdb_token
-from mediatracker.db.models import HiveRequestResolution, HiveSignal, HiveWantedVolunteer, Media, MediaItem
+from mediatracker.db.models import (
+    HiveRequestResolution,
+    HiveSignal,
+    HiveWantedVolunteer,
+    Media,
+    MediaItem,
+    QualityProfile,
+)
 from mediatracker.hive.crypto_id import hive_public_id_from_public_key
 from mediatracker.hive.hive_catalogue import _stable_work_key
 from mediatracker.hive.identity import load_private_key
@@ -391,6 +398,30 @@ def take_wanted_request(
         )
     )
     db.flush()
+
+
+def media_has_wanted_volunteer(db: Session, media_id: int) -> bool:
+    row = db.scalar(
+        select(HiveWantedVolunteer.id)
+        .join(MediaItem, MediaItem.id == HiveWantedVolunteer.media_item_id)
+        .where(MediaItem.media_id == media_id)
+        .limit(1)
+    )
+    return row is not None
+
+
+def volunteer_poll_profile_chain(db: Session):
+    """Profil par défaut de l’instance seul (bon samaritain Recherché)."""
+    from mediatracker.core.profile_attempt_orchestration import ProfileChain
+    from mediatracker.core.quality_profile import profile_from_row
+
+    row = db.scalar(select(QualityProfile).where(QualityProfile.is_default.is_(True)).limit(1))
+    if row is None:
+        return None
+    profile = profile_from_row(row)
+    if profile.quality_profile_id is None:
+        return None
+    return ProfileChain(profiles=(profile,))
 
 
 def hive_volunteer_active_for_item(db: Session, media_item_id: int) -> bool:

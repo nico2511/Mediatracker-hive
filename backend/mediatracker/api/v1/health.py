@@ -55,6 +55,9 @@ class DiskFolderOut(BaseModel):
     device: str
     mount: str
     files: list[DiskFileOut] = Field(default_factory=list)
+    incomplete_trash_count: int = 0
+    incomplete_kept_recent_count: int = 0
+    incomplete_keep_until: datetime | None = None
 
 
 class DiskVolumeOut(BaseModel):

@@ -1219,6 +1219,21 @@
         "title": "CatalogRefreshOut",
         "type": "object"
       },
+      "CatalogResetIn": {
+        "properties": {
+          "confirm_name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Confirm Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_name"
+        ],
+        "title": "CatalogResetIn",
+        "type": "object"
+      },
       "CatalogSourceOut": {
         "properties": {
           "language": {
@@ -1881,6 +1896,24 @@
         "title": "ClearOut",
         "type": "object"
       },
+      "ClientConstantsOut": {
+        "properties": {
+          "hive_join_wait_hours": {
+            "title": "Hive Join Wait Hours",
+            "type": "integer"
+          },
+          "hive_media_sharing_summary_id_limit": {
+            "title": "Hive Media Sharing Summary Id Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hive_join_wait_hours",
+          "hive_media_sharing_summary_id_limit"
+        ],
+        "title": "ClientConstantsOut",
+        "type": "object"
+      },
       "ComponentOut": {
         "properties": {
           "message": {
@@ -2394,6 +2427,28 @@
             },
             "title": "Files",
             "type": "array"
+          },
+          "incomplete_keep_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incomplete Keep Until"
+          },
+          "incomplete_kept_recent_count": {
+            "default": 0,
+            "title": "Incomplete Kept Recent Count",
+            "type": "integer"
+          },
+          "incomplete_trash_count": {
+            "default": 0,
+            "title": "Incomplete Trash Count",
+            "type": "integer"
           },
           "key": {
             "title": "Key",
@@ -3897,6 +3952,16 @@
             ],
             "title": "Original Name"
           },
+          "profile_replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProfileReplacementProposalOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "season": {
             "anyOf": [
               {
@@ -3907,6 +3972,16 @@
               }
             ],
             "title": "Season"
+          },
+          "served_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServedProfileOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_available": {
             "title": "Source Available",
@@ -6004,6 +6079,23 @@
           "folder_written_bytes": {
             "default": 0,
             "title": "Folder Written Bytes",
+            "type": "integer"
+          },
+          "keep_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keep Until"
+          },
+          "kept_recent_count": {
+            "default": 0,
+            "title": "Kept Recent Count",
             "type": "integer"
           },
           "last_run_at": {
@@ -9089,9 +9181,32 @@
       },
       "MemberUiOut": {
         "properties": {
+          "app_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Version"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "display_name": {
             "title": "Display Name",
             "type": "string"
+          },
+          "hive_protocol": {
+            "default": 0,
+            "title": "Hive Protocol",
+            "type": "integer"
           },
           "instance_id": {
             "title": "Instance Id",
@@ -9756,6 +9871,68 @@
           }
         },
         "title": "ProcessMetricsOut",
+        "type": "object"
+      },
+      "ProfileReplacementActionOut": {
+        "properties": {
+          "download_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ],
+        "title": "ProfileReplacementActionOut",
+        "type": "object"
+      },
+      "ProfileReplacementProposalOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "principal_profile_id": {
+            "title": "Principal Profile Id",
+            "type": "integer"
+          },
+          "principal_profile_name": {
+            "title": "Principal Profile Name",
+            "type": "string"
+          },
+          "repli_profile_id": {
+            "title": "Repli Profile Id",
+            "type": "integer"
+          },
+          "repli_profile_name": {
+            "title": "Repli Profile Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "principal_profile_id",
+          "principal_profile_name",
+          "repli_profile_id",
+          "repli_profile_name"
+        ],
+        "title": "ProfileReplacementProposalOut",
         "type": "object"
       },
       "ProgressCard": {
@@ -11777,6 +11954,22 @@
       },
       "RucheDetailOut": {
         "properties": {
+          "catalog_epoch": {
+            "default": 0,
+            "title": "Catalog Epoch",
+            "type": "integer"
+          },
+          "catalog_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Reset At"
+          },
           "is_creator": {
             "title": "Is Creator",
             "type": "boolean"
@@ -11908,6 +12101,29 @@
         "title": "SeasonPatch",
         "type": "object"
       },
+      "ServedProfileOut": {
+        "properties": {
+          "profile_id": {
+            "title": "Profile Id",
+            "type": "integer"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          },
+          "repli": {
+            "default": true,
+            "title": "Repli",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "profile_id",
+          "profile_name"
+        ],
+        "title": "ServedProfileOut",
+        "type": "object"
+      },
       "SettingOut": {
         "properties": {
           "default": {
@@ -11961,6 +12177,9 @@
       },
       "SettingsOut": {
         "properties": {
+          "client_constants": {
+            "$ref": "#/components/schemas/ClientConstantsOut"
+          },
           "settings": {
             "items": {
               "$ref": "#/components/schemas/SettingOut"
@@ -11974,7 +12193,8 @@
         },
         "required": [
           "settings",
-          "source_defaults"
+          "source_defaults",
+          "client_constants"
         ],
         "title": "SettingsOut",
         "type": "object"
@@ -13451,6 +13671,19 @@
           }
         },
         "title": "TmdbTrialHome",
+        "type": "object"
+      },
+      "TmdbTrialPreview": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TmdbTrialCard"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "title": "TmdbTrialPreview",
         "type": "object"
       },
       "TokenCreate": {
@@ -18517,6 +18750,53 @@
         ]
       }
     },
+    "/api/v1/hive/ruches/{ruche_id_hex}/catalog-reset": {
+      "post": {
+        "description": "R\u00e9initialise le catalogue de la ruche sur toutes les instances (cr\u00e9ateur, nom confirm\u00e9).",
+        "operationId": "post_catalog_reset_api_v1_hive_ruches__ruche_id_hex__catalog_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ruche_id_hex",
+            "required": true,
+            "schema": {
+              "title": "Ruche Id Hex",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogResetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Catalog Reset",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
     "/api/v1/hive/ruches/{ruche_id_hex}/detail": {
       "get": {
         "operationId": "get_ruche_detail_api_v1_hive_ruches__ruche_id_hex__detail_get",
@@ -19387,6 +19667,90 @@
           }
         },
         "summary": "Update Item",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/v1/items/{item_id}/profile-replacement/dismiss": {
+      "post": {
+        "operationId": "dismiss_profile_replacement_api_v1_items__item_id__profile_replacement_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileReplacementActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Profile Replacement",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/v1/items/{item_id}/profile-replacement/replace": {
+      "post": {
+        "operationId": "replace_profile_version_api_v1_items__item_id__profile_replacement_replace_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileReplacementActionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replace Profile Version",
         "tags": [
           "media"
         ]
@@ -24197,6 +24561,91 @@
           }
         },
         "summary": "Get Tmdb Trial Home",
+        "tags": [
+          "tmdb-trial"
+        ]
+      }
+    },
+    "/api/v1/tmdb-trial/preview": {
+      "get": {
+        "operationId": "preview_tmdb_trial_catalog_api_v1_tmdb_trial_preview_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "display_language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 12,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Display Language"
+            }
+          },
+          {
+            "in": "query",
+            "name": "region",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2,
+                  "minLength": 2,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Region"
+            }
+          },
+          {
+            "in": "query",
+            "name": "original_languages",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Original Languages"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TmdbTrialPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Tmdb Trial Catalog",
         "tags": [
           "tmdb-trial"
         ]

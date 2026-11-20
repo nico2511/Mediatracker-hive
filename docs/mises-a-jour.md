@@ -37,7 +37,7 @@ Exemples : [exemples/](exemples/README.md).
 - Affiche la version / SHA de l’image courante et compare au registre GHCR (jeton **GHCR** optionnel) ou à GitHub (**jeton GitHub** en repli).
 - **Mettre à jour maintenant** : `POST` vers `{watchtower_url}/v1/update?image=…` avec le jeton Bearer.
 - **Redémarrer** : redémarrage du processus applicatif sans forcément retélécharger l’image.
-- Option **Me notifier quand Watchtower installe une nouvelle version** (`notify_on_update`).
+- Option **Me notifier quand une nouvelle version démarre** (`notify_on_update`).
 
 En cas d’erreur 401 : le jeton Watchtower ne correspond pas à celui du conteneur.
 

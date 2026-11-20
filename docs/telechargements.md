@@ -21,12 +21,17 @@ flowchart LR
   sources --> S --> A --> R --> P
 ```
 
-1. Un **scan** ou une action manuelle interroge les sources dans l’**ordre** défini (`download_source_order`).
-2. Le lien retenu respecte le **profil de qualité** de la fiche, la **préférence d’hébergeurs** et les hébergeurs refusés par l’application (`BLOCKED_SOURCE_HOSTERS` — non configurables).
-3. **AllDebrid** débloque le lien ; MediaTracker ne expose **pas** aria2 sur le réseau (RPC local + secret en `/config`).
-4. À la fin, le fichier est **déplacé** vers Films / Séries (structure façon Jellyfin), la bibliothèque est rescannée, Jellyfin peut être notifié.
+1. Un **scan** ou une action manuelle interroge les sources dans l’**ordre** défini (`download_source_order`), d’abord celles qui publient des **pages de liens** (Wawacity, Free-Télécharger, etc.).
+2. Si aucune page « liens » n’est retenue pour la fiche, un **repli scan** (activé par défaut, `scan_episode_sources_fallback`) peut interroger les sources **épisode** (Comet, Torrentio, addons Stremio) pour les épisodes ou le film attendus, via l’identifiant **IMDb** et le **profil** de la fiche (mêmes critères que le déblocage Comet/Torrentio). Les aimants retenus sont ceux déjà signalés **en cache** chez AllDebrid lorsque le débrideur expose ce contrôle ; un job `pending` est alors créé comme pour un lien hoster découvert au scan. Le repli respecte `remote_search_cooldown_hours` et l’ordre global des sources.
+3. Le lien retenu respecte le **profil de qualité** de la fiche, la **préférence d’hébergeurs** et les hébergeurs refusés par l’application (`BLOCKED_SOURCE_HOSTERS` — non configurables).
+4. **AllDebrid** débloque le lien ; MediaTracker ne expose **pas** aria2 sur le réseau (RPC local + secret en `/config`).
+5. À la fin, le fichier est **déplacé** vers Films / Séries (structure façon Jellyfin), la bibliothèque est rescannée, Jellyfin peut être notifié.
 
 Page **Téléchargements** : file des jobs, progression aria2, actions d’annulation / relance selon l’état.
+
+## Proposition de version principale
+
+Si un fichier local vient d’un **profil de repli**, un contrôle source ordinaire peut constater qu’une version du **profil principal** est déjà référencée (cache de liens ou catalogue Hive), sans recherche réseau dédiée. La fiche média affiche un bandeau **Remplacer** / **Ignorer**. Le remplacement réutilise la file téléchargement (`forced`) ; l’ancien fichier n’est envoyé à la corbeille qu’après rangement réussi du nouveau. Voir [Profils de qualité — Remplacement proposé](reglages/qualite.md#remplacement-proposé-repli--principal).
 
 ## Sources disponibles
 
@@ -45,7 +50,7 @@ Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio,strem
 
 Une ancienne entrée dédiée aux flux DDL UwU+ est **migrée automatiquement** vers la liste **Addons Stremio** (même URL, une ligne d’addon).
 
-Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](reglages/sources.md)), ordre des **hébergeurs** (`hoster_preference`).
+Réglages communs : délai entre requêtes (`source_request_delay_seconds`), cache (`source_cache_seconds`), backoff après erreur (`source_error_backoff_min`), délai entre recherches distantes par fiche (`remote_search_cooldown_hours`, voir [Sources](reglages/sources.md)), repli scan vers Comet/Torrentio (`scan_episode_sources_fallback`), ordre des **hébergeurs** (`hoster_preference`).
 
 ### Wawacity — films
 

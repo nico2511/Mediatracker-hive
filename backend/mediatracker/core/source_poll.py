@@ -625,7 +625,7 @@ def _collect(
         pages = pages[:_MAX_PAGES]
     _store_report(media, report_rows, pages)
     if not pages:
-        from mediatracker.core.source_select import explain_misses
+        from mediatracker.core.source_select import explain_misses, no_version_message
 
         detail = explain_misses(
             list(results),
@@ -641,9 +641,7 @@ def _collect(
             language_fallback=language_fallback,
             profile=spec,
         )
-        message = f"Aucune version ne correspond au profil « {spec.name} »."
-        if detail:
-            message = f"{message} {detail}"
+        message = no_version_message(list(results), spec.name, detail)
         if network_only:
             return PollReport(
                 result="nothing",

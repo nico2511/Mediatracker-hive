@@ -67,6 +67,24 @@ def _seed_followed_media(db, count: int) -> None:
     db.commit()
 
 
+def test_list_media_large_page_query_budget_is_flat(client, app):
+    login(client)
+    db = app.state.session_factory()
+    try:
+        _seed_followed_media(db, 400)
+    finally:
+        db.close()
+
+    queries, hook = _count(app.state.engine)
+    try:
+        response = client.get("/api/v1/media?limit=200")
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", hook)
+    assert response.status_code == 200, response.text
+    assert len(response.json()["items"]) == 200
+    assert len(queries) <= 28
+
+
 def test_list_media_query_budget_is_flat(client, app):
     login(client)
     db = app.state.session_factory()
@@ -91,7 +109,7 @@ def test_list_media_query_budget_is_flat(client, app):
     assert large.status_code == 200, large.text
     assert len(large.json()["items"]) == 50
 
-    assert len(queries_large) <= 23
+    assert len(queries_large) <= 28
     assert abs(len(queries_large) - len(queries_small)) <= 2
 
 

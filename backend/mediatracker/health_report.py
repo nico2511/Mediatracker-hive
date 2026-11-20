@@ -101,9 +101,11 @@ def _tmdb(db: Session, settings: Settings) -> Component:
     token = _secret(db, "tmdb_read_token", settings)
     if not token:
         return Component("tmdb", "skipped", "Jeton TMDB absent.")
+    from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
     from mediatracker.integrations.tmdb import shared_tmdb
 
-    client = shared_tmdb(token)
+    catalog = read_tmdb_catalog_settings(db)
+    client = shared_tmdb(token, language=catalog.display_language)
     try:
         client.ping()
     except TmdbError as exc:

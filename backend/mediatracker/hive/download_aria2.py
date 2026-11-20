@@ -433,6 +433,7 @@ def attach_or_refresh_hive_fetch(
     download: Download,
     match: HiveCatalogMatch,
     now: datetime,
+    requested_version_key: str | None = None,
 ) -> DownloadHiveFetch | None:
     moment = _aware_utc(now)
     sources = rank_sources(db, list(match.sources))
@@ -471,6 +472,10 @@ def attach_or_refresh_hive_fetch(
     ctx.peer_base_url = peer_base
     ctx.expected_size = int(match.expected_size)
     ctx.content_sha256_hex = str(match.sha256_hex).lower() or None
+    if requested_version_key:
+        ctx.requested_version_key = str(requested_version_key).strip()[:80] or None
+    elif not existing:
+        ctx.requested_version_key = None
     if not existing:
         ctx.content_mtime_ns = 0
     ctx.updated_at = moment
@@ -485,6 +490,7 @@ def enqueue_hive_download_match(
     match: HiveCatalogMatch,
     *,
     now: datetime | None = None,
+    requested_version_key: str | None = None,
 ) -> Download | None:
     """Crée ou réutilise un Download pending avec contexte Hive (pas de HiveTransferJob)."""
     moment = _aware_utc(now or datetime.now(timezone.utc))
@@ -508,7 +514,17 @@ def enqueue_hive_download_match(
     row = Download(media_item_id=item.id, state="pending", created_at=moment)
     db.add(row)
     db.flush()
-    if attach_or_refresh_hive_fetch(db, settings, download=row, match=match, now=moment) is None:
+    if (
+        attach_or_refresh_hive_fetch(
+            db,
+            settings,
+            download=row,
+            match=match,
+            now=moment,
+            requested_version_key=requested_version_key,
+        )
+        is None
+    ):
         db.delete(row)
         db.flush()
         return None

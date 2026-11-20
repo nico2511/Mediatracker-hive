@@ -120,7 +120,7 @@ async function rejectPending(row: PendingJoinRow) {
             :data-testid="`hive-pending-code-input-${p.pending_id}`"
           />
         </label>
-        <label class="row hive-pending-ack">
+        <label class="check row hive-pending-ack">
           <input
             v-model="pendingCodeAck[p.pending_id]"
             type="checkbox"

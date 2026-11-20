@@ -29,13 +29,16 @@ Une rangée de boutons restreint la liste côté interface (sans nouvel appel AP
 | Bouton | Effet |
 | --- | --- |
 | **Tous** | Aucun filtre d’état |
-| **Disponibles** | Fiches dont la disponibilité est « disponible » (fichier obtenu via le suivi) |
-| **En attente** | En attente de téléchargement, pas encore vues |
+| **Lien trouvé** | Fiches dont `availability` vaut `available` : une source a trouvé un lien, sans fichier sur le disque |
+| **En attente** | En attente de téléchargement, pas encore vues (hors « pas encore disponible ») |
 | **Sur le disque** | Fichier présent sur le NAS (y compris partiel pour une série) |
 | **En pause** | Suivi en pause |
-| **Suivi par Jellyfin** | Fiches issues de l’identification bibliothèque (`follow_origin` identification) |
 
-Sur **Suivi par Jellyfin**, l’action **Ne plus suivre ces fiches** appelle `POST /api/v1/media/unfollow-identified` : les fiches identifiées passent en non suivies, les fichiers restent en place.
+Un bouton **?** à côté de chaque libellé affiche une phrase d’aide ; sur téléphone, un encadré sous le filtre d’état actif résume le critère.
+
+Le bouton **Sélectionner** est à part de cette rangée (à droite sur grand écran, sur sa propre ligne sur téléphone).
+
+Lorsque le filtre **Origine** vaut **Identifiés bibliothèque**, l’action **Ne plus suivre ces fiches** appelle `POST /api/v1/media/unfollow-identified` : les fiches identifiées passent en non suivies, les fichiers restent en place. Une ancienne URL ou un ancien état `etat=identified` est traduit en `origine=identification`.
 
 ## Recherche, filtres avancés et tri
 
@@ -73,7 +76,7 @@ Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / S
 | Vu | Marqué comme vu |
 | Sur le disque | Fichier présent |
 | Partiel | Série incomplète sur disque (libellé personnalisé possible) |
-| Disponible | Fichier obtenu via le suivi |
+| Disponible | Source a trouvé un lien (`availability` disponible), sans fichier sur le disque |
 | Pas encore disponible | Aucune source trouvée pour l’instant |
 | En attente | En attente de téléchargement |
 

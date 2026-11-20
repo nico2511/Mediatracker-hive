@@ -31,3 +31,12 @@ Dans le formulaire, les résolutions proposées incluent **HDLight** (720p lége
 ## Échelle des résolutions
 
 Le moteur classe les résolutions du plus bas au plus haut : SD, HDLight, HD, **HDLight1080**, 1080p, 4K. Une sortie HDLight 1080p est donc **au-dessus** du HD 720p, mais **en dessous** du 1080p « plein » pour le profil par défaut (qui exige 1080p et rejette HDLight1080).
+
+## Remplacement proposé (repli → principal)
+
+Lorsqu’un fichier sur disque provient d’un **profil de repli** (profil enregistré au rangement ou dernier téléchargement terminé), les contrôles source habituels peuvent repérer une version **acceptée par le profil principal** déjà connue (liens en cache, catalogue Hive). L’application **propose** alors un remplacement sur la fiche — jamais automatique.
+
+- **Remplacer** : lance un téléchargement du profil principal via la file existante ; l’ancien fichier part à la **corbeille** seulement après un rangement réussi du nouveau.
+- **Ignorer** : masque la proposition pour cette version ; une autre version principale pourra en créer une nouvelle.
+
+Aucune proposition si le fichier est marqué **Garder (hors nettoyage)** ou déjà issu du profil principal. Le job en repli **ne remonte pas** tout seul au principal (comportement inchangé).

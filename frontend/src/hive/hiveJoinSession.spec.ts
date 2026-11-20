@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { setClientConstantsForTests } from "../clientConstants";
 import { clearHiveJoinWait, readHiveJoinWait, writeHiveJoinWait } from "./hiveJoinSession";
 
 const sample = {
@@ -11,6 +12,10 @@ const sample = {
 
 afterEach(() => {
   clearHiveJoinWait();
+});
+
+beforeEach(() => {
+  setClientConstantsForTests({ hive_join_wait_hours: 48, hive_media_sharing_summary_id_limit: 80 });
 });
 
 describe("hiveJoinSession", () => {

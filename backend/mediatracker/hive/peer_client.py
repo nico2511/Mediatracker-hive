@@ -45,6 +45,7 @@ def gossip_sync_once(
     signals: list | None = None,
     signal_cursor: dict | None = None,
     load: dict | None = None,
+    instance: dict | None = None,
 ) -> httpx.Response:
     import json
 
@@ -63,6 +64,8 @@ def gossip_sync_once(
         doc["hint"] = True
     if load is not None:
         doc["load"] = load
+    if instance is not None:
+        doc["instance"] = instance
     body = json.dumps(doc, separators=(",", ":")).encode("utf-8")
     path = f"/hive/ruche/{ruche_id.hex()}/gossip/sync"
     return signed_peer_request(
@@ -83,6 +86,7 @@ def gossip_sync(
     vector: dict[str, int],
     entries: list | None = None,
     load: dict | None = None,
+    instance: dict | None = None,
 ) -> httpx.Response:
     return gossip_sync_once(
         base_url=base_url,
@@ -91,6 +95,7 @@ def gossip_sync(
         vector=vector,
         entries=entries,
         load=load,
+        instance=instance,
     )
 
 

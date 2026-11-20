@@ -199,7 +199,10 @@ def test_follow_attaches_a_folder_with_the_same_title_and_year(client, app):
         headers=csrf(client),
     )
     assert created.status_code == 201, created.text
-    assert created.json()["attached_count"] == 1
+    assert created.json()["attached_count"] == 0
+    from mediatracker.core.attach_deferred import join_pending
+
+    join_pending()
     items = client.get(f"/api/v1/media/{created.json()['id']}/items").json()
     assert items["seasons"][0]["episodes"][0]["downloaded"] is True
     choices = client.get(f"/api/v1/media/{created.json()['id']}/library-folders").json()

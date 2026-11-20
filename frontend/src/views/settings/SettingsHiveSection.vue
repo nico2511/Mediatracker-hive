@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import { api, userFacingApiError } from "../../api";
+import HiveCatalogResetButton from "../../components/hive/HiveCatalogResetButton.vue";
 import { useHiveEnabled } from "../../composables/useHive";
 import {
   hiveTransferEndTimeToMinutes,
@@ -58,6 +59,7 @@ const transferWinEnd = ref<number | undefined>(undefined);
 const transferWinStartTime = ref("00:00");
 const transferWinEndTime = ref("00:00");
 const catalogAutoShare = ref(false);
+const hiveOnly = ref(false);
 const hiveRequestOnMiss = ref<"auto" | "ask" | "never">("auto");
 const hiveAutoAcceptRequests = ref(false);
 
@@ -161,6 +163,7 @@ async function load() {
     syncTransferWindowFieldsFromMinutes();
     catalogAutoShare.value =
       map.get("hive_catalog_auto_share") === true || map.get("hive_catalog_auto_share") === "true";
+    hiveOnly.value = map.get("hive_only") === true || map.get("hive_only") === "true";
     const onMiss = String(map.get("hive_request_on_miss") || "auto").toLowerCase();
     hiveRequestOnMiss.value = onMiss === "ask" || onMiss === "never" ? onMiss : "auto";
     hiveAutoAcceptRequests.value =
@@ -200,6 +203,7 @@ async function saveCore() {
         hive_transfer_window_start: transferWinStart.value,
         hive_transfer_window_end: transferWinEnd.value,
         hive_catalog_auto_share: catalogAutoShare.value,
+        hive_only: hiveOnly.value,
         hive_request_on_miss: hiveRequestOnMiss.value,
         hive_auto_accept_requests: hiveAutoAcceptRequests.value,
       },
@@ -325,6 +329,17 @@ async function invite(rucheId: string) {
   }
 }
 
+function onCatalogResetSuccess() {
+  error.value = "";
+  note.value = "Catalogue de la ruche réinitialisé.";
+  void load();
+}
+
+function onCatalogResetError(message: string) {
+  note.value = "";
+  error.value = message;
+}
+
 async function confirmReset() {
   if (!resetName.value.trim()) {
     return;
@@ -351,11 +366,11 @@ async function confirmReset() {
     <section class="hive-block panel stack" aria-labelledby="hive-act-title">
       <h2 id="hive-act-title" class="settings-section-title">Activation</h2>
       <p class="hive-block-lead hint">Interrupteur maître : coupe tout partage et échange. L’entrée Hive n’apparaît que lorsqu’il est activé.</p>
-      <label class="hive-toggle row sp">
-        <span>Hive</span>
-        <span class="row">
+      <label class="hive-toggle switch-line row sp">
+        <span>Hive · {{ hiveOn ? "Activé" : "Désactivé" }}</span>
+        <span class="switch">
           <input v-model="hiveOn" type="checkbox" data-testid="hive-master-toggle" @change="onToggleHive" />
-          <span>{{ hiveOn ? "Activé" : "Désactivé" }}</span>
+          <span class="switch-ui" aria-hidden="true"></span>
         </span>
       </label>
     </section>
@@ -394,6 +409,32 @@ async function confirmReset() {
         <p v-if="pullOnlyHint" class="tag warn">{{ pullOnlyHint }}</p>
       </section>
 
+      <section
+        class="hive-block panel stack"
+        aria-labelledby="hive-download-source-title"
+        data-testid="hive-download-source-section"
+      >
+        <h2 id="hive-download-source-title" class="settings-section-title">Source de téléchargement</h2>
+        <label class="hive-field switch-line sp hive-only-toggle">
+          <span class="hive-only-toggle-copy">
+            <span class="label">Ruche seule · {{ hiveOnly ? "Activé" : "Désactivé" }}</span>
+            <span class="hint block"
+              >Télécharger uniquement via la ruche, même si une clé AllDebrid est configurée. La recherche de liens
+              habituelle n’est pas utilisée.</span
+            >
+          </span>
+          <span class="switch hive-only-toggle-switch">
+            <input
+              v-model="hiveOnly"
+              type="checkbox"
+              aria-label="Ruche seule"
+              data-testid="hive-only-toggle"
+            />
+            <span class="switch-ui" aria-hidden="true"></span>
+          </span>
+        </label>
+      </section>
+
       <section class="hive-block panel stack" aria-labelledby="hive-ruches-title">
         <div class="row sp hive-block-head">
           <div>
@@ -424,6 +465,13 @@ async function confirmReset() {
                 <RouterLink class="btn btn-sm" :to="membresPath(r.ruche_id_hex)" data-testid="hive-membres-link">
                   Membres
                 </RouterLink>
+                <HiveCatalogResetButton
+                  v-if="r.is_creator"
+                  :ruche-id-hex="r.ruche_id_hex"
+                  layout="inline"
+                  @success="onCatalogResetSuccess"
+                  @error="onCatalogResetError"
+                />
                 <button v-if="r.is_creator" type="button" class="btn btn-sm" @click="invite(r.ruche_id_hex)">Inviter</button>
                 <button v-if="!r.is_creator" type="button" class="btn btn-sm danger" @click="leaveRuche(r.ruche_id_hex)">Quitter</button>
               </div>
@@ -469,38 +517,38 @@ async function confirmReset() {
             </span>
           </label>
         </fieldset>
-        <label class="hive-field row sp">
+        <label class="hive-field switch-line sp">
           <span>
-            <span class="label">Accepter automatiquement les demandes reçues</span>
+            <span class="label">Accepter automatiquement les demandes reçues · {{ hiveAutoAcceptRequests ? "Activé" : "Désactivé" }}</span>
             <span class="hint block">Désactivé par défaut : chaque demande reste à valider dans Reçues.</span>
           </span>
-          <span class="row">
+          <span class="switch">
             <input
               v-model="hiveAutoAcceptRequests"
               type="checkbox"
               data-testid="hive-auto-accept-requests-toggle"
             />
-            <span>{{ hiveAutoAcceptRequests ? "Activé" : "Désactivé" }}</span>
+            <span class="switch-ui" aria-hidden="true"></span>
           </span>
         </label>
       </section>
 
       <section class="hive-block panel stack" aria-labelledby="hive-share-title">
         <h2 id="hive-share-title" class="settings-section-title">Partage reçu</h2>
-        <label class="hive-field row sp">
+        <label class="hive-field switch-line sp">
           <span>
-            <span class="label">Repartager automatiquement les fichiers reçus via Hive</span>
+            <span class="label">Repartager automatiquement les fichiers reçus via Hive · {{ catalogAutoShare ? "Activé" : "Désactivé" }}</span>
             <span class="hint block">
               Désactivé par défaut : un fichier reçu via Hive n’enregistre pas d’intention de partage tant que ce réglage est off.
             </span>
           </span>
-          <span class="row">
+          <span class="switch">
             <input
               v-model="catalogAutoShare"
               type="checkbox"
               data-testid="hive-catalog-auto-share-toggle"
             />
-            <span>{{ catalogAutoShare ? "Activé" : "Désactivé" }}</span>
+            <span class="switch-ui" aria-hidden="true"></span>
           </span>
         </label>
       </section>
@@ -540,9 +588,12 @@ async function confirmReset() {
           </label>
           <fieldset class="hive-field hive-transfer-window" data-testid="hive-transfer-window">
             <legend class="label">Fenêtre horaire de transfert</legend>
-            <label class="row sp">
+            <label class="switch-line sp">
               <span>Toute la journée</span>
-              <input v-model="transferWinAllDay" type="checkbox" data-testid="hive-transfer-all-day" />
+              <span class="switch">
+                <input v-model="transferWinAllDay" type="checkbox" data-testid="hive-transfer-all-day" />
+                <span class="switch-ui" aria-hidden="true"></span>
+              </span>
             </label>
             <div class="hive-transfer-times">
               <label>
@@ -671,6 +722,31 @@ async function confirmReset() {
 
 .hive-toggle {
   padding-top: 0.25rem;
+}
+
+.hive-only-toggle {
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.hive-only-toggle-copy {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.hive-only-toggle-switch {
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .hive-only-toggle {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hive-only-toggle-switch {
+    justify-content: space-between;
+  }
 }
 
 .hive-ruche-list {

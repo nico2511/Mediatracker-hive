@@ -17,6 +17,7 @@ from mediatracker.events.catalog import GROUPABLE_EVENTS
 from mediatracker.events.channels import for_hook
 from mediatracker.events.scrub import scrub_payload
 from mediatracker.security.ssrf import OutboundUrlRejected, enforce_outbound_request_url, settings_rejection_message
+from mediatracker.settings_int import int_setting as _int_setting
 
 logger = logging.getLogger(__name__)
 
@@ -405,14 +406,6 @@ def _add_delivery(db: Session, webhook_id: int, event_id: int, due: datetime) ->
         return
 
 
-def _int_setting(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def _text_setting(db: Session, key: str) -> str:

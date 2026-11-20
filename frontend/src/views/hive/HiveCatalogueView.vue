@@ -171,9 +171,12 @@ async function onVersionRequested() {
           Séries
         </button>
       </div>
-      <label class="row">
-        <input v-model="hideOwned" type="checkbox" @change="load" />
+      <label class="switch-line">
         <span class="hint">Cacher ce que j’ai déjà</span>
+        <span class="switch">
+          <input v-model="hideOwned" type="checkbox" @change="load" />
+          <span class="switch-ui" aria-hidden="true"></span>
+        </span>
       </label>
     </div>
     <p v-if="refreshedAt" class="hint hive-catalogue-refreshed">Catalogue fusionné actualisé.</p>

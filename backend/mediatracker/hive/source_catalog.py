@@ -451,7 +451,7 @@ def catalogue_request_miss_detail(
     from mediatracker.core.file_status import FileStatusIndex
 
     file_status = FileStatusIndex.load(db, [item]).for_item(item)
-    if file_status == "present" or (item.downloaded and item.file_path):
+    if not explicit_version and (file_status == "present" or (item.downloaded and item.file_path)):
         return "Cette œuvre est déjà dans votre bibliothèque."
     rows = _rows_for_item(db, media, item)
     if not rows:

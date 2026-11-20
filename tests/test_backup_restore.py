@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from tests.conftest import csrf, login
 
-from mediatracker.db.models import Media
+from mediatracker.core.installed_version import FINGERPRINT_KEY
+from mediatracker.db.models import Event, Media, Setting
 from mediatracker.maintenance.backup import backup_sqlite, copy_sqlite_file, sqlite_path
 from mediatracker.maintenance.restore_catalog import (
     BackupCatalogError,
@@ -97,6 +98,45 @@ def test_backup_preview_rejects_path_outside_backups_dir(client, settings):
         resolve_backup_file(settings, "subdir/evil.db")
     bad = client.get("/api/v1/maintenance/backups/not-a-backup.db/preview", headers=csrf(client))
     assert bad.status_code == 404
+
+
+def test_restore_does_not_emit_system_updated(client, app, settings, worker_ack_simulator, monkeypatch):
+    monkeypatch.setenv("MEDIATRACKER_VERSION", "2.0.0")
+    monkeypatch.setenv("MEDIATRACKER_GIT_SHA", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    login(client)
+    db = app.state.session_factory()
+    try:
+        now = datetime.now(timezone.utc)
+        row = db.get(Setting, FINGERPRINT_KEY)
+        if row is None:
+            db.add(
+                Setting(key=FINGERPRINT_KEY, value="1.9.0@9999999", is_secret=False, updated_at=now),
+            )
+        else:
+            row.value = "1.9.0@9999999"
+        db.commit()
+    finally:
+        db.close()
+
+    _seed_fiche(client, "Slot A")
+    name = _backup_name(settings, datetime(2026, 10, 21, 9, 30, tzinfo=timezone.utc))
+    _seed_fiche(client, "Slot B")
+
+    done = client.post(
+        f"/api/v1/maintenance/backups/{name}/restore",
+        json={"confirm": "RESTORE"},
+        headers=csrf(client),
+    )
+    assert done.status_code == 200, done.text
+
+    db = app.state.session_factory()
+    try:
+        assert db.query(Event).filter_by(type="system.updated").count() == 0
+        stored = db.get(Setting, FINGERPRINT_KEY)
+        assert stored is not None
+        assert stored.value == "2.0.0@aaaaaaa"
+    finally:
+        db.close()
 
 
 def test_restore_replaces_data_and_keeps_safety_copy(client, app, settings, worker_ack_simulator):

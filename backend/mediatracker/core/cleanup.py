@@ -26,6 +26,7 @@ from mediatracker.core.storage import storage_layout
 from mediatracker.db.models import Download, Event, LibraryFile, Media, MediaItem, MediaSeason, Setting, TrashEntry
 from mediatracker.events import record_event
 from mediatracker.library.scanner import library_roots
+from mediatracker.settings_int import int_setting as _int_setting
 
 logger = logging.getLogger(__name__)
 
@@ -1172,7 +1173,7 @@ def _owned_files(
             row
             for row in db.scalars(select(Media).where(Media.id != media.id, Media.type == media.type)).all()
         ]
-    candidates = _files_for(items)
+    candidates = _files_for(items, stat_sizes=batch is None)
     owned: list[PlannedFile] = []
     for planned in candidates:
         path = planned.path
@@ -1198,7 +1199,7 @@ def _inside(path: Path, root: Path) -> bool:
     return True
 
 
-def _files_for(items: list[MediaItem]) -> list[PlannedFile]:
+def _files_for(items: list[MediaItem], *, stat_sizes: bool = True) -> list[PlannedFile]:
     found: list[PlannedFile] = []
     seen: set[str] = set()
     for item in items:
@@ -1210,7 +1211,7 @@ def _files_for(items: list[MediaItem]) -> list[PlannedFile]:
             found.append(PlannedFile(item=item, path=path, size=0))
             continue
         seen.add(key)
-        size = path.stat().st_size if path.is_file() else 0
+        size = path.stat().st_size if stat_sizes and path.is_file() else 0
         found.append(PlannedFile(item=item, path=path, size=size))
     return found
 
@@ -1354,16 +1355,6 @@ def _bool_setting(db: Session, key: str, default: bool) -> bool:
     if row is None or not row.value:
         return default
     return row.value == "true"
-
-
-def _int_setting(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def _aware(value: datetime) -> datetime:

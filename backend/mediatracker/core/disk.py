@@ -13,6 +13,7 @@ from mediatracker.config import Settings
 from mediatracker.core.storage import incomplete_dir, storage_layout
 from mediatracker.db.models import Download, Setting
 from mediatracker.events import record_event
+from mediatracker.settings_int import int_setting as _int_setting
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +150,3 @@ def datetime_now():
     return datetime.now(timezone.utc)
 
 
-def _int_setting(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or row.value in (None, ""):
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default

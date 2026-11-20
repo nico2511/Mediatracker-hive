@@ -1,4 +1,4 @@
-> Instantané public de MediaTracker, commit source 1d6f59b. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
+> Instantané public de MediaTracker, commit source 13659cb. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
 
 # MediaTracker
 
@@ -93,7 +93,7 @@ Copies quotidiennes de la base dans `/config/backups/`. Dans **Réglages → Dis
 
 ## Licence
 
-Ce dépôt est distribué sous [GNU GPL version 3](LICENSE) (ou ultérieure). Copyright © 2026 nico2511.
+Ce dépôt est distribué sous [GNU GPL version 3](LICENSE) (ou ultérieure). Copyright © 2026 nico2511 (voir [NOTICE](NOTICE)).
 
 L’image Docker inclut [aria2](https://aria2.github.io/) (téléchargements BitTorrent), un logiciel sous licence GNU GPL version 2 ou ultérieure, distinct du code MediaTracker embarqué dans la même image.
 

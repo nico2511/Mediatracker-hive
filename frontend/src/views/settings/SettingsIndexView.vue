@@ -16,7 +16,7 @@ const badgeFor = (slug: string) => settingsIndexBadgeLabel(slug, status);
 <template>
   <div class="settings-index zone">
     <div v-for="group in groups" :key="group.id" class="settings-index-group">
-      <h2 class="settings-subsection-title settings-index-group-title">
+      <h2 class="settings-index-group-title">
         {{ group.title }}
       </h2>
       <RouterLink

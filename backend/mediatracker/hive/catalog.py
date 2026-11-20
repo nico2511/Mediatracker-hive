@@ -21,6 +21,7 @@ from mediatracker.db.models import (
     Media,
     MediaItem,
 )
+from mediatracker.hive.catalog_epoch import local_catalog_epoch
 from mediatracker.hive.catalog_validity import local_offer_publishable
 from mediatracker.hive.crypto_id import hive_public_id_from_public_key, sign_document, verify_document_signature
 from mediatracker.hive.fingerprint import _stat_fingerprint, ensure_fingerprint_row_for_item
@@ -230,6 +231,7 @@ def build_catalog_payload(
     etat: str,
     taille: int | None = None,
     file_mtime_ns: int | None = None,
+    catalog_epoch: int = 0,
 ) -> dict:
     payload: dict = {
         "v": 1,
@@ -241,6 +243,7 @@ def build_catalog_payload(
         "sha256": sha256_hex,
         "file_id": file_id.hex(),
         "etat": etat,
+        "catalog_epoch": int(catalog_epoch),
     }
     if isinstance(taille, int) and taille > 0:
         payload["taille"] = taille
@@ -405,6 +408,7 @@ def publish_available(
     ):
         return
     seq = next_seq(db, ruche_id, origin_id)
+    epoch = local_catalog_epoch(db, ruche_id)
     payload = build_catalog_payload(
         ruche_id=ruche_id,
         origin_instance_id=origin_id,
@@ -416,6 +420,7 @@ def publish_available(
         etat="disponible",
         taille=taille,
         file_mtime_ns=file_mtime_ns,
+        catalog_epoch=epoch,
     )
     sig = sign_payload(private_key, payload)
     _persist_entry(db, ruche_id=ruche_id, payload=payload, signature_b64=sig, media_item_id=item.id)
@@ -444,6 +449,7 @@ def publish_tombstone(
     if last.payload_json:
         prev = json.loads(last.payload_json)
     else:
+        epoch = local_catalog_epoch(db, ruche_id)
         prev = build_catalog_payload(
             ruche_id=ruche_id,
             origin_instance_id=origin_id,
@@ -453,10 +459,12 @@ def publish_tombstone(
             sha256_hex=last.sha256_hex or "",
             file_id=last.file_id or _file_id_for_ruche(ruche_id, origin_id, item.id),
             etat="disponible",
+            catalog_epoch=epoch,
         )
     payload = dict(prev)
     payload["seq"] = seq
     payload["etat"] = "retire"
+    payload["catalog_epoch"] = local_catalog_epoch(db, ruche_id)
     sig = sign_payload(private_key, payload)
     entry = HiveEntry(
         ruche_id=ruche_id,

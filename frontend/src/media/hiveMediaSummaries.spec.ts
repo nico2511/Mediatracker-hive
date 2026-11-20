@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  fetchHiveMediaSummaries,
-  HIVE_MEDIA_SUMMARY_LIMIT,
-  releaseLoadingThenRefreshHive,
-} from "./hiveMediaSummaries";
+import { setClientConstantsForTests } from "../clientConstants";
+import { fetchHiveMediaSummaries, releaseLoadingThenRefreshHive } from "./hiveMediaSummaries";
 
 describe("fetchHiveMediaSummaries", () => {
+  beforeEach(() => {
+    setClientConstantsForTests({ hive_join_wait_hours: 48, hive_media_sharing_summary_id_limit: 80 });
+  });
+
   it("calls the batch endpoint with a comma-separated id list", async () => {
     const request = vi.fn().mockResolvedValue([
       { media_id: 11, shared: true, transfer_active: false, preparing: false, pull_only: false },
@@ -18,13 +19,23 @@ describe("fetchHiveMediaSummaries", () => {
     expect(out[22]?.transfer_active).toBe(true);
   });
 
-  it("caps the number of requested ids", async () => {
+  it("envoie tous les ids si client_constants non chargé", async () => {
+    setClientConstantsForTests(null);
     const request = vi.fn().mockResolvedValue([]);
-    const ids = Array.from({ length: HIVE_MEDIA_SUMMARY_LIMIT + 5 }, (_, index) => index + 1);
+    const ids = Array.from({ length: 85 }, (_, index) => index + 1);
     await fetchHiveMediaSummaries(request, ids);
     const path = request.mock.calls[0]?.[0] as string;
     const requested = path.split("ids=")[1]?.split(",") ?? [];
-    expect(requested).toHaveLength(HIVE_MEDIA_SUMMARY_LIMIT);
+    expect(requested).toHaveLength(85);
+  });
+
+  it("caps the number of requested ids", async () => {
+    const request = vi.fn().mockResolvedValue([]);
+    const ids = Array.from({ length: 85 }, (_, index) => index + 1);
+    await fetchHiveMediaSummaries(request, ids);
+    const path = request.mock.calls[0]?.[0] as string;
+    const requested = path.split("ids=")[1]?.split(",") ?? [];
+    expect(requested).toHaveLength(80);
   });
 });
 

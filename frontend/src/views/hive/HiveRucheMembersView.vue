@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 
 import { api, userFacingApiError } from "../../api";
+import HiveCatalogResetButton from "../../components/hive/HiveCatalogResetButton.vue";
 import HivePendingJoinList, { type PendingJoinRow } from "../../components/hive/HivePendingJoinList.vue";
 
 const MEMBERS_PAGE_SIZE = 20;
@@ -12,18 +13,55 @@ interface MemberRow {
   display_name: string;
   pull_only: boolean;
   is_self: boolean;
+  app_version: string | null;
+  hive_protocol: number;
+  capabilities: string[];
+}
+
+function versionParts(raw: string | null | undefined): { display: string; title: string } {
+  if (!raw) {
+    return { display: "", title: "" };
+  }
+  const at = raw.indexOf("@");
+  if (at < 0) {
+    return { display: raw, title: raw };
+  }
+  return { display: raw.slice(0, at), title: raw };
+}
+
+function versionPillLabel(
+  m: MemberRow,
+  localProtocol: number,
+): { text: string; title: string; tone: "muted" | "ok" | "warn" } {
+  if (!m.app_version) {
+    return { text: "version inconnue", title: "", tone: "muted" };
+  }
+  const { display, title } = versionParts(m.app_version);
+  const upToDate = m.hive_protocol >= localProtocol;
+  const text = upToDate ? `v${display} · à jour` : `v${display} · ancienne version`;
+  return { text, title, tone: upToDate ? "ok" : "warn" };
 }
 
 interface RucheDetail {
   ruche_id_hex: string;
   is_creator: boolean;
   weekly_quota_bytes: number;
+  catalog_epoch: number;
+  catalog_reset_at: string | null;
   members: MemberRow[];
 }
+
+const HIVE_PROTOCOL_FALLBACK = 1;
 
 const route = useRoute();
 const rucheIdHex = computed(() => String(route.params.rucheIdHex || ""));
 const detail = ref<RucheDetail | null>(null);
+
+const selfMember = computed(() => detail.value?.members.find((m) => m.is_self) ?? null);
+
+const localHiveProtocol = computed(
+  () => selfMember.value?.hive_protocol ?? HIVE_PROTOCOL_FALLBACK,
+);
 const pendingJoins = ref<PendingJoinRow[]>([]);
 const quotaGb = ref(100);
 const memberSearch = ref("");
@@ -31,6 +69,19 @@ const memberPage = ref(1);
 const error = ref("");
 const note = ref("");
 const loading = ref(false);
+const catalogResetNotice = computed(() => {
+  const raw = detail.value?.catalog_reset_at;
+  if (!raw || detail.value?.is_creator) {
+    return "";
+  }
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `Le maître a réinitialisé le catalogue le ${dd}/${mm}.`;
+});
 
 const filteredMembers = computed(() => {
   const q = memberSearch.value.trim().toLowerCase();
@@ -133,6 +184,17 @@ function onPendingError(message: string) {
 function onPendingNote(message: string) {
   note.value = message;
 }
+
+function onCatalogResetSuccess() {
+  error.value = "";
+  note.value = "Catalogue de la ruche réinitialisé.";
+  void loadDetail();
+}
+
+function onCatalogResetError(message: string) {
+  note.value = "";
+  error.value = message;
+}
 </script>
 
 <template>
@@ -149,6 +211,14 @@ function onPendingNote(message: string) {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="note" class="ok">{{ note }}</p>
     <p v-if="loading && !detail" class="hint">Chargement…</p>
+
+    <p
+      v-if="catalogResetNotice"
+      class="hint hive-catalog-reset-notice"
+      data-testid="hive-catalog-reset-notice"
+    >
+      {{ catalogResetNotice }}
+    </p>
 
     <template v-if="detail">
       <section
@@ -180,6 +250,14 @@ function onPendingNote(message: string) {
           </label>
         </div>
 
+        <p
+          v-if="selfMember?.app_version"
+          class="hive-self-version hint"
+          data-testid="hive-self-version-announce"
+        >
+          Cette instance annonce v{{ versionParts(selfMember.app_version).display }}
+        </p>
+
         <ul class="hive-member-list" data-testid="hive-member-list">
           <li
             v-for="m in pagedMembers"
@@ -187,11 +265,21 @@ function onPendingNote(message: string) {
             class="hive-member-row stack"
             data-testid="hive-member-row"
           >
-            <div class="row sp">
-              <span>
-                {{ m.display_name }}
-                <span v-if="m.pull_only" class="hint">(tirage)</span>
-              </span>
+            <div class="row sp hive-member-main">
+              <div class="hive-member-identity stack tight">
+                <span class="hive-member-name">
+                  {{ m.display_name }}
+                  <span v-if="m.pull_only" class="hint">(tirage)</span>
+                </span>
+                <span
+                  class="hive-version-pill"
+                  :class="`hive-version-pill--${versionPillLabel(m, localHiveProtocol).tone}`"
+                  :title="versionPillLabel(m, localHiveProtocol).title || undefined"
+                  data-testid="hive-member-version-pill"
+                >
+                  {{ versionPillLabel(m, localHiveProtocol).text }}
+                </span>
+              </div>
               <button
                 v-if="detail.is_creator && !m.is_self"
                 type="button"
@@ -242,6 +330,14 @@ function onPendingNote(message: string) {
           </button>
         </div>
       </section>
+
+      <HiveCatalogResetButton
+        v-if="detail.is_creator"
+        :ruche-id-hex="rucheIdHex"
+        layout="zone"
+        @success="onCatalogResetSuccess"
+        @error="onCatalogResetError"
+      />
     </template>
   </div>
 </template>
@@ -298,6 +394,55 @@ function onPendingNote(message: string) {
   gap: 0.5rem;
 }
 
+.hive-member-main {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hive-member-identity {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.hive-member-name {
+  word-break: break-word;
+}
+
+.hive-version-pill {
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+  white-space: normal;
+}
+
+.hive-version-pill--muted {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 92%, var(--card));
+}
+
+.hive-version-pill--ok {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--ok) 12%, var(--card));
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--hair));
+}
+
+.hive-version-pill--warn {
+  color: color-mix(in srgb, var(--warn) 85%, var(--text));
+  background: color-mix(in srgb, var(--warn) 14%, var(--card));
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--hair));
+}
+
+.hive-self-version {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 .hive-member-options {
   align-items: flex-end;
   flex-wrap: wrap;
@@ -310,6 +455,11 @@ function onPendingNote(message: string) {
 
 .stack.tight {
   gap: 0.2rem;
+}
+
+.hive-catalog-reset-notice {
+  margin: 0;
+  font-size: 0.88rem;
 }
 
 @media (max-width: 720px) {

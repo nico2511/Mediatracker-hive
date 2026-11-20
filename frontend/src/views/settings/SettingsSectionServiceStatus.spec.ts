@@ -160,13 +160,13 @@ describe("SettingsSectionView — statut des services", () => {
     expect(patch.values.scan_interval_min).toBe(120);
   });
 
-  it("masque la notification Watchtower et garde vérifier/redémarrer", async () => {
+  it("garde Mettre à jour maintenant indisponible sans Watchtower et affiche la notification de version", async () => {
     routeSection.value = "maj";
     serviceFlags.watchtowerConfigured = false;
     fetchSettingsMock.mockResolvedValue({
       settings: [
         { key: "watchtower_url", value: "" },
-        { key: "notify_on_watchtower_update", value: true },
+        { key: "notify_on_update", value: true },
       ],
     });
     apiMock.mockImplementation(async (url: string) => {
@@ -179,21 +179,27 @@ describe("SettingsSectionView — statut des services", () => {
           watchtower_configured: false,
           version: "0.0.0",
           active_downloads: 0,
+          detail: "ok",
         };
+      }
+      if (url === "/api/v1/webhooks") {
+        return [];
+      }
+      if (url === "/api/v1/events/notifications") {
+        return { events: [] };
       }
       return {};
     });
     const wrapper = mountSection();
     await flushPromises();
     expect(wrapper.text()).toContain("Indisponible : renseignez l'URL et le jeton Watchtower");
-    expect(wrapper.text()).not.toContain("Me notifier quand Watchtower");
-    expect(wrapper.text()).not.toContain("Disponible après configuration de Watchtower");
+    expect(wrapper.text()).toContain("Me notifier quand une nouvelle version démarre");
     expect(wrapper.text()).toContain("Vérifier la mise à jour");
     expect(wrapper.text()).toContain("Redémarrer");
     expect(wrapper.text()).toContain("Mettre à jour maintenant");
   });
 
-  it("masque les options Jellyfin et oriente vers Services et jetons", async () => {
+  it("masque les options Jellyfin et oriente vers API et jetons", async () => {
     routeSection.value = "jellyfin";
     serviceFlags.jellyfinConfigured = false;
     fetchSettingsMock.mockResolvedValue({
@@ -225,7 +231,7 @@ describe("SettingsSectionView — statut des services", () => {
     await vi.waitFor(() => expect(serviceStatusRefs().serviceStatusLoaded.value).toBe(true));
     await flushPromises();
     expect(wrapper.text()).toContain("Disponible après connexion de Jellyfin");
-    expect(wrapper.text()).toContain("Services et jetons");
+    expect(wrapper.text()).toContain("API et jetons");
     expect(wrapper.text()).not.toContain("URL Jellyfin");
     expect(wrapper.text()).not.toContain("Tester la connexion");
     expect(wrapper.text()).not.toContain("Utilisateur Jellyfin");

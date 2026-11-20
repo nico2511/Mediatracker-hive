@@ -56,7 +56,7 @@ const sectionPath = (slug: string) => `/reglages/${slug}`;
       aria-label="Sections des réglages"
     >
       <template v-for="group in navGroups" :key="group.id">
-        <p class="settings-tabs-group-title settings-subsection-title">
+        <p class="settings-tabs-group-title">
           {{ group.title }}
         </p>
         <RouterLink

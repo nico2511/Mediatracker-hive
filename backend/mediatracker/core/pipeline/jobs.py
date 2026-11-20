@@ -23,6 +23,7 @@ from mediatracker.db.session import commit_retry
 from mediatracker.events import record_event
 from mediatracker.providers.base import AUTH_BLOCKED_MESSAGE
 from mediatracker.providers.downloaders.aria2 import scrub_url
+from mediatracker.settings_int import int_setting as _int_setting
 
 _SOURCE_SWITCH_JOURNAL_COOLDOWN = timedelta(hours=1)
 
@@ -687,6 +688,20 @@ def _fail(db: Session, row: Download, code: str, message: str, now: datetime) ->
             "status": "En erreur",
         },
     )
+    if item is not None and media is not None:
+        from mediatracker.config import get_settings
+        from mediatracker.core.profile_replacement import on_download_terminal
+
+        on_download_terminal(
+            db,
+            get_settings(),
+            media,
+            item,
+            row,
+            success=False,
+            new_dest=None,
+            now=now,
+        )
 
 
 def _block_queue(db: Session, row: Provider | None, now: datetime) -> None:
@@ -753,18 +768,6 @@ def hoster_preference_list(db: Session, settings: Settings) -> list[str]:
 
 
 _hosters = hoster_preference_list
-
-
-def _int_setting(db: Session, key: str, default: int) -> int:
-    from mediatracker.db.models import Setting
-
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def _text_setting(db: Session, key: str, default: str) -> str:

@@ -91,13 +91,21 @@ def refresh_digital_releases(
             _schedule(db, moment + _INTERVAL)
             db.commit()
             return False
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
         from mediatracker.integrations.tmdb import shared_tmdb
 
-        client = shared_tmdb(token)
+        catalog = read_tmdb_catalog_settings(db)
+        client = shared_tmdb(token, language=catalog.display_language)
+    else:
+        catalog = None
+    if catalog is None:
+        from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+        catalog = read_tmdb_catalog_settings(db)
     start = moment.date() - timedelta(days=_PAST_DAYS)
     end = moment.date() + timedelta(days=_AHEAD_DAYS)
-    films = client.digital_releases(start=start, end=end)[:_LIMIT]
-    series = client.airing_series(start=start, end=end)[:_LIMIT]
+    films = client.digital_releases(start=start, end=end, region=catalog.region)[:_LIMIT]
+    series = client.airing_series(start=start, end=end, region=catalog.region)[:_LIMIT]
     db.execute(delete(DigitalRelease))
     _store_releases(db, films, media_type="film", moment=moment)
     _store_releases(db, series, media_type="series", moment=moment)

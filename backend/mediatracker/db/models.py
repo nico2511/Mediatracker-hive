@@ -286,11 +286,45 @@ class MediaItem(Base):
     file_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     release_quality: Mapped[str | None] = mapped_column(String(16), nullable=True)
     release_language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Profil validé au rangement (identité ``quality_profile`` du job terminé).
+    served_poll_quality_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("quality_profile.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # Short audit list, e.g. voluntary trash or an unexpected file loss.
     traces: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     media: Mapped[Media] = relationship(back_populates="items")
     links: Mapped[list["Link"]] = relationship(back_populates="item", cascade="all, delete-orphan")
+
+
+class ProfileReplacementProposal(Base):
+    """Proposition utilisateur : remplacer un fichier repli par une version du profil principal."""
+
+    __tablename__ = "profile_replacement_proposal"
+    __table_args__ = (
+        UniqueConstraint("media_item_id", "version_key", name="uq_profile_repl_item_version"),
+        Index("ix_profile_repl_item_state", "media_item_id", "state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    media_item_id: Mapped[int] = mapped_column(
+        ForeignKey("media_item.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    principal_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("quality_profile.id", ondelete="RESTRICT"), nullable=False
+    )
+    repli_profile_id: Mapped[int] = mapped_column(ForeignKey("quality_profile.id", ondelete="RESTRICT"), nullable=False)
+    version_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    link_id: Mapped[int | None] = mapped_column(ForeignKey("link.id", ondelete="SET NULL"), nullable=True)
+    hive_sha256_hex: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # active | stale | dismissed | replacing | completed
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    replace_download_id: Mapped[int | None] = mapped_column(
+        ForeignKey("download.id", ondelete="SET NULL"), nullable=True
+    )
+    old_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 class Link(Base):
@@ -392,6 +426,8 @@ class DownloadHiveFetch(Base):
     content_sha256_hex: Mapped[str | None] = mapped_column(String(64), nullable=True)
     grant_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     grant_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Choix explicite catalogue Hive (demande manuelle) : cohabitation multi-versions à l’import.
+    requested_version_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -731,6 +767,8 @@ class HiveRuche(Base):
     ruche_id: Mapped[bytes] = mapped_column(LargeBinary(16), primary_key=True)
     creator_instance_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
     weekly_quota_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    catalog_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    catalog_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     members: Mapped[list["HiveMember"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
@@ -883,6 +921,22 @@ class HiveOriginReachability(Base):
     last_ok_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     measured_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
     measured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class HivePeerInfo(Base):
+    """Dernier instantané version / protocole reçu d'un pair (gossip)."""
+
+    __tablename__ = "hive_peer_info"
+
+    ruche_id: Mapped[bytes] = mapped_column(
+        LargeBinary(16), ForeignKey("hive_ruche.ruche_id", ondelete="CASCADE"), primary_key=True
+    )
+    origin_instance_id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    app_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    hive_protocol: Mapped[int] = mapped_column(Integer, nullable=False)
+    capabilities_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class HivePeerLoad(Base):

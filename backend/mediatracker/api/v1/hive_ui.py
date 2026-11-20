@@ -13,14 +13,19 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.client_constants import HIVE_MEDIA_SHARING_SUMMARY_ID_LIMIT as _MEDIA_SHARING_SUMMARY_ID_LIMIT
 from mediatracker.config import Settings
+from mediatracker.core.file_status import FileStatusIndex
 from mediatracker.core.follow import FollowError, FollowInput, follow
+from mediatracker.core.pipeline.download_guard import DOWNLOAD_TERMINAL_STATES
 from mediatracker.db.models import (
     Download,
     DownloadHiveFetch,
     HiveCatalogue,
     HiveEntry,
     HiveFileFingerprint,
+    HiveShareExclusion,
+    HiveShareIntent,
     Media,
     MediaItem,
 )
@@ -39,8 +44,13 @@ from mediatracker.hive.catalogue_card import (
 from mediatracker.hive.download_aria2 import hive_download_active_for_item
 from mediatracker.hive.hive_catalogue import load_hive_catalogue_rows, refresh_hive_catalogue_store
 from mediatracker.hive.identity import hive_enabled_in_db
-from mediatracker.hive.share_exclusions import list_excluded_ruche_ids, replace_share_exclusions
-from mediatracker.hive.share_policy import effective_exclude_all_for_ui, grant_share_intent, revoke_share_intent
+from mediatracker.hive.share_exclusions import RUCHE_EXCLUDE_ALL, list_excluded_ruche_ids, replace_share_exclusions
+from mediatracker.hive.share_policy import (
+    effective_exclude_all_for_ui,
+    grant_share_intent,
+    hive_catalog_auto_share_enabled,
+    revoke_share_intent,
+)
 from mediatracker.hive.source_catalog import (
     _expected_size_for_sha,
     _parse_version_parts,
@@ -591,25 +601,123 @@ class MediaShareSummaryOut(BaseModel):
     pull_only: bool
 
 
-_MEDIA_SHARING_SUMMARY_ID_LIMIT = 80
+def _batch_media_share_summaries(db: Session, _settings: Settings, media_ids: list[int]) -> list[MediaShareSummaryOut]:
+    del _settings
+    pull_only = hive_enabled_in_db(db) and not _public_address_configured(db)
+    if not media_ids:
+        return []
+    hive_on = hive_enabled_in_db(db)
+    public_ok = _public_address_configured(db)
+    auto_share = hive_catalog_auto_share_enabled(db)
+
+    items = list(db.scalars(select(MediaItem).where(MediaItem.media_id.in_(media_ids))).all())
+    items_by_media: dict[int, list[MediaItem]] = {media_id: [] for media_id in media_ids}
+    for item in items:
+        items_by_media.setdefault(item.media_id, []).append(item)
+
+    item_ids = [item.id for item in items if item.id is not None]
+    fingerprints: dict[int, HiveFileFingerprint] = {}
+    if item_ids:
+        for row in db.scalars(
+            select(HiveFileFingerprint).where(HiveFileFingerprint.media_item_id.in_(item_ids))
+        ).all():
+            fingerprints[row.media_item_id] = row
+
+    exclusions_by_item: dict[int, list[HiveShareExclusion]] = {}
+    if item_ids:
+        for row in db.scalars(
+            select(HiveShareExclusion).where(HiveShareExclusion.media_item_id.in_(item_ids))
+        ).all():
+            exclusions_by_item.setdefault(row.media_item_id, []).append(row)
+
+    intent_ids: set[int] = set()
+    if item_ids:
+        intent_ids = set(
+            db.scalars(select(HiveShareIntent.media_item_id).where(HiveShareIntent.media_item_id.in_(item_ids))).all()
+        )
+
+    file_status = FileStatusIndex.load(db, items) if items else None
+    transfer_active_ids: set[int] = set()
+    if item_ids:
+        sha_by_item = {
+            item_id: (fingerprints[item_id].sha256_hex or "").lower()
+            for item_id in item_ids
+            if item_id in fingerprints and (fingerprints[item_id].sha256_hex or "").strip()
+        }
+        if sha_by_item:
+            for media_item_id, fetch_sha in db.execute(
+                select(Download.media_item_id, DownloadHiveFetch.sha256_hex)
+                .join(DownloadHiveFetch, DownloadHiveFetch.download_id == Download.id)
+                .where(
+                    Download.media_item_id.in_(sha_by_item.keys()),
+                    Download.state.not_in(tuple(DOWNLOAD_TERMINAL_STATES)),
+                )
+            ):
+                expected = sha_by_item.get(media_item_id)
+                if expected and (fetch_sha or "").lower() == expected:
+                    transfer_active_ids.add(media_item_id)
+
+    def effective_exclude_all(item_id: int) -> bool:
+        rows = exclusions_by_item.get(item_id, [])
+        if any(row.ruche_id == RUCHE_EXCLUDE_ALL for row in rows):
+            return True
+        if auto_share:
+            return False
+        return item_id not in intent_ids
+
+    def shareable_base(item: MediaItem) -> bool:
+        if not hive_on or not public_ok or file_status is None:
+            return False
+        status = file_status.for_item(item)
+        present = status == "present"
+        if not present and status not in {"trash", "trashed"} and item.downloaded and item.file_path:
+            from pathlib import Path
+
+            present = Path(item.file_path).is_file()
+        if not present:
+            return False
+        fp = fingerprints.get(item.id) if item.id is not None else None
+        return fp is not None and bool(fp.sha256_hex)
+
+    def item_preparing(item: MediaItem) -> bool:
+        fp = fingerprints.get(item.id) if item.id is not None else None
+        preparing = fp is not None and not (fp.sha256_hex or "").strip() and bool(item.file_path)
+        return preparing and not shareable_base(item)
+
+    summaries: list[MediaShareSummaryOut] = []
+    for media_id in media_ids:
+        shared = False
+        transfer_active = False
+        preparing = False
+        for item in items_by_media.get(media_id, []):
+            if item.id is None:
+                continue
+            sh_base = shareable_base(item)
+            shared = shared or (sh_base and not effective_exclude_all(item.id))
+            transfer_active = transfer_active or (item.id in transfer_active_ids)
+            preparing = preparing or item_preparing(item)
+        summaries.append(
+            MediaShareSummaryOut(
+                media_id=media_id,
+                shared=shared,
+                transfer_active=transfer_active,
+                preparing=preparing,
+                pull_only=pull_only,
+            )
+        )
+    return summaries
 
 
 def _media_share_summary_for_id(db: Session, settings: Settings, media_id: int) -> MediaShareSummaryOut:
-    items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all())
-    shared = False
-    transfer_active = False
-    preparing = False
+    batch = _batch_media_share_summaries(db, settings, [media_id])
+    if batch:
+        return batch[0]
     pull_only = hive_enabled_in_db(db) and not _public_address_configured(db)
-    for item in items:
-        row = _share_state_for_item(db, item, settings=settings)
-        shared = shared or row.shared
-        transfer_active = transfer_active or row.transfer_active
-        preparing = preparing or row.preparing
     return MediaShareSummaryOut(
         media_id=media_id,
-        shared=shared,
-        transfer_active=transfer_active,
-        preparing=preparing,
+        shared=False,
+        transfer_active=False,
+        preparing=False,
         pull_only=pull_only,
     )
 
@@ -640,7 +748,7 @@ def batch_media_sharing_summary(
         media_ids.append(media_id)
         if len(media_ids) >= _MEDIA_SHARING_SUMMARY_ID_LIMIT:
             break
-    return [_media_share_summary_for_id(db, settings, media_id) for media_id in media_ids]
+    return _batch_media_share_summaries(db, settings, media_ids)
 
 
 @router.get("/media/{media_id}/sharing-summary", response_model=MediaShareSummaryOut)

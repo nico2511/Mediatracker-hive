@@ -46,3 +46,15 @@ export function saveMediaListSnapshot(body: unknown): void {
 export function loadMediaListSnapshot<T>(): SnapshotEnvelope<T> | null {
   return read<T>(MEDIA_KEY);
 }
+
+export function removeMediaFromListSnapshot(mediaId: number): void {
+  const snap = loadMediaListSnapshot<{ items: { id: number }[] }>();
+  if (!snap?.body?.items?.length) {
+    return;
+  }
+  const items = snap.body.items.filter((row) => row.id !== mediaId);
+  if (items.length === snap.body.items.length) {
+    return;
+  }
+  saveMediaListSnapshot({ items });
+}

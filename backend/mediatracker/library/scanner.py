@@ -30,6 +30,7 @@ from mediatracker.db.session import release_sqlite_before_network
 from mediatracker.events import record_event
 from mediatracker.integrations.tmdb import TmdbError, TmdbTitle
 from mediatracker.library.parse import ParsedName, is_video, normalize_title, parse_path, show_key
+from mediatracker.settings_int import int_setting as _setting_int
 
 LAST_SCAN_KEY = "library.last_scan_at"
 _ACTIVE_DOWNLOAD = ("pending", "resolving", "queued")
@@ -304,6 +305,7 @@ def attach_known_files(db: Session, settings: Settings, media: Media) -> int:
     """Link files already in the library. They count as downloaded and are not queued again."""
     from mediatracker.core.library_plan import list_folders
 
+    release_sqlite_before_network(db)
     movies, series = library_roots(db, settings)
     jellyfin_ids = _jellyfin_folder_ids(db, settings, movies, series)
     now = datetime.now(timezone.utc)
@@ -1025,16 +1027,6 @@ def _path_setting(db: Session, key: str) -> Path | None:
     if row is None or not row.value:
         return None
     return Path(row.value)
-
-
-def _setting_int(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
 
 
 def _setting_bool(db: Session, key: str, default: bool) -> bool:

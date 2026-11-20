@@ -132,12 +132,14 @@ def remote_links_source(db: Session, settings: Settings, type_name: str) -> tupl
 
 
 def enabled_remote_sources(db: Session, settings: Settings) -> list[tuple[int, object]]:
-    from mediatracker.core.source_availability import source_usable
+    from mediatracker.core.source_availability import download_source_enabled_in_settings, source_usable
 
     delay = _int_setting(db, "source_request_delay_seconds", settings.source_request_delay_seconds)
     ttl = _int_setting(db, "source_cache_seconds", settings.source_cache_seconds)
     opened: list[tuple[int, object]] = []
     for row, entry in _with_capability(db, "links"):
+        if not download_source_enabled_in_settings(db, settings, row.type):
+            continue
         if not source_usable(db, settings, row.type):
             continue
         opener = getattr(entry, "open_poll", None)

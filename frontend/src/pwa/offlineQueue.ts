@@ -1,6 +1,6 @@
+import { requestAppSettingsCachesIfEmpty } from "../appSettingsCaches";
+import { offlineQueueRetentionMs } from "../fixedRetention";
 import type { FollowMediaType } from "./parseTmdbInput";
-
-export const QUEUE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface QueueItem {
   id: string;
@@ -75,11 +75,16 @@ export function queueKey(tmdbId: number, type: FollowMediaType): string {
 }
 
 export function isExpired(item: QueueItem, now = Date.now()): boolean {
+  requestAppSettingsCachesIfEmpty();
   const added = Date.parse(item.added_at);
   if (Number.isNaN(added)) {
     return true;
   }
-  return now - added > QUEUE_RETENTION_MS;
+  const retention = offlineQueueRetentionMs();
+  if (retention === null) {
+    return false;
+  }
+  return now - added > retention;
 }
 
 export async function purgeExpiredQueue(now = Date.now()): Promise<QueueItem[]> {

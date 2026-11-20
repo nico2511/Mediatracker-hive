@@ -7,6 +7,7 @@ import HealthSeriesChart from "../components/HealthSeriesChart.vue";
 import MetricSparkline from "../components/MetricSparkline.vue";
 import SourceStatesCard from "../components/SourceStatesCard.vue";
 import {api, userFacingApiError} from "../api";
+import { fixedRetentionSnapshot } from "../fixedRetention";
 import { formatBytes } from "../diskFormat";
 import { useHiveEnabled } from "../composables/useHive";
 import type { HivePeerLoadResponse } from "../hive/hivePeerLoad";
@@ -116,6 +117,16 @@ const hivePeerLoad = ref<HivePeerLoadResponse | null>(null);
 const hivePeerLoadError = ref("");
 
 const { hiveEnabled } = useHiveEnabled();
+
+const metricsHistoryDays = computed(() => fixedRetentionSnapshot()?.metrics_history_days ?? null);
+
+const metricsHistoryTitle = computed(() => {
+  const days = metricsHistoryDays.value;
+  if (days === null) {
+    return "Historique";
+  }
+  return `Historique (${days} jour${days > 1 ? "s" : ""})`;
+});
 
 const historySeries = computed((): HistorySeries[] => {
   const body = history.value;
@@ -434,7 +445,7 @@ onUnmounted(() => {
 
     <details class="health-block health-history-panel">
       <summary>
-        <h2>Historique (7 jours)</h2>
+        <h2>{{ metricsHistoryTitle }}</h2>
       </summary>
       <p v-if="history" class="hint">
         Buckets de {{ history.bucket_minutes }} min depuis {{ new Date(history.since).toLocaleString("fr-FR") }}.

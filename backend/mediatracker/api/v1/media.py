@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
-from mediatracker.config import get_settings
+from mediatracker.config import Settings, get_settings
 from mediatracker.core.display_title import clean_display_title
 from mediatracker.core.fiche_check import fiche_last_check_at, touch_fiche_checked
 from mediatracker.core.file_status import FileStatusCounts, FileStatusIndex, aggregate_file_status
@@ -30,6 +30,7 @@ from mediatracker.core.tracking import (
 )
 from mediatracker.db.models import CatalogEntry, Download, Link, Media, MediaItem, MediaSeason, Setting
 from mediatracker.integrations.tmdb import TmdbClient, TmdbError, TmdbTitle, borrow_tmdb
+from mediatracker.settings_int import int_setting as _setting_int
 
 router = APIRouter(prefix="/media", tags=["media"])
 item_router = APIRouter(prefix="/items", tags=["media"])
@@ -253,6 +254,20 @@ class EpisodePatch(BaseModel):
     keep: bool | None = None
 
 
+class ServedProfileOut(BaseModel):
+    profile_id: int
+    profile_name: str
+    repli: bool = True
+
+
+class ProfileReplacementProposalOut(BaseModel):
+    id: int
+    principal_profile_id: int
+    principal_profile_name: str
+    repli_profile_id: int
+    repli_profile_name: str
+
+
 class EpisodeOut(BaseModel):
     id: int
     season: int | None
@@ -274,6 +289,8 @@ class EpisodeOut(BaseModel):
     file_absent: bool = False
     file_status: str = "absent"
     trash_entry_id: int | None = None
+    served_profile: ServedProfileOut | None = None
+    profile_replacement: ProfileReplacementProposalOut | None = None
 
 
 class FileStatusCountsOut(BaseModel):
@@ -417,15 +434,16 @@ def _views(rows: list[MediaItem]) -> list[EpisodeView]:
 
 
 def _catalog_links(db: Session, rows: list[Media], settings) -> dict[int, tuple[int, str | None]]:
-    from mediatracker.core.catalog_source_visibility import catalog_entry_visible
+    from mediatracker.core.catalog_source_visibility import visible_latest_source_types
 
     ids = {row.tmdb_id for row in rows if row.tmdb_id}
     if not ids:
         return {}
+    visible_sources = {source.strip().lower() for source in visible_latest_source_types(db, settings)}
     entries = [
         row
         for row in db.scalars(select(CatalogEntry).where(CatalogEntry.tmdb_id.in_(ids))).all()
-        if catalog_entry_visible(db, settings, row.source)
+        if (row.source or "").strip().lower() in visible_sources
     ]
     by_key: dict[tuple[str, int], tuple[int, str | None]] = {}
     for entry in entries:
@@ -789,16 +807,6 @@ def _setting_text(db: Session, key: str, default: str) -> str:
     return row.value
 
 
-def _setting_int(db: Session, key: str, default: int) -> int:
-    row = db.get(Setting, key)
-    if row is None or not row.value:
-        return default
-    try:
-        return int(row.value)
-    except ValueError:
-        return default
-
-
 def _setting_bool(db: Session, key: str, default: bool) -> bool:
     row = db.get(Setting, key)
     if row is None or not row.value:
@@ -862,6 +870,9 @@ def _episode_out(
     download_busy: bool = False,
     file_status_index: FileStatusIndex | None = None,
     file_status: str | None = None,
+    db: Session | None = None,
+    settings: Settings | None = None,
+    media: Media | None = None,
 ) -> EpisodeOut:
     from mediatracker.core.forget import is_file_absent
 
@@ -875,6 +886,29 @@ def _episode_out(
     trash_entry_id = None
     if file_status_index is not None and row.id is not None:
         trash_entry_id = file_status_index.trash_entry_for(row.id)
+
+    served_profile = None
+    profile_replacement = None
+    if db is not None and settings is not None and media is not None and row.id is not None:
+        from mediatracker.core.profile_replacement import (
+            active_proposal_for_item,
+            proposal_to_out,
+            served_profile_display,
+        )
+
+        served_raw = served_profile_display(db, media, row, settings)
+        if served_raw is not None:
+            served_profile = ServedProfileOut(**served_raw)
+        proposal = active_proposal_for_item(db, row.id)
+        if proposal is not None:
+            out = proposal_to_out(db, proposal)
+            profile_replacement = ProfileReplacementProposalOut(
+                id=out.id,
+                principal_profile_id=out.principal_profile_id,
+                principal_profile_name=out.principal_profile_name,
+                repli_profile_id=out.repli_profile_id,
+                repli_profile_name=out.repli_profile_name,
+            )
 
     return EpisodeOut(
         id=row.id,
@@ -897,6 +931,8 @@ def _episode_out(
         file_absent=is_file_absent(row),
         file_status=resolved,
         trash_entry_id=trash_entry_id,
+        served_profile=served_profile,
+        profile_replacement=profile_replacement,
     )
 
 
@@ -993,12 +1029,18 @@ def _follow_input(body: MediaCreate):
     return FollowInput(**body.model_dump())
 
 
-def insert_followed(db: Session, secret_key: str, body: MediaCreate) -> tuple[Media, list[MediaItem]]:
+def insert_followed(
+    db: Session,
+    secret_key: str,
+    body: MediaCreate,
+    *,
+    settings: Settings | None = None,
+) -> tuple[Media, list[MediaItem]]:
     """Create a followed media the same way ``POST /media`` does."""
     from mediatracker.core.follow import FollowError, follow
 
     try:
-        return follow(db, secret_key, _follow_input(body), source="create")
+        return follow(db, secret_key, _follow_input(body), source="create", settings=settings)
     except FollowError as exc:
         raise Problem(exc.status, exc.title, exc.detail) from exc
 
@@ -1011,19 +1053,15 @@ def create_media(
     _principal=Depends(require_scope("write")),
 ) -> MediaOut:
     del _principal
-    row, episodes = insert_followed(db, request.app.state.settings.secret_key, body)
-    from mediatracker.core.worker_wake import REASON_API_MEDIA, wake_worker
+    settings = request.app.state.settings
+    row, episodes = insert_followed(db, settings.secret_key, body, settings=settings)
+    from mediatracker.core.attach_deferred import commit_follow_side_effects, schedule_attach_known_files
 
-    wake_worker(db, request.app.state.settings, REASON_API_MEDIA, commit=False)
-    from mediatracker.library.scanner import attach_known_files
-
-    attached = attach_known_files(db, request.app.state.settings, row)
-    if attached:
-        db.commit()
-        episodes = list(db.scalars(select(MediaItem).where(MediaItem.media_id == row.id)).all())
-    row._attached = attached  # type: ignore[attr-defined]
+    commit_follow_side_effects(db, settings)
+    schedule_attach_known_files(request.app.state.session_factory, settings, row.id)
+    row._attached = 0  # type: ignore[attr-defined]
     file_status_index = FileStatusIndex.load(db, episodes)
-    return _to_media(row, episodes, db, request.app.state.settings, file_status_index=file_status_index)
+    return _to_media(row, episodes, db, settings, file_status_index=file_status_index)
 
 
 def _store_tmdb(db: Session, row: Media, fetched: TmdbTitle) -> list[MediaItem]:
@@ -1042,7 +1080,10 @@ def _fetch_tmdb_title(db: Session, secret_key: str, tmdb_id: int, media_type: st
     token = tmdb_token.read_tmdb_token(db, secret_key)
     if not token:
         raise Problem(422, "TMDB", "Jeton TMDB absent : métadonnées non récupérées.")
-    client, owned = borrow_tmdb(token, TmdbClient)
+    from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+    catalog = read_tmdb_catalog_settings(db)
+    client, owned = borrow_tmdb(token, TmdbClient, language=catalog.display_language)
     try:
         fetched = client.fetch(tmdb_id, media_type)
         imdb_id = fetched.imdb_id
@@ -1101,6 +1142,7 @@ def follow_existing_media(
             ),
             media=row,
             source="existing",
+            settings=request.app.state.settings,
         )
     except FollowError as exc:
         raise Problem(exc.status, exc.title, exc.detail) from exc
@@ -1716,11 +1758,20 @@ def delete_media(
     return Response(status_code=204)
 
 
-def _seasons_out(db: Session, media_id: int, rows: list[MediaItem]) -> list[SeasonOut]:
+def _seasons_out(
+    db: Session,
+    media_id: int,
+    rows: list[MediaItem],
+    *,
+    settings: Settings | None = None,
+    media: Media | None = None,
+) -> list[SeasonOut]:
     rows_sorted = sorted(rows, key=lambda item: (item.season is None, item.season or 0, item.episode or 0, item.id))
     busy = _busy_item_ids(db, [row.id for row in rows_sorted])
     progress_ids = _in_progress_ids(db, [row.id for row in rows_sorted])
     file_status_index = FileStatusIndex.load(db, rows_sorted)
+    if media is None:
+        media = db.get(Media, media_id)
     meta = {
         season.number: season
         for season in db.scalars(select(MediaSeason).where(MediaSeason.media_id == media_id)).all()
@@ -1735,6 +1786,9 @@ def _seasons_out(db: Session, media_id: int, rows: list[MediaItem]) -> list[Seas
                     download_active=row.id in busy,
                     download_busy=row.id in progress_ids,
                     file_status_index=file_status_index,
+                    db=db,
+                    settings=settings,
+                    media=media,
                 ),
             )
         )
@@ -1767,7 +1821,7 @@ def fiche_sse_payload(db: Session, settings, media_id: int) -> dict[str, Any]:
     rows = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all())
     file_status_index = FileStatusIndex.load(db, rows)
     media_out = _to_media(media, rows, db, settings, file_status_index=file_status_index)
-    seasons = _seasons_out(db, media_id, rows)
+    seasons = _seasons_out(db, media_id, rows, settings=settings, media=media)
     return {
         "media": media_out.model_dump(mode="json"),
         "seasons": [season.model_dump(mode="json") for season in seasons],
@@ -1785,7 +1839,9 @@ def list_items(
     media = _get_media(db, media_id)
     rows = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all())
     _sync_library_claims(db, request, media, rows)
-    return EpisodeListOut(seasons=_seasons_out(db, media_id, rows))
+    return EpisodeListOut(
+        seasons=_seasons_out(db, media_id, rows, settings=request.app.state.settings, media=media)
+    )
 
 
 @router.patch("/{media_id}/seasons/{number}", response_model=SeasonOut)
@@ -1872,6 +1928,53 @@ class RedownloadOut(BaseModel):
     status: str
     message: str
     download_id: int | None = None
+
+
+class ProfileReplacementActionOut(BaseModel):
+    ok: bool
+    message: str
+    download_id: int | None = None
+
+
+@item_router.post("/{item_id}/profile-replacement/replace", response_model=ProfileReplacementActionOut)
+def replace_profile_version(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> ProfileReplacementActionOut:
+    del _principal
+    row = db.get(MediaItem, item_id)
+    if row is None:
+        raise Problem(404, "Introuvable", "Épisode introuvable.")
+    media = db.get(Media, row.media_id)
+    if media is None:
+        raise Problem(404, "Introuvable", "Fiche introuvable.")
+    from mediatracker.core.profile_replacement import start_replace
+
+    result = start_replace(db, request.app.state.settings, media, row, now=datetime.now(timezone.utc))
+    if not result.ok:
+        raise Problem(422, "Requête invalide", result.message)
+    db.commit()
+    return ProfileReplacementActionOut(ok=True, message=result.message, download_id=result.download_id)
+
+
+@item_router.post("/{item_id}/profile-replacement/dismiss", response_model=ProfileReplacementActionOut)
+def dismiss_profile_replacement(
+    item_id: int,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> ProfileReplacementActionOut:
+    del _principal
+    row = db.get(MediaItem, item_id)
+    if row is None:
+        raise Problem(404, "Introuvable", "Épisode introuvable.")
+    from mediatracker.core.profile_replacement import dismiss_proposal
+
+    if not dismiss_proposal(db, row, now=datetime.now(timezone.utc)):
+        raise Problem(404, "Introuvable", "Aucune proposition active.")
+    db.commit()
+    return ProfileReplacementActionOut(ok=True, message="Proposition ignorée.")
 
 
 @item_router.post("/{item_id}/redownload", response_model=RedownloadOut)

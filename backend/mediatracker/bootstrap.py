@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.api.errors import Problem
 from mediatracker.config import Settings, get_settings
 from mediatracker.core.aria2_session import prune_aria2_session_at_startup
 from mediatracker.core.incomplete import prune_incomplete_orphans_at_startup
@@ -18,12 +19,11 @@ from mediatracker.db.session import create_session_factory, session_scope
 from mediatracker.providers.downloaders.aria2 import ARIA2_DEFAULT_RPC_URL
 from mediatracker.security.crypto import decrypt_secret, encrypt_secret
 from mediatracker.security.logging import configure_logging
+from mediatracker.security.password_policy import validate_new_password
 from mediatracker.security.passwords import hash_password
 from mediatracker.settings_store import PROVIDERS_SEEDED_KEY, ensure_settings
 
 logger = logging.getLogger(__name__)
-
-MIN_ADMIN_PASSWORD = 8
 
 
 def ensure_admin(db: Session, settings: Settings) -> None:
@@ -31,8 +31,16 @@ def ensure_admin(db: Session, settings: Settings) -> None:
     if user is not None:
         return
     password = settings.admin_password or ""
-    if len(password) < MIN_ADMIN_PASSWORD:
+    if not password:
         logger.info("Aucun compte : l'assistant de premier démarrage créera le mot de passe.")
+        return
+    try:
+        validate_new_password(password, username=settings.admin_username)
+    except Problem as exc:
+        logger.error(
+            "ADMIN_PASSWORD refusé (%s) : le compte administrateur n'a pas été créé.",
+            exc.detail,
+        )
         return
     db.add(
         User(

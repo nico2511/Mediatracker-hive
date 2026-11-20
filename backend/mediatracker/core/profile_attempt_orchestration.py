@@ -430,11 +430,37 @@ def orchestrate_profile_first_poll(
         media = read.get(Media, media_id)
         if media is None or not media.followed:
             return None
-        if restrict_single_profile is not None:
+        from mediatracker.hive.signal_wanted import media_has_wanted_volunteer, volunteer_poll_profile_chain
+
+        if media_has_wanted_volunteer(read, media_id):
+            chain = volunteer_poll_profile_chain(read)
+            if chain is None:
+
+                def _volunteer_profile_err(db: Session):
+                    row = db.get(Media, media_id)
+                    if row is None:
+                        return None
+                    return _finish(
+                        db,
+                        row,
+                        settings,
+                        moment,
+                        draw,
+                        result="error",
+                        message="Aucun profil de qualité par défaut.",
+                        episodes=0,
+                        queued=0,
+                        proposed=0,
+                        failed=True,
+                        force=force,
+                    )
+
+                return apply_with_retry(factory, "Erreur profil volontaire", _volunteer_profile_err)
+        elif restrict_single_profile is not None:
             if restrict_single_profile.quality_profile_id is None:
                 return None
             chain = profile_chain_from_anchor(read, media, settings, restrict_single_profile)
-        else:
+        elif restrict_single_profile is None:
             try:
                 chain = load_profile_chain(read, media, settings)
             except ProfileResolveError as exc:
@@ -469,6 +495,7 @@ def orchestrate_profile_first_poll(
     last: PollReport | None = None
     chosen: PollReport | None = None
     had_error = False
+    links_retained_any_page = False
     winning_profile_id: int | None = None
     winning_profile: Profile | None = None
     scoped_attach = attach_profile_download_id is not None and attach_profile_item_id is not None
@@ -498,6 +525,11 @@ def orchestrate_profile_first_poll(
 
             report = apply_with_retry(factory, "Application Hive", _hive_apply)
         else:
+            from mediatracker.core.scan_episode_fallback import links_poll_retained_page
+            from mediatracker.providers.sources.registry import for_type as registry_for_type
+
+            entry = registry_for_type(attempt.source)
+            is_links_source = entry is not None and "links" in getattr(entry, "capabilities", frozenset())
             prep = factory()
             try:
                 opened = remote_links_source(prep, settings, attempt.source)
@@ -525,6 +557,8 @@ def orchestrate_profile_first_poll(
                 )
             finally:
                 close_source(source)
+            if is_links_source and links_poll_retained_page(report):
+                links_retained_any_page = True
         if report is None:
             continue
         last = report
@@ -553,6 +587,34 @@ def orchestrate_profile_first_poll(
             winning_profile_id = attempt.profile.quality_profile_id
             break
 
+    if chosen is None and not links_retained_any_page:
+        from mediatracker.core.scan_episode_fallback import (
+            maybe_scan_episode_sources_fallback,
+            scan_episode_sources_fallback_enabled,
+        )
+
+        gate = factory()
+        try:
+            fallback_enabled = scan_episode_sources_fallback_enabled(gate, settings)
+        finally:
+            gate.close()
+        fallback_report = None
+        if fallback_enabled:
+            fallback_report = maybe_scan_episode_sources_fallback(
+                factory,
+                settings,
+                media_id,
+                chain,
+                moment=moment,
+                force=force,
+                rng=draw,
+                links_retained_any_page=links_retained_any_page,
+                chosen=chosen,
+            )
+        if fallback_report is not None and _poll_attempt_success(fallback_report):
+            chosen = fallback_report
+            last = fallback_report
+
     def _finalize(db: Session):
         row = db.get(Media, media_id)
         if row is None:
@@ -564,6 +626,9 @@ def orchestrate_profile_first_poll(
             from mediatracker.hive.signal_policy import maybe_publish_cherche_on_source_miss
 
             maybe_publish_cherche_on_source_miss(db, settings, media=row, now=moment)
+        from mediatracker.core.profile_replacement import scan_proposals_after_poll
+
+        scan_proposals_after_poll(db, row, settings, now=moment)
         return _finish(
             db,
             row,

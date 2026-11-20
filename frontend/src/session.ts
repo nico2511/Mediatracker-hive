@@ -1,3 +1,4 @@
+import { prefetchAppSettingsCaches } from "./appSettingsCaches";
 import { api, setUnauthorized, shouldRestorePersistedSession, type User } from "./api";
 import { clearOfflineUserData } from "./pwa/clearOfflineUserData";
 import { invalidateSettings } from "./settings";
@@ -133,6 +134,9 @@ async function load(): Promise<SessionGate> {
     cached = { signedIn: true, user, needsPassword: false, setupCompleted: true };
   }
   writePersistedGate(cached);
+  if (cached.signedIn) {
+    void prefetchAppSettingsCaches();
+  }
   return cached;
 }
 

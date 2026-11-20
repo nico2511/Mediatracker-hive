@@ -41,6 +41,7 @@ from mediatracker.hive.crypto_id import (
 logger = logging.getLogger(__name__)
 
 HIVE_ENABLED_KEY = "hive_enabled"
+HIVE_ONLY_KEY = "hive_only"
 HIVE_PUBLIC_ADDRESS_KEY = "hive_public_address"
 HIVE_INSTANCE_NAME_KEY = "hive_instance_name"
 HIVE_NAME_DOCUMENT_KEY = "hive_name_document"
@@ -75,6 +76,10 @@ def _read_setting_text(db: Session, key: str) -> str:
 
 def hive_enabled_in_db(db: Session) -> bool:
     return _read_setting_text(db, HIVE_ENABLED_KEY).lower() == "true"
+
+
+def hive_only_in_db(db: Session) -> bool:
+    return _read_setting_text(db, HIVE_ONLY_KEY).lower() == "true"
 
 
 def _signed_identity_persisted(db: Session) -> bool:

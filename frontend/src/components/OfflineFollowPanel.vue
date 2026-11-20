@@ -11,6 +11,7 @@ import { type FollowMediaType } from "../pwa/parseTmdbInput";
 import { alternateFollowType } from "../pwa/parseTmdbInput";
 import type { SyncResultRow } from "../pwa/offlineSync";
 import { updateQueueItemType } from "../pwa/offlineQueue";
+import { fixedRetentionSnapshot } from "../fixedRetention";
 
 const route = useRoute();
 const router = useRouter();
@@ -40,7 +41,10 @@ const showResults = computed(() => Boolean(results.value?.length));
 
 const queueSubtitle = computed(() => {
   const n = items.value.length;
-  return `${n} élément${n > 1 ? "s" : ""} · gardés 30 jours`;
+  const days = fixedRetentionSnapshot()?.source_state_days;
+  const retention =
+    typeof days === "number" ? `gardés ${days} jour${days > 1 ? "s" : ""}` : "conservation selon le serveur";
+  return `${n} élément${n > 1 ? "s" : ""} · ${retention}`;
 });
 
 function addedLabel(item: QueueItem): string {
