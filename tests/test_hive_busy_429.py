@@ -17,8 +17,6 @@ from mediatracker.db.models import (
     HiveRuche,
     Setting,
 )
-from mediatracker.hive.identity import load_private_key
-from mediatracker.hive.peer_auth import sign_request_headers
 from mediatracker.hive.hive_busy import (
     HIVE_BUSY_REASON_HEADER,
     REASON_BANDWIDTH,
@@ -27,6 +25,8 @@ from mediatracker.hive.hive_busy import (
     REASON_RATE,
     REASON_WINDOW,
 )
+from mediatracker.hive.identity import load_private_key
+from mediatracker.hive.peer_auth import sign_request_headers
 from mediatracker.hive.transfer_parallel import TransferParallelGate
 from mediatracker.hive.transfer_settings import seconds_until_transfer_window_open, seconds_until_week_reset
 

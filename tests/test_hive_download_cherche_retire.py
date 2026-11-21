@@ -14,9 +14,14 @@ from mediatracker.core.pipeline.queue import _finish_download
 from mediatracker.db.models import Download, HiveSignal, Media, MediaItem, Setting
 from mediatracker.hive.catalog import _cle_document, sign_payload
 from mediatracker.hive.identity import load_private_key
-from mediatracker.hive.signal import _latest_signal_row
-from mediatracker.hive.signal import build_signal_payload, cle_hash, next_signal_seq
-from mediatracker.hive.signal import retract_cherche_for_item, sync_possede_for_item
+from mediatracker.hive.signal import (
+    _latest_signal_row,
+    build_signal_payload,
+    cle_hash,
+    next_signal_seq,
+    retract_cherche_for_item,
+    sync_possede_for_item,
+)
 from mediatracker.hive.signal_policy import (
     CHERCHE_CATCHUP_AT_KEY,
     maybe_catchup_cherche_for_followed,

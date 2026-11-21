@@ -121,8 +121,9 @@ def test_link_for_nested_integrity_conflict_keeps_session_no_url_in_log(caplog, 
 def test_begin_clears_pass_error_before_manual_link_attempt(client, app, db_session, settings, monkeypatch):
     connect_alldebrid_for_tests(app)
     login(client)
-    from mediatracker.core.pipeline import queue as download_queue
     from tests.test_pipeline import FakeDownloader
+
+    from mediatracker.core.pipeline import queue as download_queue
 
     media = Media(type="series", title="Erreur pass", year=2026, followed=True)
     db_session.add(media)
@@ -347,8 +348,9 @@ def test_manual_link_exhausted_retries_yield_cascade_not_fail(client, app):
 def test_begin_prefers_pasted_direct_link_over_manual_page(client, app, db_session, settings, monkeypatch):
     connect_alldebrid_for_tests(app)
     login(client)
-    from mediatracker.core.pipeline import queue as download_queue
     from tests.test_pipeline import FakeDownloader
+
+    from mediatracker.core.pipeline import queue as download_queue
 
     media = Media(type="series", title="Priorité direct", year=2026, followed=True)
     db_session.add(media)
@@ -422,8 +424,9 @@ def test_begin_prefers_pasted_direct_link_over_manual_page(client, app, db_sessi
 def test_begin_calls_manual_page_only_after_direct_manual_misses(client, app, db_session, settings, monkeypatch):
     connect_alldebrid_for_tests(app)
     login(client)
-    from mediatracker.core.pipeline import queue as download_queue
     from tests.test_pipeline import FakeDownloader
+
+    from mediatracker.core.pipeline import queue as download_queue
 
     media = Media(type="series", title="Ordre appels", year=2026, followed=True)
     db_session.add(media)

@@ -1,6 +1,7 @@
+from tests.conftest import csrf, login
+
 from mediatracker.core.tmdb_votes import exposed_tmdb_vote_average
 from mediatracker.db.models import Media
-from tests.conftest import csrf, login
 
 
 def test_exposed_vote_average_null_without_votes():

@@ -1729,8 +1729,8 @@ def hide_media_fiche(
 ) -> MediaOut:
     """Masque la fiche (listes et accueil). Fichiers, historique et Hive inchangés."""
     del _principal
-    from mediatracker.core.media_hide import hide_media
     from mediatracker.core.follow import unfollow
+    from mediatracker.core.media_hide import hide_media
 
     row = _get_media(db, media_id)
     moment = datetime.now(timezone.utc)
