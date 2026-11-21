@@ -33,7 +33,19 @@ from mediatracker.hive.membership import (
 )
 from mediatracker.hive.peer_info import build_local_instance_snapshot, peer_info_row
 from mediatracker.hive.peer_membership import confirm_membership_from_creator, submit_join_over_http
-from mediatracker.hive.transfer_policy import DEFAULT_WEEKLY_QUOTA
+from mediatracker.hive.quota_journal import record_member_quota_reset
+from mediatracker.hive.quota_member_notify import emit_my_quota_reset_notices
+from mediatracker.hive.quota_peer import (
+    aggregate_my_quota,
+    queue_quota_reset_notice,
+    resolve_member_display_name,
+)
+from mediatracker.hive.transfer_policy import (
+    DEFAULT_WEEKLY_QUOTA,
+    member_receive_quota_snapshot,
+    reset_member_receive_quota,
+)
+from mediatracker.hive.transfer_settings import next_week_start_utc, week_start_date
 
 router = APIRouter(tags=["hive"])
 
@@ -440,15 +452,76 @@ class MemberUiOut(BaseModel):
     app_version: str | None = None
     hive_protocol: int = 0
     capabilities: list[str] = Field(default_factory=list)
+    shares_in_ruche: bool = False
+    receive_bytes_used: int | None = None
+    receive_quota_bytes: int | None = None
+    receive_quota_status: str | None = None
 
 
 class RucheDetailOut(BaseModel):
     ruche_id_hex: str
     is_creator: bool
     weekly_quota_bytes: int
+    quota_week_start: str
+    quota_reset_at: str
     catalog_epoch: int = 0
     catalog_reset_at: str | None = None
     members: list[MemberUiOut]
+
+
+class MyQuotaSourceOut(BaseModel):
+    status: str
+    source_instance_id: str
+    source_display_name: str
+    shares_in_ruche: bool | None = None
+    bytes_used: int | None = None
+    quota_bytes: int | None = None
+    week_start: str | None = None
+    reset_at: str | None = None
+    receive_quota_status: str | None = None
+
+
+class MyQuotaOut(BaseModel):
+    ruche_id_hex: str
+    week_start: str
+    reset_at: str
+    sources: list[MyQuotaSourceOut]
+
+
+@router.get("/ruches/{ruche_id_hex}/my-quota", response_model=MyQuotaOut)
+def get_my_quota(
+    ruche_id_hex: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> MyQuotaOut:
+    del _principal
+    _require_hive(db)
+    settings = _settings(request)
+    try:
+        ruche_id = bytes.fromhex(ruche_id_hex)
+    except ValueError as exc:
+        raise Problem(404, "Introuvable", "Ruche introuvable.") from exc
+    ruche = db.get(HiveRuche, ruche_id)
+    if ruche is None:
+        raise Problem(404, "Introuvable", "Ruche introuvable.")
+    now = _now()
+    try:
+        raw = aggregate_my_quota(db, settings, ruche_id=ruche_id, now=now)
+        emit_my_quota_reset_notices(db, sources=raw.get("sources") or [], when=now)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise Problem(404, "Introuvable", "Identité Hive absente.") from exc
+    sources = [
+        MyQuotaSourceOut.model_validate(row) for row in raw.get("sources") or [] if isinstance(row, dict)
+    ]
+    return MyQuotaOut(
+        ruche_id_hex=str(raw.get("ruche_id_hex") or ruche_id_hex),
+        week_start=str(raw.get("week_start") or ""),
+        reset_at=str(raw.get("reset_at") or ""),
+        sources=sources,
+    )
 
 
 @router.get("/ruches/{ruche_id_hex}/detail", response_model=RucheDetailOut)
@@ -494,6 +567,7 @@ def get_ruche_detail(
                 app_version = info.app_version
                 hive_protocol = info.hive_protocol
                 capabilities = list(info.capabilities)
+        quota_snap = member_receive_quota_snapshot(db, ruche_id=ruche_id, instance_id=mid, now=now)
         members_ui.append(
             MemberUiOut(
                 instance_id=mid,
@@ -503,13 +577,21 @@ def get_ruche_detail(
                 app_version=app_version,
                 hive_protocol=hive_protocol,
                 capabilities=capabilities,
+                shares_in_ruche=bool(quota_snap["shares_in_ruche"]),
+                receive_bytes_used=quota_snap["receive_bytes_used"],
+                receive_quota_bytes=quota_snap["receive_quota_bytes"],
+                receive_quota_status=quota_snap["receive_quota_status"],
             )
         )
     reset_at = ruche.catalog_reset_at.isoformat() if ruche.catalog_reset_at is not None else None
+    ws = week_start_date(now)
+    nxt = next_week_start_utc(now)
     return RucheDetailOut(
         ruche_id_hex=ruche_id_hex,
         is_creator=ruche.creator_instance_id == instance_id,
         weekly_quota_bytes=quota,
+        quota_week_start=ws.isoformat(),
+        quota_reset_at=nxt.isoformat().replace("+00:00", "Z"),
         catalog_epoch=int(ruche.catalog_epoch or 0),
         catalog_reset_at=reset_at,
         members=members_ui,
@@ -562,6 +644,57 @@ def post_catalog_reset(
 
 class QuotaPatchIn(BaseModel):
     weekly_quota_bytes: int = Field(ge=1, le=10_000_000_000_000)
+
+
+@router.post("/ruches/{ruche_id_hex}/members/{instance_id}/quota/reset", status_code=204)
+def post_member_quota_reset(
+    ruche_id_hex: str,
+    instance_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("admin")),
+) -> None:
+    del _principal
+    _require_hive(db)
+    settings = _settings(request)
+    try:
+        ruche_id = bytes.fromhex(ruche_id_hex)
+    except ValueError as exc:
+        raise Problem(404, "Introuvable", "Ruche introuvable.") from exc
+    try:
+        _, local_id, *_ = local_instance_identity(db, settings)
+    except ValueError as exc:
+        raise Problem(404, "Introuvable", "Identité Hive absente.") from exc
+    ruche = db.get(HiveRuche, ruche_id)
+    if ruche is None:
+        raise Problem(404, "Introuvable", "Ruche introuvable.")
+    if ruche.creator_instance_id != local_id:
+        raise Problem(403, "Interdit", "Seul le créateur peut remettre un quota à zéro.")
+    now = _now()
+    member_label = resolve_member_display_name(db, ruche_id=ruche_id, instance_id=instance_id)
+    try:
+        reset_member_receive_quota(db, ruche_id=ruche_id, member_id=instance_id, now=now)
+        record_member_quota_reset(
+            db,
+            ruche_id_hex=ruche_id_hex,
+            member_instance_id=instance_id,
+            member_display=member_label,
+            when=now,
+        )
+        queue_quota_reset_notice(db, ruche_id=ruche_id, member_instance_id=instance_id, when=now)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        code = str(exc)
+        if code == "member_not_found":
+            raise Problem(404, "Introuvable", "Membre introuvable.") from exc
+        if code == "shares_in_ruche":
+            raise Problem(
+                422,
+                "Requête invalide",
+                "Ce membre partage dans la ruche : aucun quota à remettre à zéro.",
+            ) from exc
+        raise Problem(422, "Requête invalide", str(exc)) from exc
 
 
 @router.patch("/ruches/{ruche_id_hex}/quota", status_code=204)

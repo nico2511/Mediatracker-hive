@@ -16,7 +16,7 @@ L’entrée de menu **Hive** n’apparaît que lorsque Hive est activé.
 
 - **Créer une ruche** : depuis Réglages Hive ou la navigation Hive.
 - **Inviter** : lien d’invitation généré par l’application ; page **Rejoindre** (`/hive/rejoindre`).
-- **Membres** (`/hive/ruches/<id>/membres`) : validation des demandes (créateur de la ruche), quotas, exclusion. Chaque membre affiche une pastille de version MediaTracker (connue via le gossip pair, sans toucher à la liste signée des membres) : **à jour** si le protocole Hive annoncé est au moins égal au vôtre, **ancienne version** sinon, **version inconnue** pour un pair qui n’a pas encore annoncé.
+- **Membres** (`/hive/ruches/<id>/membres`) : validation des demandes (créateur de la ruche), quota hebdomadaire de la ruche (un seul encadré), consommation locale par membre qui ne partage pas, remise à zéro du compteur d’un membre (`POST /api/v1/hive/ruches/<id>/members/<instance>/quota/reset`, créateur uniquement), exclusion. Un membre qui n’est pas créateur ne voit pas les barres de consommation des autres (les compteurs affichés localement reflètent l’envoi, pas la réception). Chaque membre affiche une pastille de version MediaTracker (connue via le gossip pair, sans toucher à la liste signée des membres) : **à jour** si le protocole Hive annoncé est au moins égal au vôtre, **ancienne version** sinon, **version inconnue** pour un pair qui n’a pas encore annoncé.
 
 Le mode **tirage seul** (`pull_only`) : l’instance peut recevoir des fichiers sans en envoyer (affiché dans l’interface si applicable).
 

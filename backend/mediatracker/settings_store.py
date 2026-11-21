@@ -105,6 +105,7 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "scan_ongoing_only": SettingSpec(False, "bool", "scan_ongoing_only"),
     "scan_air_window_days": SettingSpec(False, "int", "scan_air_window_days"),
     "film_theatrical_fallback_months": SettingSpec(False, "int", "film_theatrical_fallback_months"),
+    "film_trigger_us_digital": SettingSpec(False, "bool", "film_trigger_us_digital"),
     "allow_fallback": SettingSpec(False, "bool", "allow_fallback"),
     "profile_fallback_order": SettingSpec(False, "str", "profile_fallback_order", optional=True),
     "source_cache_seconds": SettingSpec(False, "int", "source_cache_seconds"),

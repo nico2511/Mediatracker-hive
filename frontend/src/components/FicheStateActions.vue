@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import ActionMenuPopover from "./ActionMenuPopover.vue";
+import FicheHideMenuEntry from "./FicheHideMenuEntry.vue";
 import StatusIcon from "./StatusIcon.vue";
 import TrailerPlayerDialog from "./TrailerPlayerDialog.vue";
 import { trailerSubtitle } from "../trailerSubtitle";
@@ -53,6 +54,7 @@ const props = defineProps<{
   tmdbTrailerLanguage?: string | null;
   /** Masque les titres de section (bandeau actions série). */
   compact?: boolean;
+  hidden?: boolean;
 }>();
 
 const trailerOpen = ref(false);
@@ -71,6 +73,7 @@ const emit = defineEmits<{
   restore: [];
   redownload: [];
   unfollow: [];
+  hide: [];
   followAgain: [];
   watch: [body: Record<string, unknown>];
 }>();
@@ -385,6 +388,10 @@ function checkedFrom(event: Event): boolean {
               >
                 Marquer la série comme non vue
               </button>
+            </template>
+            <template v-if="!hidden">
+              <hr class="action-menu-separator" role="none" />
+              <FicheHideMenuEntry @hide="emit('hide')" />
             </template>
             <button v-if="followed" type="button" class="action-menu-item danger" role="menuitem" @click="emit('unfollow')">
               Ne plus suivre…

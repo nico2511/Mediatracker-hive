@@ -146,6 +146,9 @@ data/uindex_profile/
 mediatracker.env
 frontend/node_modules/
 frontend/dist/
+captures-tmdb-score/
+captures-a-trier/
+.capture-a-trier*/
 backend/mediatracker/core/.build-id
 
 # Hive T8 sandbox jetable (recette locale)

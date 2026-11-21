@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from mediatracker.core.catalog_list import followed_index, library_files_for_ent
 from mediatracker.core.catalog_poster import display_poster_url
 from mediatracker.core.display_title import clean_display_title
 from mediatracker.core.release_title import release_caption
+from mediatracker.core.tmdb_votes import exposed_tmdb_vote_average
 from mediatracker.core.tracking import EpisodeView, progress_of, tmdb_page_url
 from mediatracker.db.models import (
     CatalogEntry,
@@ -124,6 +125,7 @@ class LatestCard(BaseModel):
     in_library: bool = False
     ignored: bool = False
     hive_work_key: str | None = None
+    tmdb_vote_average: float | None = None
 
 
 class RecentDownloadCard(BaseModel):
@@ -149,6 +151,34 @@ class UpcomingReleaseCard(BaseModel):
     release_on: date
     tmdb_id: int
     tmdb_url: str | None = None
+
+
+class ToSortItemOut(BaseModel):
+    media_id: int
+    media_title: str
+    poster_url: str | None = None
+    kind: str
+    detail: str
+    highlight: str | None = None
+    season: int | None = None
+    seasons: list[int] = Field(default_factory=list)
+    ignore_key: str
+
+
+class ToSortGroupOut(BaseModel):
+    kind: str
+    title: str
+    items: list[ToSortItemOut]
+
+
+class ToSortOut(BaseModel):
+    total: int
+    footer: str
+    groups: list[ToSortGroupOut]
+
+
+class ToSortIgnoreIn(BaseModel):
+    ignore_key: str = Field(min_length=1, max_length=120)
 
 
 class DashboardOut(BaseModel):
@@ -210,6 +240,35 @@ def _card_from_next(media: Media) -> EpisodeCard:
     )
 
 
+@router.get("/to-sort", response_model=ToSortOut)
+def dashboard_to_sort(
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> ToSortOut:
+    del _principal
+    from mediatracker.core.to_sort import compute_to_sort, snapshot_to_api
+
+    return ToSortOut.model_validate(snapshot_to_api(compute_to_sort(db)))
+
+
+@router.post("/to-sort/ignore")
+def dashboard_to_sort_ignore(
+    body: ToSortIgnoreIn,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> dict[str, bool]:
+    del _principal
+    from mediatracker.api.errors import Problem
+    from mediatracker.core.to_sort import remember_ignore, validate_ignore_key
+
+    key = body.ignore_key.strip()
+    if not validate_ignore_key(key):
+        raise Problem(422, "Requête invalide", "Clé d'ignoré invalide.")
+    remember_ignore(db, key)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("", response_model=DashboardOut)
 def dashboard(
     request: Request,
@@ -223,10 +282,17 @@ def dashboard(
     to_watch_rows = to_watch_pairs(db, limit=_LIMIT)
     today = date.today()
     week_end = today + timedelta(days=7)
+    from mediatracker.core.media_hide import media_visible_clause
+
     upcoming_rows = db.execute(
         select(MediaItem, Media)
         .join(Media, Media.id == MediaItem.media_id)
-        .where(MediaItem.air_date.is_not(None), MediaItem.air_date >= today, MediaItem.air_date < week_end)
+        .where(
+            MediaItem.air_date.is_not(None),
+            MediaItem.air_date >= today,
+            MediaItem.air_date < week_end,
+            media_visible_clause(),
+        )
         .order_by(MediaItem.air_date, MediaItem.season, MediaItem.episode)
         .limit(_LIMIT)
     ).all()
@@ -237,6 +303,7 @@ def dashboard(
             Media.next_air_date.is_not(None),
             Media.next_air_date >= today,
             Media.next_air_date < week_end,
+            media_visible_clause(),
         )
     ).all()
     for media in announced:
@@ -247,8 +314,10 @@ def dashboard(
     upcoming.sort(key=lambda card: (card.air_date or date.max, card.media_title, card.episode or 0))
 
     def _downloads(states: tuple[str, ...] | None, failed: bool) -> list[DownloadCard]:
-        stmt = select(Download, MediaItem, Media).join(MediaItem, MediaItem.id == Download.media_item_id).join(
-            Media, Media.id == MediaItem.media_id
+        stmt = (
+            select(Download, MediaItem, Media)
+            .join(MediaItem, MediaItem.id == Download.media_item_id)
+            .join(Media, Media.id == MediaItem.media_id)
         )
         if failed:
             stmt = stmt.where(Download.state == "failed").order_by(Download.id.desc())
@@ -374,6 +443,8 @@ def _available(db: Session) -> list[AvailableCard]:
             on_shelf,
         ),
     )
+    from mediatracker.core.media_hide import media_visible_clause
+
     rows = db.execute(
         select(MediaItem, Media)
         .join(Media, Media.id == MediaItem.media_id)
@@ -382,6 +453,7 @@ def _available(db: Session) -> list[AvailableCard]:
             MediaItem.downloaded.is_(False),
             MediaItem.watched.is_(False),
             Media.followed.is_(True),
+            media_visible_clause(),
             ~film_obtained,
             or_(
                 Media.type != "series",
@@ -431,7 +503,13 @@ def _progress_complete(media: Media, episodes: list[MediaItem]) -> bool:
 
 
 def _progress(db: Session) -> list[ProgressCard]:
-    media_rows = list(db.scalars(select(Media).where(Media.followed.is_(True)).order_by(Media.title, Media.id)).all())
+    from mediatracker.core.media_hide import media_visible_clause
+
+    media_rows = list(
+        db.scalars(
+            select(Media).where(Media.followed.is_(True), media_visible_clause()).order_by(Media.title, Media.id)
+        ).all()
+    )
     if not media_rows:
         return []
     grouped: dict[int, list[MediaItem]] = {row.id: [] for row in media_rows}
@@ -492,12 +570,14 @@ class _CatalogContext:
         followed_tmdb: set[tuple[str, int]],
         followed_title: set[tuple[str, str, int | None]],
         library_files: list[LibraryFile],
+        media_votes: dict[int, tuple[float | None, int | None]],
     ) -> None:
         self.fiche_tmdb = fiche_tmdb
         self.fiche_title = fiche_title
         self.followed_tmdb = followed_tmdb
         self.followed_title = followed_title
         self.library_files = library_files
+        self.media_votes = media_votes
 
 
 def _latest_card(row: CatalogEntry, ctx: _CatalogContext) -> LatestCard:
@@ -506,12 +586,17 @@ def _latest_card(row: CatalogEntry, ctx: _CatalogContext) -> LatestCard:
     title, version = release_caption(row.title, quality=row.quality, language=row.language, season=row.season)
     media_id = _catalog_fiche(row, ctx.fiche_tmdb, ctx.fiche_title)
     followed = is_followed(row, ctx.followed_tmdb, ctx.followed_title)
+    vote_average = None
+    if media_id is not None:
+        stored = ctx.media_votes.get(media_id, (None, None))
+        vote_average = exposed_tmdb_vote_average(stored[0], stored[1])
     return LatestCard(
         title=title,
         subtitle=version,
         poster_url=display_poster_url(row),
         media_type=row.media_type,
         media_id=media_id,
+        tmdb_vote_average=vote_average,
         year=row.year,
         overview=row.overview,
         tmdb_id=row.tmdb_id,
@@ -529,7 +614,7 @@ def _catalog_home(db: Session, settings) -> tuple[list[LatestCard], list[LatestC
 
     if not any_latest_source_usable(db, settings):
         return [], [], []
-    fiche_tmdb, fiche_title = _fiche_lookup(db)
+    fiche_tmdb, fiche_title, media_votes = _fiche_lookup(db)
     followed_tmdb, followed_title = followed_index(db)
     followed_sets = (followed_tmdb, followed_title)
     film_page = list_catalog_page(
@@ -567,16 +652,27 @@ def _catalog_home(db: Session, settings) -> tuple[list[LatestCard], list[LatestC
         ).all()
     )
     library_rows = [*film_page.rows, *series_page.rows, *latest_rows]
+    from mediatracker.core.media_hide import hidden_media_ids
+
+    hidden_ids = hidden_media_ids(db)
     ctx = _CatalogContext(
         fiche_tmdb=fiche_tmdb,
         fiche_title=fiche_title,
         followed_tmdb=followed_tmdb,
         followed_title=followed_title,
         library_files=library_files_for_entries(db, library_rows),
+        media_votes=media_votes,
     )
-    latest_cards = [_latest_card(row, ctx) for row in latest_rows]
-    catalog_films = [_latest_card(row, ctx) for row in film_page.rows]
-    catalog_series = [_latest_card(row, ctx) for row in series_page.rows]
+
+    def _home_catalog_card(row: CatalogEntry) -> LatestCard | None:
+        media_id = _catalog_fiche(row, ctx.fiche_tmdb, ctx.fiche_title)
+        if media_id is not None and media_id in hidden_ids:
+            return None
+        return _latest_card(row, ctx)
+
+    latest_cards = [card for row in latest_rows if (card := _home_catalog_card(row)) is not None]
+    catalog_films = [card for row in film_page.rows if (card := _home_catalog_card(row)) is not None]
+    catalog_series = [card for row in series_page.rows if (card := _home_catalog_card(row)) is not None]
     return latest_cards, catalog_films, catalog_series
 
 
@@ -664,10 +760,16 @@ def _upcoming_releases(db: Session) -> list[UpcomingReleaseCard]:
     )
     if not rows:
         return []
+    from mediatracker.core.media_hide import media_visible_clause
+
     followed = {
         (media_type, tmdb_id)
         for media_type, tmdb_id in db.execute(
-            select(Media.type, Media.tmdb_id).where(Media.followed.is_(True), Media.tmdb_id.is_not(None))
+            select(Media.type, Media.tmdb_id).where(
+                Media.followed.is_(True),
+                Media.tmdb_id.is_not(None),
+                media_visible_clause(),
+            )
         ).all()
     }
     cards: list[UpcomingReleaseCard] = []
@@ -690,19 +792,35 @@ def _upcoming_releases(db: Session) -> list[UpcomingReleaseCard]:
     return cards
 
 
-def _fiche_lookup(db: Session) -> tuple[dict[tuple[str, int], int], dict[tuple[str, str, int | None], int]]:
+def _fiche_lookup(
+    db: Session,
+) -> tuple[
+    dict[tuple[str, int], int],
+    dict[tuple[str, str, int | None], int],
+    dict[int, tuple[float | None, int | None]],
+]:
     from mediatracker.core.catalog import fold_title
 
     media_rows = db.execute(
-        select(Media.id, Media.type, Media.tmdb_id, Media.title, Media.year).order_by(Media.id)
+        select(
+            Media.id,
+            Media.type,
+            Media.tmdb_id,
+            Media.title,
+            Media.year,
+            Media.tmdb_vote_average,
+            Media.tmdb_vote_count,
+        ).order_by(Media.id)
     ).all()
     by_tmdb: dict[tuple[str, int], int] = {}
     by_title: dict[tuple[str, str, int | None], int] = {}
-    for media_id, media_type, tmdb_id, title, year in media_rows:
+    media_votes: dict[int, tuple[float | None, int | None]] = {}
+    for media_id, media_type, tmdb_id, title, year, vote_average, vote_count in media_rows:
+        media_votes[media_id] = (vote_average, vote_count)
         if tmdb_id:
             by_tmdb.setdefault((media_type, tmdb_id), media_id)
         by_title.setdefault((media_type, fold_title(title), year), media_id)
-    return by_tmdb, by_title
+    return by_tmdb, by_title, media_votes
 
 
 def _catalog_fiche(

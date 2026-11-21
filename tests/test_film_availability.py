@@ -21,6 +21,42 @@ def _release_dates(*blocks: tuple[str, int, str]) -> dict:
     return {"results": [{"iso_3166_1": country, "release_dates": rows} for country, rows in grouped.items()]}
 
 
+def test_compute_us_digital_when_option_enabled():
+    payload = _release_dates(
+        ("FR", 3, "2026-06-01"),
+        ("FR", 4, "2027-03-01"),
+        ("US", 4, "2027-01-20"),
+    )
+    available, _t, source = compute_film_availability(
+        payload,
+        date(2026, 6, 1),
+        country="FR",
+        trigger_us_digital=True,
+    )
+    assert available == date(2027, 1, 20)
+    assert source == "digital_us"
+
+    available_off, _t2, source_off = compute_film_availability(
+        payload,
+        date(2026, 6, 1),
+        country="FR",
+        trigger_us_digital=False,
+    )
+    assert available_off == date(2027, 3, 1)
+    assert source_off == "digital_fr"
+
+
+def test_compute_catalog_region_emits_regional_digital_source_code():
+    payload = _release_dates(("DE", 4, "2026-08-01"), ("FR", 4, "2026-09-01"))
+    available, _t, source = compute_film_availability(payload, None, country="DE")
+    assert available == date(2026, 8, 1)
+    assert source == "digital_de"
+
+    available_fr, _t2, source_fr = compute_film_availability(payload, None, country="FR")
+    assert available_fr == date(2026, 9, 1)
+    assert source_fr == "digital_fr"
+
+
 def test_compute_digital_fr_then_physical_then_any_country():
     payload = _release_dates(("FR", 3, "2026-06-01"), ("FR", 4, "2026-09-15"))
     available, theatrical, source = compute_film_availability(payload, date(2026, 6, 1))
@@ -485,6 +521,58 @@ def test_apply_film_from_tmdb_keeps_digital_when_release_dates_missing(client, a
         assert row is not None
         assert row.next_air_date == date(2026, 12, 1)
         assert row.film_availability_source == "digital_fr"
+    finally:
+        db.close()
+
+
+def test_apply_new_seasons_film_keeps_catalog_release_regions(client, app):
+    from mediatracker.core.seasons import apply_new_seasons
+    from mediatracker.db.models import Media, Setting
+    from mediatracker.integrations.tmdb import TmdbTitle
+    from mediatracker.integrations.tmdb_enrichment import release_by_region
+
+    db = app.state.session_factory()
+    try:
+        region = db.get(Setting, "tmdb_region")
+        if region is None:
+            db.add(Setting(key="tmdb_region", value="DE", is_secret=False))
+        else:
+            region.value = "DE"
+        media = Media(
+            type="film",
+            title="Exemple Région",
+            followed=True,
+            tmdb_id=701,
+        )
+        db.add(media)
+        db.commit()
+        release_dates = _release_dates(
+            ("DE", 3, "2026-05-01"),
+            ("DE", 4, "2026-08-15"),
+            ("US", 4, "2026-07-01"),
+            ("FR", 4, "2026-12-01"),
+        )
+        fetched = TmdbTitle(
+            tmdb_id=701,
+            media_type="film",
+            title="Exemple Région",
+            year=2026,
+            overview=None,
+            poster_url=None,
+            series_status=None,
+            release_date=date(2026, 5, 1),
+            seasons=(),
+            release_dates=release_dates,
+            release_by_region=release_by_region(release_dates),
+        )
+        apply_new_seasons(db, media, fetched, now=NOW)
+        db.commit()
+        db.refresh(media)
+        assert media.tmdb_release_by_region is not None
+        assert "DE" in media.tmdb_release_by_region
+        assert media.tmdb_release_by_region["DE"]["digital"] == "2026-08-15"
+        assert media.tmdb_release_by_region["US"]["digital"] == "2026-07-01"
+        assert "FR" not in media.tmdb_release_by_region
     finally:
         db.close()
 

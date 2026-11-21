@@ -154,6 +154,13 @@ def _hoster_ok(link: Link, preference: list[str]) -> bool:
     An empty preference means « is any link left », used after a skip. A link
     with no hoster name (some protected URLs) is kept.
     """
+    from mediatracker.core.profile_attempt_adapters import manual_provider_link
+
+    if manual_provider_link(link):
+        name = (link.hoster or "").casefold()
+        if name in BLOCKED_SOURCE_HOSTERS:
+            return False
+        return True
     name = (link.hoster or "").casefold()
     if name in BLOCKED_SOURCE_HOSTERS:
         return False

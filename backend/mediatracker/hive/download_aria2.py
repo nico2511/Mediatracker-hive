@@ -35,6 +35,26 @@ HIVE_PEER_BUSY_MESSAGE = "Source Hive occupée."
 logger = logging.getLogger(__name__)
 
 
+def local_parallel_wait_message(
+    db: Session,
+    row: Download,
+    peer_base_url: str,
+    *,
+    origin_instance_id: str | None = None,
+) -> str:
+    """Libellé quand la file locale est pleine (sans 429 du pair)."""
+    from mediatracker.hive.download_pipeline import peer_label_from_instance_id
+
+    active = active_hive_fetches_for_peer(db, peer_base_url, exclude_download_id=row.id)
+    if origin_instance_id:
+        label = peer_label_from_instance_id(origin_instance_id)
+    elif peer_base_url.strip():
+        label = peer_base_url.strip().rstrip("/")
+    else:
+        label = "le pair"
+    return f"En attente : déjà {active} transferts en cours depuis {label}"
+
+
 def _normalize_peer_base(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
@@ -63,10 +83,18 @@ def active_hive_fetches_for_peer(
 
 
 class HiveGrantMintError(Exception):
-    def __init__(self, code: str, message: str = "", *, retry_after_seconds: float | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str = "",
+        *,
+        retry_after_seconds: float | None = None,
+        busy_reason: str | None = None,
+    ) -> None:
         self.code = code
         self.message = message
         self.retry_after_seconds = retry_after_seconds
+        self.busy_reason = (busy_reason or "").strip() or None
         super().__init__(message or code)
 
 
@@ -179,7 +207,8 @@ def _peer_unusable_for_job(
     now: datetime,
     *,
     limit: int,
-) -> bool:
+    origin_instance_id: str | None = None,
+) -> str | None:
     from mediatracker.hive.download_pipeline import (
         hive_peer_busy_key,
         hive_peer_marked_busy,
@@ -187,14 +216,16 @@ def _peer_unusable_for_job(
     )
 
     if not peer_base_url:
-        return True
+        return HIVE_PEER_BUSY_MESSAGE
     peer_key = hive_peer_busy_key(peer_base_url)
     if hive_peer_marked_busy(row.id, peer_key, now):
-        return True
+        return HIVE_PEER_BUSY_MESSAGE
     if active_hive_fetches_for_peer(db, peer_base_url, exclude_download_id=row.id) >= limit:
         mark_hive_peer_busy(row.id, peer_key, now)
-        return True
-    return False
+        return local_parallel_wait_message(
+            db, row, peer_base_url, origin_instance_id=origin_instance_id
+        )
+    return None
 
 
 def apply_hive_fetch_source(
@@ -276,8 +307,8 @@ def hive_failover_after_peer_busy(
         resolved = _resolve_active_source(db, source)
         if resolved is None:
             continue
-        _, _, _, peer_base = resolved
-        if _peer_unusable_for_job(db, row, peer_base, moment, limit=limit):
+        _, _, inst_id, peer_base = resolved
+        if _peer_unusable_for_job(db, row, peer_base, moment, limit=limit, origin_instance_id=inst_id):
             continue
         if not apply_hive_fetch_source(db, ctx, source, index=index, now=moment):
             continue
@@ -376,14 +407,19 @@ def mint_remote_fetch_grant(
     if resp.status_code != 200:
         code = {401: "peer_auth", 404: "peer_file", 429: "peer_rate"}.get(resp.status_code, "peer_mint")
         retry_after_seconds = None
+        busy_reason = None
         if resp.status_code == 429:
+            from mediatracker.hive.hive_busy import HIVE_BUSY_REASON_HEADER
             from mediatracker.hive.peer_rate_limit import parse_retry_after_header
 
-            retry_after_seconds = parse_retry_after_header(resp.headers.get("Retry-After"))
+            busy_reason = (resp.headers.get(HIVE_BUSY_REASON_HEADER) or "").strip() or None
+            cap: float | None = None if busy_reason == "quota" else 300.0
+            retry_after_seconds = parse_retry_after_header(resp.headers.get("Retry-After"), cap_seconds=cap)
         raise HiveGrantMintError(
             code,
             f"Mint grant refusé ({resp.status_code}).",
             retry_after_seconds=retry_after_seconds,
+            busy_reason=busy_reason,
         )
     try:
         body = resp.json()
@@ -698,6 +734,9 @@ def prepare_hive_aria2_unlock(
             and active_hive_fetches_for_peer(db, ctx.peer_base_url, exclude_download_id=row.id) >= limit
         )
         if peer_full:
+            wait_msg = local_parallel_wait_message(
+                db, row, ctx.peer_base_url, origin_instance_id=ctx.origin_instance_id
+            )
             _journal_source_attempt(
                 db,
                 row,
@@ -705,10 +744,10 @@ def prepare_hive_aria2_unlock(
                 item,
                 "hive",
                 issue="empty",
-                reason=HIVE_PEER_BUSY_MESSAGE,
+                reason=wait_msg,
                 now=now,
             )
-            defer_hive_peer_busy(row, now)
+            defer_hive_peer_busy(row, now, error_message=wait_msg)
             return "waiting"
         try:
             grant = ensure_mint_for_download(db, settings, ctx, now=now)
@@ -718,8 +757,23 @@ def prepare_hive_aria2_unlock(
                 retry_after = None
                 if exc.retry_after_seconds is not None:
                     retry_after = timedelta(seconds=float(exc.retry_after_seconds))
-                mark_hive_peer_busy(row.id, peer_key, now, retry_after=retry_after)
-                defer_hive_peer_busy(row, now)
+                from mediatracker.hive.download_pipeline import defer_hive_peer_busy_from_remote
+                from mediatracker.hive.hive_busy import REASON_QUOTA
+
+                mark_hive_peer_busy(
+                    row.id,
+                    peer_key,
+                    now,
+                    retry_after=retry_after,
+                    uncap_retry=exc.busy_reason == REASON_QUOTA,
+                )
+                defer_hive_peer_busy_from_remote(
+                    row,
+                    now,
+                    busy_reason=exc.busy_reason,
+                    retry_after_seconds=exc.retry_after_seconds,
+                    peer_instance_id=ctx.origin_instance_id,
+                )
                 return "waiting"
             if defer_final:
                 return None
@@ -735,8 +789,11 @@ def prepare_hive_aria2_unlock(
             resolved = _resolve_active_source(db, source)
             if resolved is None:
                 continue
-            _, _, _, peer_base = resolved
-            if _peer_unusable_for_job(db, row, peer_base, now, limit=limit):
+            _, _, inst_id, peer_base = resolved
+            unusable = _peer_unusable_for_job(
+                db, row, peer_base, now, limit=limit, origin_instance_id=inst_id
+            )
+            if unusable:
                 _journal_source_attempt(
                     db,
                     row,
@@ -744,7 +801,7 @@ def prepare_hive_aria2_unlock(
                     item,
                     "hive",
                     issue="empty",
-                    reason=HIVE_PEER_BUSY_MESSAGE,
+                    reason=unusable,
                     now=now,
                 )
                 continue
@@ -761,8 +818,16 @@ def prepare_hive_aria2_unlock(
                     retry_after = None
                     if exc.retry_after_seconds is not None:
                         retry_after = timedelta(seconds=float(exc.retry_after_seconds))
+                    from mediatracker.hive.hive_busy import REASON_QUOTA
+
                     peer_key = hive_peer_busy_key(peer_base)
-                    mark_hive_peer_busy(row.id, peer_key, now, retry_after=retry_after)
+                    mark_hive_peer_busy(
+                        row.id,
+                        peer_key,
+                        now,
+                        retry_after=retry_after,
+                        uncap_retry=exc.busy_reason == REASON_QUOTA,
+                    )
                     continue
                 _restore_hive_fetch_ctx(ctx, ranked_snap)
                 if defer_final:

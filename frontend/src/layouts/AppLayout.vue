@@ -185,6 +185,13 @@ async function onNavAction(item: NavItem) {
       <div class="sidebar-foot">
         <p v-if="user" class="hint sidebar-user">{{ user.username }}</p>
         <p v-if="versionLabel" class="hint sidebar-version" :title="versionTitle">{{ versionLabel }}</p>
+        <p class="hint sidebar-version">
+          <a
+            href="https://github.com/nico2511/Mediatracker-hive"
+            target="_blank"
+            rel="noopener"
+          >Dépôt Mediatracker-hive</a>
+        </p>
       </div>
     </aside>
     <main class="content">

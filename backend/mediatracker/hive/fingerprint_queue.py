@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
@@ -12,6 +12,25 @@ from mediatracker.db.models import HiveFileFingerprint, HiveFingerprintQueue, Hi
 from mediatracker.hive.fingerprint import HIVE_CLAIM_STALE
 
 logger = logging.getLogger(__name__)
+
+FAIL_REASON_TRASH = "Fichier en corbeille."
+FAILED_RETRY_MIN_AGE = timedelta(hours=24)
+
+
+def _failed_eligible_for_daily_retry(row: HiveFingerprintQueue, *, now: datetime) -> bool:
+    if row.status != "failed":
+        return False
+    if (row.fail_reason or "").strip() == FAIL_REASON_TRASH:
+        return False
+    updated = row.updated_at
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    elif updated.tzinfo != timezone.utc:
+        updated = updated.astimezone(timezone.utc)
+    moment = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    if moment.tzinfo != timezone.utc:
+        moment = moment.astimezone(timezone.utc)
+    return moment - updated >= FAILED_RETRY_MIN_AGE
 
 
 def enqueue_fingerprint_work(db: Session, media_item_id: int, *, now: datetime) -> None:
@@ -172,11 +191,14 @@ def backfill_queue_from_incomplete(db: Session, *, now: datetime) -> int:
     )
     for media_item_id in rows:
         existing = db.scalar(
-            select(HiveFingerprintQueue.id).where(
+            select(HiveFingerprintQueue).where(
                 HiveFingerprintQueue.media_item_id == int(media_item_id)
             )
         )
         if existing is not None:
+            if _failed_eligible_for_daily_retry(existing, now=now):
+                enqueue_fingerprint_work(db, int(media_item_id), now=now)
+                added += 1
             continue
         enqueue_fingerprint_work(db, int(media_item_id), now=now)
         added += 1

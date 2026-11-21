@@ -107,3 +107,61 @@ def record_inbound_bytes(
         return
     row = _quota_row(db, ruche_id=ruche_id, member_id=requester_id, when=now)
     row.bytes_used = int(row.bytes_used) + max(0, nbytes)
+
+
+def reset_member_receive_quota(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    member_id: str,
+    now: datetime,
+) -> int:
+    """Remet à zéro le compteur local de la semaine en cours pour un membre non-partageur."""
+    if (
+        db.scalar(
+            select(HiveMember.member_instance_id)
+            .where(HiveMember.ruche_id == ruche_id, HiveMember.member_instance_id == member_id)
+            .limit(1)
+        )
+        is None
+    ):
+        raise ValueError("member_not_found")
+    if member_shares_in_ruche(db, ruche_id=ruche_id, instance_id=member_id):
+        raise ValueError("shares_in_ruche")
+    ws = week_start_date(now)
+    row = db.get(HiveReceiveQuota, (ruche_id, member_id, ws))
+    previous = int(row.bytes_used) if row is not None else 0
+    row = _quota_row(db, ruche_id=ruche_id, member_id=member_id, when=now)
+    row.bytes_used = 0
+    db.flush()
+    return previous
+
+
+def member_receive_quota_snapshot(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    instance_id: str,
+    now: datetime,
+) -> dict[str, int | str | bool | None]:
+    """Consommation locale (envoyeur) pour l'écran Membres."""
+    from mediatracker.hive.transfer_settings import quota_usage_status, week_start_date
+
+    shares = member_shares_in_ruche(db, ruche_id=ruche_id, instance_id=instance_id)
+    if shares:
+        return {
+            "shares_in_ruche": True,
+            "receive_bytes_used": None,
+            "receive_quota_bytes": None,
+            "receive_quota_status": None,
+        }
+    limit = weekly_quota_for_ruche(db, ruche_id)
+    ws = week_start_date(now)
+    row = db.get(HiveReceiveQuota, (ruche_id, instance_id, ws))
+    used = int(row.bytes_used) if row is not None else 0
+    return {
+        "shares_in_ruche": False,
+        "receive_bytes_used": used,
+        "receive_quota_bytes": limit,
+        "receive_quota_status": quota_usage_status(used, limit),
+    }

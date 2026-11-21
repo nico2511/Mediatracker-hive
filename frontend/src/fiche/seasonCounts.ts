@@ -7,7 +7,85 @@ export type SeasonCountsEpisode = {
   source_available: boolean;
   download_active?: boolean;
   download_busy?: boolean;
+  air_date?: string | null;
 };
+
+export type CountPillTone = "ok" | "warn" | "muted";
+
+/** Calendrier local du navigateur (YYYY-MM-DD), pas minuit UTC. */
+export function browserLocalTodayIso(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function todayIso(): string {
+  return browserLocalTodayIso();
+}
+
+/** Épisode déjà diffusé : pas de date TMDB ou date ≤ aujourd'hui. */
+export function isEpisodeAired(episode: SeasonCountsEpisode, today: string = todayIso()): boolean {
+  const ad = episode.air_date;
+  if (ad == null || ad === "") {
+    return true;
+  }
+  return ad <= today;
+}
+
+export function airedEpisodeCount(group: SeasonCountsGroup, today: string = todayIso()): number {
+  return group.episodes.filter((row) => isEpisodeAired(row, today)).length;
+}
+
+function episodePresentOnDisk(row: SeasonCountsEpisode): boolean {
+  return row.file_status === "present" || row.downloaded;
+}
+
+function episodeAbsentWithoutSource(row: SeasonCountsEpisode): boolean {
+  if (row.file_status === "present" || row.downloaded) {
+    return false;
+  }
+  if (row.download_active || row.download_busy || row.file_status === "downloading") {
+    return false;
+  }
+  if (row.source_available && !row.downloaded) {
+    return false;
+  }
+  const status = row.file_status || "absent";
+  return status === "absent";
+}
+
+export function watchedAmongAiredCount(group: SeasonCountsGroup, today: string = todayIso()): number {
+  return group.episodes.filter((row) => isEpisodeAired(row, today) && row.watched).length;
+}
+
+export function presentOnDiskAmongAiredCount(group: SeasonCountsGroup, today: string = todayIso()): number {
+  return group.episodes.filter((row) => isEpisodeAired(row, today) && episodePresentOnDisk(row)).length;
+}
+
+export function watchedTone(group: SeasonCountsGroup, today: string = todayIso()): CountPillTone {
+  const aired = airedEpisodeCount(group, today);
+  const watched = watchedAmongAiredCount(group, today);
+  if (watched === 0) {
+    return "muted";
+  }
+  if (aired > 0 && watched >= aired) {
+    return "ok";
+  }
+  return "warn";
+}
+
+export function onDiskTone(group: SeasonCountsGroup, today: string = todayIso()): CountPillTone {
+  const aired = airedEpisodeCount(group, today);
+  const present = presentOnDiskAmongAiredCount(group, today);
+  if (present === 0) {
+    return "muted";
+  }
+  if (aired > 0 && present >= aired) {
+    return "ok";
+  }
+  return "warn";
+}
 
 export type SeasonCountsGroup = {
   episode_count: number | null;
@@ -56,20 +134,8 @@ export function readyWithoutFileCount(group: SeasonCountsGroup): number {
   }).length;
 }
 
-export function absentWithoutSourceCount(group: SeasonCountsGroup): number {
-  return group.episodes.filter((row) => {
-    if (row.file_status === "present" || row.downloaded) {
-      return false;
-    }
-    if (row.download_active || row.download_busy || row.file_status === "downloading") {
-      return false;
-    }
-    if (row.source_available && !row.downloaded) {
-      return false;
-    }
-    const status = row.file_status || "absent";
-    return status === "absent";
-  }).length;
+export function absentWithoutSourceCount(group: SeasonCountsGroup, today: string = todayIso()): number {
+  return group.episodes.filter((row) => isEpisodeAired(row, today) && episodeAbsentWithoutSource(row)).length;
 }
 
 export function missingCatalogLabel(group: SeasonCountsGroup): string {

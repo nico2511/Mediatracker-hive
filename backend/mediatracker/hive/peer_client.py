@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -18,6 +20,8 @@ def signed_peer_request(
     private_key: Ed25519PrivateKey,
     body: bytes = b"",
     query: str = "",
+    when: datetime | None = None,
+    timeout: float | None = None,
 ) -> httpx.Response:
     headers = sign_request_headers(
         private_key=private_key,
@@ -26,9 +30,17 @@ def signed_peer_request(
         query=query,
         ruche_id=ruche_id,
         body=body,
+        when=when,
     )
     url = path if not query else f"{path}?{query}"
-    return peer_request(base_url=base_url, method=method, url_path=url, headers=headers, body=body)
+    return peer_request(
+        base_url=base_url,
+        method=method,
+        url_path=url,
+        headers=headers,
+        body=body,
+        timeout=timeout,
+    )
 
 
 def gossip_sync_once(

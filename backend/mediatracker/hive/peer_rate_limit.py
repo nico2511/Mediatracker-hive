@@ -31,13 +31,19 @@ class PeerRateLimiter:
         self._hits.clear()
 
 
-def parse_retry_after_header(value: str | None, *, cap_seconds: float = 300.0) -> float | None:
-    """Délai HTTP Retry-After (secondes), plafonné."""
+def parse_retry_after_header(value: str | None, *, cap_seconds: float | None = 300.0) -> float | None:
+    """Délai HTTP Retry-After (secondes), plafonné si cap_seconds est défini."""
     if not value or not str(value).strip():
         return None
     raw = str(value).strip()
+
+    def _cap(seconds: float) -> float:
+        if cap_seconds is None:
+            return max(0.0, seconds)
+        return min(cap_seconds, max(0.0, seconds))
+
     try:
-        return min(cap_seconds, max(0.0, float(raw)))
+        return _cap(float(raw))
     except ValueError:
         pass
     try:
@@ -45,6 +51,6 @@ def parse_retry_after_header(value: str | None, *, cap_seconds: float = 300.0) -
 
         moment = parsedate_to_datetime(raw)
         delay = moment.timestamp() - time.time()
-        return min(cap_seconds, max(0.0, delay))
+        return _cap(delay)
     except (TypeError, ValueError, IndexError, OverflowError):
         return None

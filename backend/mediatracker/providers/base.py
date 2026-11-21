@@ -48,6 +48,8 @@ class LinkCandidate(BaseModel):
     # Torrent file index, when the source names one file inside the magnet.
     file_index: int | None = None
     external_id: str
+    # Generic Wawacity page heading « HD » only (no release name on the row).
+    page_hd_label: bool = False
 
 
 class SourceResult(BaseModel):

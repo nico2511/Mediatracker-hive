@@ -32,7 +32,7 @@ export function hiveBadgesForState(state: HiveShareUiState | null | undefined): 
   if (state.pull_only && state.has_file) {
     badges.push({ key: "pull", label: "Mode tirage", tone: "info" });
   } else if (state.shared) {
-    badges.push({ key: "shared", label: "Partagé", tone: "honey" });
+    badges.push({ key: "shared", label: "Partagé", tone: "info" });
   } else if (state.preparing) {
     badges.push({ key: "prep", label: "Préparation au partage", tone: "muted" });
   } else if (!state.has_file) {

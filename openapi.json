@@ -3118,6 +3118,11 @@
             ],
             "title": "Source"
           },
+          "source_rounds": {
+            "default": 0,
+            "title": "Source Rounds",
+            "type": "integer"
+          },
           "speed": {
             "anyOf": [
               {
@@ -7599,6 +7604,17 @@
             ],
             "title": "Tmdb Url"
           },
+          "tmdb_vote_average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tmdb Vote Average"
+          },
           "year": {
             "anyOf": [
               {
@@ -8515,6 +8531,17 @@
             "title": "File Status",
             "type": "string"
           },
+          "film_availability_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Film Availability Source"
+          },
           "film_not_yet_available": {
             "default": false,
             "title": "Film Not Yet Available",
@@ -8539,6 +8566,18 @@
           "followed": {
             "title": "Followed",
             "type": "boolean"
+          },
+          "hidden_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hidden At"
           },
           "id": {
             "title": "Id",
@@ -8597,6 +8636,18 @@
           "new_episode_policy": {
             "title": "New Episode Policy",
             "type": "string"
+          },
+          "next_air_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Air Date"
           },
           "next_episode": {
             "anyOf": [
@@ -8984,6 +9035,11 @@
       },
       "MediaPage": {
         "properties": {
+          "hidden_count": {
+            "default": 0,
+            "title": "Hidden Count",
+            "type": "integer"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/MediaOut"
@@ -9363,6 +9419,44 @@
           "pull_only": {
             "title": "Pull Only",
             "type": "boolean"
+          },
+          "receive_bytes_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receive Bytes Used"
+          },
+          "receive_quota_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receive Quota Bytes"
+          },
+          "receive_quota_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receive Quota Status"
+          },
+          "shares_in_ruche": {
+            "default": false,
+            "title": "Shares In Ruche",
+            "type": "boolean"
           }
         },
         "required": [
@@ -9599,6 +9693,126 @@
           "message"
         ],
         "title": "MissingFileOut",
+        "type": "object"
+      },
+      "MyQuotaOut": {
+        "properties": {
+          "reset_at": {
+            "title": "Reset At",
+            "type": "string"
+          },
+          "ruche_id_hex": {
+            "title": "Ruche Id Hex",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/MyQuotaSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "week_start": {
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ruche_id_hex",
+          "week_start",
+          "reset_at",
+          "sources"
+        ],
+        "title": "MyQuotaOut",
+        "type": "object"
+      },
+      "MyQuotaSourceOut": {
+        "properties": {
+          "bytes_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Used"
+          },
+          "quota_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota Bytes"
+          },
+          "receive_quota_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receive Quota Status"
+          },
+          "reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset At"
+          },
+          "shares_in_ruche": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares In Ruche"
+          },
+          "source_display_name": {
+            "title": "Source Display Name",
+            "type": "string"
+          },
+          "source_instance_id": {
+            "title": "Source Instance Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "week_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week Start"
+          }
+        },
+        "required": [
+          "status",
+          "source_instance_id",
+          "source_display_name"
+        ],
+        "title": "MyQuotaSourceOut",
         "type": "object"
       },
       "NextEpisodeOut": {
@@ -12125,6 +12339,14 @@
             "title": "Members",
             "type": "array"
           },
+          "quota_reset_at": {
+            "title": "Quota Reset At",
+            "type": "string"
+          },
+          "quota_week_start": {
+            "title": "Quota Week Start",
+            "type": "string"
+          },
           "ruche_id_hex": {
             "title": "Ruche Id Hex",
             "type": "string"
@@ -12138,6 +12360,8 @@
           "ruche_id_hex",
           "is_creator",
           "weekly_quota_bytes",
+          "quota_week_start",
+          "quota_reset_at",
           "members"
         ],
         "title": "RucheDetailOut",
@@ -13849,6 +14073,146 @@
           }
         },
         "title": "TmdbTrialPreview",
+        "type": "object"
+      },
+      "ToSortGroupOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ToSortItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "items"
+        ],
+        "title": "ToSortGroupOut",
+        "type": "object"
+      },
+      "ToSortIgnoreIn": {
+        "properties": {
+          "ignore_key": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Ignore Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ignore_key"
+        ],
+        "title": "ToSortIgnoreIn",
+        "type": "object"
+      },
+      "ToSortItemOut": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "highlight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Highlight"
+          },
+          "ignore_key": {
+            "title": "Ignore Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_id": {
+            "title": "Media Id",
+            "type": "integer"
+          },
+          "media_title": {
+            "title": "Media Title",
+            "type": "string"
+          },
+          "poster_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Poster Url"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          },
+          "seasons": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Seasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "media_id",
+          "media_title",
+          "kind",
+          "detail",
+          "ignore_key"
+        ],
+        "title": "ToSortItemOut",
+        "type": "object"
+      },
+      "ToSortOut": {
+        "properties": {
+          "footer": {
+            "title": "Footer",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/ToSortGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "footer",
+          "groups"
+        ],
+        "title": "ToSortOut",
         "type": "object"
       },
       "TokenCreate": {
@@ -16134,6 +16498,72 @@
         ]
       }
     },
+    "/api/v1/dashboard/to-sort": {
+      "get": {
+        "operationId": "dashboard_to_sort_api_v1_dashboard_to_sort_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToSortOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dashboard To Sort",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/v1/dashboard/to-sort/ignore": {
+      "post": {
+        "operationId": "dashboard_to_sort_ignore_api_v1_dashboard_to_sort_ignore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToSortIgnoreIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Dashboard To Sort Ignore Api V1 Dashboard To Sort Ignore Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dashboard To Sort Ignore",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
     "/api/v1/downloads": {
       "get": {
         "operationId": "list_downloads_api_v1_downloads_get",
@@ -16473,6 +16903,48 @@
         ]
       }
     },
+    "/api/v1/downloads/{download_id}/force-search": {
+      "post": {
+        "operationId": "force_search_download_api_v1_downloads__download_id__force_search_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "download_id",
+            "required": true,
+            "schema": {
+              "title": "Download Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Force Search Download",
+        "tags": [
+          "downloads"
+        ]
+      }
+    },
     "/api/v1/downloads/{download_id}/retry": {
       "post": {
         "operationId": "retry_download_api_v1_downloads__download_id__retry_post",
@@ -16517,7 +16989,7 @@
     },
     "/api/v1/downloads/{download_id}/retry-all": {
       "post": {
-        "description": "Fresh Wawacity discovery, then every hoster in the configured order.",
+        "description": "Nouvelle recherche sur les sources actives, puis les h\u00e9bergeurs dans l'ordre r\u00e9gl\u00e9.",
         "operationId": "retry_download_from_scratch_api_v1_downloads__download_id__retry_all_post",
         "parameters": [
           {
@@ -19210,6 +19682,94 @@
           }
         },
         "summary": "Get Ruche Members",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/ruches/{ruche_id_hex}/members/{instance_id}/quota/reset": {
+      "post": {
+        "operationId": "post_member_quota_reset_api_v1_hive_ruches__ruche_id_hex__members__instance_id__quota_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ruche_id_hex",
+            "required": true,
+            "schema": {
+              "title": "Ruche Id Hex",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "title": "Instance Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Member Quota Reset",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/ruches/{ruche_id_hex}/my-quota": {
+      "get": {
+        "operationId": "get_my_quota_api_v1_hive_ruches__ruche_id_hex__my_quota_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ruche_id_hex",
+            "required": true,
+            "schema": {
+              "title": "Ruche Id Hex",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyQuotaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get My Quota",
         "tags": [
           "hive",
           "hive"
@@ -22003,6 +22563,16 @@
               ],
               "title": "Identify Status"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_hidden",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Hidden",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -22463,6 +23033,49 @@
           }
         },
         "summary": "Force Download",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/v1/media/{media_id}/hide": {
+      "post": {
+        "description": "Masque la fiche (listes et accueil). Fichiers, historique et Hive inchang\u00e9s.",
+        "operationId": "hide_media_fiche_api_v1_media__media_id__hide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hide Media Fiche",
         "tags": [
           "media"
         ]
@@ -23637,6 +24250,49 @@
           }
         },
         "summary": "Unfollow Media",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/v1/media/{media_id}/unhide": {
+      "post": {
+        "description": "R\u00e9affiche une fiche masqu\u00e9e (ne relance pas le suivi).",
+        "operationId": "unhide_media_fiche_api_v1_media__media_id__unhide_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unhide Media Fiche",
         "tags": [
           "media"
         ]
@@ -25756,6 +26412,43 @@
           }
         },
         "summary": "Hive Member List"
+      }
+    },
+    "/hive/ruche/{ruche_id_hex}/quota-for-peer": {
+      "get": {
+        "operationId": "hive_quota_for_peer_hive_ruche__ruche_id_hex__quota_for_peer_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ruche_id_hex",
+            "required": true,
+            "schema": {
+              "title": "Ruche Id Hex",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hive Quota For Peer"
       }
     }
   }

@@ -8,7 +8,7 @@ from tests.conftest import csrf, login, profile_compliant_db_link_fields
 
 from mediatracker.core.forget import TRACE_FILE_ABSENT, forget_local_file
 from mediatracker.core.pipeline import tick
-from mediatracker.core.pipeline.constants import REDISCOVER_RESERVED
+from mediatracker.core.pipeline.constants import REDISCOVER_MESSAGE, REDISCOVER_RESERVED
 from mediatracker.core.precheck import DUPLICATE_IGNORED, REDOWNLOAD_STARTED
 from mediatracker.db.models import Download, Event, Link, Media, MediaItem, Provider
 from mediatracker.providers.base import DirectLink, DownloadStatus, Health
@@ -241,8 +241,15 @@ def test_redownload_without_links_schedules_rediscover(client, app):
         assert row.state == "pending"
         assert row.forced is True
         assert row.error_code == REDISCOVER_RESERVED
+        assert row.error == REDISCOVER_MESSAGE
+        assert "Wawacity" not in (row.error or "")
     finally:
         db.close()
+
+
+def test_rediscover_message_is_neutral():
+    assert REDISCOVER_MESSAGE == "Nouvelle recherche planifiée."
+    assert "Wawacity" not in REDISCOVER_MESSAGE
 
 
 def test_redownload_duplicate_on_disk_is_ignored(client, app):

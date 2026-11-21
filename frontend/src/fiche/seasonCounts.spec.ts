@@ -1,14 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   absentWithoutSourceCount,
+  browserLocalTodayIso,
   catalogEpisodeCount,
   missingCatalogSlots,
+  onDiskTone,
   presentOnDiskCount,
   readyWithoutFileCount,
   readyWithoutFileLabel,
+  watchedTone,
   type SeasonCountsGroup,
 } from "./seasonCounts";
+
+const REF = "2026-11-21";
 
 function season(overrides: Partial<SeasonCountsGroup>): SeasonCountsGroup {
   return {
@@ -75,5 +80,53 @@ describe("seasonCounts", () => {
     });
     expect(readyWithoutFileCount(group)).toBe(0);
     expect(absentWithoutSourceCount(group)).toBe(0);
+  });
+
+  it("vert vus et disque quand les épisodes diffusés sont complets", () => {
+    const group = season({
+      episodes: [
+        { watched: true, downloaded: true, file_status: "present", source_available: false, air_date: "2022-01-01" },
+        { watched: true, downloaded: true, file_status: "present", source_available: false, air_date: "2022-01-08" },
+        {
+          watched: false,
+          downloaded: false,
+          file_status: "absent",
+          source_available: false,
+          air_date: "2099-12-01",
+        },
+      ],
+    });
+    expect(watchedTone(group, REF)).toBe("ok");
+    expect(onDiskTone(group, REF)).toBe("ok");
+  });
+
+  it("ambre si partiel parmi les diffusés", () => {
+    const group = season({
+      episodes: [
+        { watched: true, downloaded: true, file_status: "present", source_available: false, air_date: "2022-03-01" },
+        { watched: false, downloaded: true, file_status: "present", source_available: false, air_date: "2022-03-08" },
+        { watched: false, downloaded: false, file_status: "absent", source_available: false, air_date: "2022-03-15" },
+      ],
+    });
+    expect(watchedTone(group, REF)).toBe("warn");
+    expect(onDiskTone(group, REF)).toBe("warn");
+  });
+
+  it("sans fichier ni source seulement pour les épisodes déjà diffusés", () => {
+    const group = season({
+      episodes: [
+        { watched: false, downloaded: false, file_status: "absent", source_available: false, air_date: "2026-11-08" },
+        { watched: false, downloaded: false, file_status: "absent", source_available: false, air_date: "2099-12-01" },
+      ],
+    });
+    expect(absentWithoutSourceCount(group, REF)).toBe(1);
+  });
+
+  it("utilise la date locale injectée sans passer par toISOString", () => {
+    const spy = vi.spyOn(Date.prototype, "toISOString");
+    const clock = new Date(2026, 10, 21, 23, 30, 0);
+    expect(browserLocalTodayIso(clock)).toBe("2026-11-21");
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

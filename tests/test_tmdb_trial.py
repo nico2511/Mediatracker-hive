@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 from sqlalchemy import func, select
@@ -10,6 +12,8 @@ from tests.conftest import login
 from mediatracker.core.tmdb_trial_cache import clear_tmdb_trial_cache
 from mediatracker.db.models import LibraryFile, Media
 from mediatracker.integrations.tmdb import WATCH_MONETIZATION_TYPES_FR, TmdbClient
+
+NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 class _RecordingTransport:
@@ -192,7 +196,16 @@ def test_browse_marks_followed_and_hides_library(recording_client, client, app, 
         media = Media(type="film", title="Possédé", year=2099, tmdb_id=1001, followed=True)
         db.add(media)
         db.flush()
-        db.add(LibraryFile(path="/tmp/demo.mkv", tmdb_id=1001, media_id=media.id, size=1))
+        db.add(
+            LibraryFile(
+                path="/tmp/demo.mkv",
+                tmdb_id=1001,
+                media_type="film",
+                media_id=media.id,
+                status="matched",
+                size=1,
+            )
+        )
         db.commit()
     finally:
         db.close()
@@ -207,3 +220,79 @@ def test_browse_marks_followed_and_hides_library(recording_client, client, app, 
     all_rows = client.get("/api/v1/tmdb-trial/browse", params={"type": "film", "release_kind": "cinema", "page": 1})
     assert all_rows.json()["items"][0]["followed"] is True
     assert all_rows.json()["items"][0]["in_library"] is True
+
+
+def test_browse_in_library_false_counts_only_matched_present(recording_client, client, app, monkeypatch):
+    """Trashed or missing library rows must not light the catalogue in_library flag."""
+    login(client)
+    _, mock = recording_client
+    monkeypatch.setattr("mediatracker.core.tmdb_trial._client", lambda db, settings: mock)
+    monkeypatch.setattr("mediatracker.api.v1.metadata.borrow_client", lambda db, settings: (mock, True))
+
+    db = app.state.session_factory()
+    try:
+        db.add(
+            LibraryFile(
+                path="/tmp/matched.mkv",
+                tmdb_id=1001,
+                media_type="film",
+                status="matched",
+                size=1,
+            )
+        )
+        db.add(
+            LibraryFile(
+                path="/tmp/trashed.mkv",
+                tmdb_id=1001,
+                media_type="film",
+                status="trashed",
+                size=1,
+            )
+        )
+        db.add(
+            LibraryFile(
+                path="/tmp/missing.mkv",
+                tmdb_id=1001,
+                media_type="film",
+                status="matched",
+                missing_at=NOW,
+                size=1,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    browse = client.get(
+        "/api/v1/tmdb-trial/browse",
+        params={"type": "film", "release_kind": "cinema", "page": 1},
+    )
+    assert browse.status_code == 200
+    assert browse.json()["items"][0]["in_library"] is True
+
+    db = app.state.session_factory()
+    try:
+        row = db.scalars(select(LibraryFile).where(LibraryFile.path == "/tmp/matched.mkv")).one()
+        row.status = "trashed"
+        db.commit()
+    finally:
+        db.close()
+
+    clear_tmdb_trial_cache()
+    browse_after = client.get(
+        "/api/v1/tmdb-trial/browse",
+        params={"type": "film", "release_kind": "cinema", "page": 1},
+    )
+    assert browse_after.json()["items"][0]["in_library"] is False
+
+    not_in_lib = client.get(
+        "/api/v1/tmdb-trial/browse",
+        params={"type": "film", "release_kind": "cinema", "page": 1, "in_library": "false"},
+    )
+    assert not_in_lib.status_code == 200
+    assert not_in_lib.json()["items"][0]["tmdb_id"] == 1001
+
+    search = client.get("/api/v1/metadata/tmdb/search", params={"q": "alpha", "type": "film"})
+    assert search.status_code == 200
+    hit = next(item for item in search.json()["items"] if item["tmdb_id"] == 1001)
+    assert hit["in_library"] is False

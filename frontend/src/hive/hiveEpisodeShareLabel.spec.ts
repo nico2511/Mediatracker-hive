@@ -39,7 +39,9 @@ describe("hiveEpisodeShareChips", () => {
 
   it("affiche Partagé quand shared", () => {
     const chips = hiveEpisodeShareChips({ ...base, shared: true, exclude_all: false });
-    expect(chips.some((c) => c.key === "shared")).toBe(true);
+    const shared = chips.find((c) => c.key === "shared");
+    expect(shared).toBeTruthy();
+    expect(shared?.tone).toBe("info");
   });
 
   it("reçu via Hive masqué si reparatagé", () => {
@@ -79,5 +81,23 @@ describe("hiveEpisodeShareChips", () => {
       fingerprint_total_size: 1000,
     });
     expect(chip?.labelShort).toBe("Empreinte 39 %");
+    expect(chip?.tone).toBe("warn");
+  });
+
+  it("teinte empreinte selon le pourcentage", () => {
+    const okChip = hiveEpisodeShareChip({
+      ...base,
+      preparing: true,
+      fingerprint_partial_size: 740,
+      fingerprint_total_size: 1000,
+    });
+    expect(okChip?.tone).toBe("ok");
+    const mutedChip = hiveEpisodeShareChip({
+      ...base,
+      preparing: true,
+      fingerprint_partial_size: 280,
+      fingerprint_total_size: 1000,
+    });
+    expect(mutedChip?.tone).toBe("muted");
   });
 });

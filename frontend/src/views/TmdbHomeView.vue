@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref } from "vue";
 
 import HomeGridSection from "../components/HomeGridSection.vue";
 import HomePersonalBlocks from "../components/HomePersonalBlocks.vue";
+import HomeToSortBlock, { type ToSortPayload } from "../components/HomeToSortBlock.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
 import StatusIcon from "../components/StatusIcon.vue";
@@ -12,7 +13,7 @@ import type { HomeSectionKey } from "../homeFilters";
 import { mediaKind, tmdbPage } from "../labels";
 import type { QuickTarget } from "../quick";
 import { fetchSettings } from "../settings";
-import { tmdbTrialRatingLabel } from "../tmdbTrialRating";
+import { tmdbRatingLabel } from "../tmdbRatingLabel";
 import { tmdbCatalogHomeHint } from "./settings/tmdbCatalogMeta";
 
 interface TmdbCard {
@@ -54,6 +55,9 @@ const progressSort = ref<"name" | "watched">("name");
 const wide = ref(true);
 const catalogHint = ref("Rangées alimentées par TMDB.");
 const hiveFollowBusy = ref<Record<string, boolean>>({});
+const toSortBoard = ref<ToSortPayload | null>(null);
+const toSortError = ref("");
+const toSortLoading = ref(false);
 let mediaQuery: MediaQueryList | null = null;
 
 function syncWide() {
@@ -129,11 +133,23 @@ function metaHint(card: TmdbCard): string {
     parts.push(String(card.year));
   }
   parts.push(mediaKind(card.media_type));
-  const rating = tmdbTrialRatingLabel(card.vote_average ?? null);
+  const rating = tmdbRatingLabel(card.vote_average ?? null);
   if (rating) {
     parts.push(`TMDB ${rating}/10`);
   }
   return parts.join(" · ");
+}
+
+async function loadToSort() {
+  toSortLoading.value = true;
+  toSortError.value = "";
+  try {
+    toSortBoard.value = await api<ToSortPayload>("/api/v1/dashboard/to-sort");
+  } catch {
+    toSortError.value = "Le bloc À trier est indisponible.";
+  } finally {
+    toSortLoading.value = false;
+  }
 }
 
 async function load() {
@@ -180,6 +196,7 @@ onMounted(() => {
   mediaQuery.addEventListener("change", syncWide);
   void loadCatalogHint();
   void load();
+  void loadToSort();
 });
 
 onUnmounted(() => {
@@ -477,6 +494,13 @@ onUnmounted(() => {
         </template>
       </HomeGridSection>
     </template>
+
+    <HomeToSortBlock
+      :board="toSortBoard"
+      :error="toSortError"
+      :loading="toSortLoading"
+      @changed="loadToSort"
+    />
 
     <MediaQuickView :target="quick" :follow="quickFollow" @close="quick = null" @changed="load" />
   </section>

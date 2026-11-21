@@ -14,7 +14,8 @@ from mediatracker.integrations.tmdb import TmdbTitle
 from mediatracker.integrations.tmdb_enrichment import TMDB_DIGITAL, TMDB_PHYSICAL, TMDB_THEATRICAL
 
 _SETTING_FALLBACK_MONTHS = "film_theatrical_fallback_months"
-_TRUSTED_DIGITAL_SOURCES = frozenset({"digital_fr", "physical_fr", "digital_any"})
+_SETTING_TRIGGER_US_DIGITAL = "film_trigger_us_digital"
+_TRUSTED_DIGITAL_SOURCES = frozenset({"digital_fr", "physical_fr", "digital_any", "digital_us"})
 
 
 def _add_months(day: date, months: int) -> date:
@@ -64,25 +65,58 @@ def _first_date(
     return min(pool) if pool else None
 
 
+def _digital_source(country: str) -> str:
+    if country == "FR":
+        return "digital_fr"
+    return f"digital_{country.lower()}"
+
+
+def _physical_source(country: str) -> str:
+    if country == "FR":
+        return "physical_fr"
+    return f"physical_{country.lower()}"
+
+
+def _trusted_stored_source(source: str | None) -> bool:
+    if source is None:
+        return True
+    if source in _TRUSTED_DIGITAL_SOURCES:
+        return True
+    return source.startswith("digital_") or source.startswith("physical_")
+
+
 def compute_film_availability(
     release_dates: dict[str, Any] | None,
     theatrical: date | None,
     *,
     fallback_months: int = 4,
     country: str = "FR",
+    trigger_us_digital: bool = False,
 ) -> tuple[date | None, date | None, str]:
     """Return (search_from, theatrical_on, source_code).
 
-    Priority: digital FR, physical FR, any digital/physical, theatrical + N months.
+    Priority: regional digital (optionally earliest with US digital), regional physical,
+    any digital/physical, theatrical + N months.
     """
+    catalog = country.upper()
     entries = _entries(release_dates)
-    theatrical_on = _first_date(entries, country=country, kinds=(TMDB_THEATRICAL,)) or theatrical
-    digital_fr = _first_date(entries, country=country, kinds=(TMDB_DIGITAL,))
-    if digital_fr is not None:
-        return digital_fr, theatrical_on, "digital_fr"
-    physical_fr = _first_date(entries, country=country, kinds=(TMDB_PHYSICAL,))
-    if physical_fr is not None:
-        return physical_fr, theatrical_on, "physical_fr"
+    theatrical_on = _first_date(entries, country=catalog, kinds=(TMDB_THEATRICAL,)) or theatrical
+    digital_region = _first_date(entries, country=catalog, kinds=(TMDB_DIGITAL,))
+    digital_us = _first_date(entries, country="US", kinds=(TMDB_DIGITAL,)) if trigger_us_digital else None
+
+    if digital_region is not None or digital_us is not None:
+        picks: list[tuple[date, str]] = []
+        if digital_region is not None:
+            picks.append((digital_region, _digital_source(catalog)))
+        if digital_us is not None:
+            picks.append((digital_us, "digital_us"))
+        if picks:
+            available, source = min(picks, key=lambda row: row[0])
+            return available, theatrical_on, source
+
+    physical_region = _first_date(entries, country=catalog, kinds=(TMDB_PHYSICAL,))
+    if physical_region is not None:
+        return physical_region, theatrical_on, _physical_source(catalog)
     any_digital = _first_date(entries, country=None, kinds=(TMDB_DIGITAL, TMDB_PHYSICAL))
     if any_digital is not None:
         return any_digital, theatrical_on, "digital_any"
@@ -106,6 +140,21 @@ def fallback_months_from_db(db: Session, default: int = 4) -> int:
     return max(0, min(value, 24))
 
 
+def trigger_us_digital_from_db(db: Session, default: bool = False) -> bool:
+    from mediatracker.db.models import Setting
+
+    row = db.get(Setting, _SETTING_TRIGGER_US_DIGITAL)
+    if row is None or row.value is None or not str(row.value).strip():
+        return default
+    return str(row.value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def catalog_region_from_db(db: Session, default: str = "FR") -> str:
+    from mediatracker.core.tmdb.catalog_settings import read_tmdb_catalog_settings
+
+    return read_tmdb_catalog_settings(db).region or default
+
+
 def _sync_theatrical(db: Session, media: Media, theatrical: date | None) -> None:
     if theatrical is None:
         return
@@ -115,19 +164,36 @@ def _sync_theatrical(db: Session, media: Media, theatrical: date | None) -> None
         film.air_date = theatrical
 
 
+def _sync_release_by_region(media: Media, release_dates: dict[str, Any] | None, catalog_region: str) -> None:
+    if not release_dates:
+        return
+    from mediatracker.integrations.tmdb_enrichment import regions_for_display, release_by_region
+
+    media.tmdb_release_by_region = release_by_region(
+        release_dates,
+        regions=regions_for_display(catalog_region),
+    )
+
+
 def apply_film_from_tmdb(db: Session, media: Media, fetched: TmdbTitle, *, fallback_months: int | None = None) -> None:
     if media.type != "film" or fetched.media_type != "film":
         return
     months = fallback_months if fallback_months is not None else fallback_months_from_db(db)
+    catalog_region = catalog_region_from_db(db)
+    trigger_us = trigger_us_digital_from_db(db)
     theatrical = fetched.release_date
+    _sync_release_by_region(media, fetched.release_dates, catalog_region)
     if fetched.release_dates is None:
         _sync_theatrical(db, media, theatrical)
-        if media.next_air_date is not None and (
-            media.film_availability_source in _TRUSTED_DIGITAL_SOURCES
-            or media.film_availability_source is None
-        ):
+        if media.next_air_date is not None and _trusted_stored_source(media.film_availability_source):
             return
-        available, _theatrical, source = compute_film_availability({"results": []}, theatrical, fallback_months=months)
+        available, _theatrical, source = compute_film_availability(
+            {"results": []},
+            theatrical,
+            fallback_months=months,
+            country=catalog_region,
+            trigger_us_digital=trigger_us,
+        )
         media.next_air_date = available
         media.film_availability_source = source
         return
@@ -135,6 +201,8 @@ def apply_film_from_tmdb(db: Session, media: Media, fetched: TmdbTitle, *, fallb
         fetched.release_dates,
         theatrical,
         fallback_months=months,
+        country=catalog_region,
+        trigger_us_digital=trigger_us,
     )
     media.next_air_date = available
     media.film_availability_source = source
@@ -162,7 +230,7 @@ def film_availability_label(
         film = next((item for item in episodes if item.season is None and item.episode is None), None)
         theatrical = film.air_date if film is not None else None
     if when is not None and when > day:
-        if source == "physical_fr":
+        if source == "physical_fr" or source.startswith("physical_"):
             return f"Pas encore disponible, sortie physique le {_format_fr(when)}"
         if source == "theatrical_fallback":
             return f"Pas encore disponible, disponible vers le {_format_fr(when)} (estimation)"

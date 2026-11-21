@@ -93,10 +93,6 @@ def outbound_transfer_progress(
             pct = parallel_gate.transfer_pct_for_grant(grant_id, int(grant.content_size or 0))
             if pct is not None and (best_pct is None or pct > best_pct):
                 best_pct = pct
-        elif parallel_gate is None:
-            active = True
-    if not active and grants:
-        active = True
     return active, best_pct
 
 
@@ -190,8 +186,8 @@ def batch_outbound_transfer_progress(
             continue
         item_id = int(row.media_item_id)
         active, best_pct = out.get(item_id, (False, None))
-        active = True
         if parallel_gate is not None and parallel_gate.is_grant_active(int(row.id)):
+            active = True
             pct = parallel_gate.transfer_pct_for_grant(int(row.id), int(row.content_size or 0))
             if pct is not None and (best_pct is None or pct > best_pct):
                 best_pct = pct

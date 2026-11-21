@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
+from mediatracker.core.catalog_list import library_tmdb_keys
 from mediatracker.core.tmdb.client import borrow_client
-from mediatracker.db.models import LibraryFile, Media
+from mediatracker.db.models import Media
 from mediatracker.integrations.tmdb import TmdbError
 
 router = APIRouter(prefix="/metadata/tmdb", tags=["metadata"])
@@ -68,11 +69,7 @@ def search_tmdb(
         (row.type, row.tmdb_id): row.followed
         for row in db.scalars(select(Media).where(Media.tmdb_id.is_not(None))).all()
     }
-    library_ids = {
-        row.tmdb_id
-        for row in db.scalars(select(LibraryFile).where(LibraryFile.tmdb_id.is_not(None))).all()
-        if row.tmdb_id is not None
-    }
+    library_keys = library_tmdb_keys(db)
     return TmdbSearchOut(
         items=[
             TmdbHitOut(
@@ -87,7 +84,7 @@ def search_tmdb(
                 episode_count=hit.episode_count,
                 runtime=hit.runtime,
                 followed=bool(followed.get((hit.media_type, hit.tmdb_id))),
-                in_library=hit.tmdb_id in library_ids,
+                in_library=(hit.media_type, hit.tmdb_id) in library_keys,
                 seasons=_seasons(hit),
             )
             for hit in hits[:20]

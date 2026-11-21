@@ -170,6 +170,12 @@ def notification_text(event_type: str, payload: dict[str, Any]) -> tuple[str, st
             payload.get("message") or payload.get("reason") or "Événement transfert Hive (historique)."
         )
         return "Transfert Hive", detail
+    if event_type == "hive.quota.reset":
+        detail = str(payload.get("message") or "Quota hebdomadaire d'un membre remis à zéro.")
+        return "Hive — quota", detail
+    if event_type == "hive.quota.reset.notice":
+        detail = str(payload.get("message") or "Votre quota a été remis à zéro chez une source.")
+        return "Hive — quota", detail
     if event_type == "media.unfollowed":
         automatic = payload.get("automatic") is True
         reason = str(payload.get("reason") or "")

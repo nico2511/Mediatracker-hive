@@ -75,6 +75,8 @@ const fields = [
   },
 ] as const;
 
+const filmTriggerUsDigital = ref(false);
+
 const settingsRows = ref<SettingRow[]>([]);
 
 function scanFieldHint(key: string, hintTail: string): string {
@@ -301,6 +303,9 @@ async function applySettingsBody(body: Awaited<ReturnType<typeof fetchSettings>>
     }
     if (row.key === "scan_ongoing_only" && typeof row.value === "boolean") {
       ongoing.value = row.value;
+    }
+    if (row.key === "film_trigger_us_digital" && typeof row.value === "boolean") {
+      filmTriggerUsDigital.value = row.value;
     }
     if (row.key === "library_scan_enabled" && typeof row.value === "boolean") {
       libraryEnabled.value = row.value;
@@ -590,6 +595,7 @@ async function save() {
       values: {
         ...values,
         scan_ongoing_only: ongoing.value,
+        film_trigger_us_digital: filmTriggerUsDigital.value,
         library_scan_enabled: libraryEnabled.value,
         media_dir: mediaPath.value,
         library_movies_path: moviesPath.value,
@@ -2004,6 +2010,17 @@ async function saveProfileFallback() {
               <span class="hint">Les séries terminées ou annulées ne sont pas repollées.</span>
             </label>
             <label>
+              <span>Déclencher dès la première sortie numérique US</span>
+              <select v-model="filmTriggerUsDigital">
+                <option :value="false">Non</option>
+                <option :value="true">Oui</option>
+              </select>
+              <span class="hint">
+                Quand cette option est active, la date de recherche est le plus tôt entre la sortie numérique de la
+                région du catalogue TMDB et celle des États-Unis (numérique seulement).
+              </span>
+            </label>
+            <label>
               <span>Dossier médias</span>
               <input v-model="mediaPath" placeholder="/data/media" />
               <span class="hint">En vigueur : <code>{{ storageHint.media_dir }}</code>. Vide : base des films et des séries.</span>
@@ -2723,6 +2740,13 @@ async function saveProfileFallback() {
             </dl>
             <p v-if="updateSnapshot.updateAvailable && updateSnapshot.remoteSha" class="settings-update-badge">
               Nouvelle image publiée ({{ updateSnapshot.remoteSha }})
+            </p>
+            <p class="hint">
+              <a
+                href="https://github.com/nico2511/Mediatracker-hive"
+                target="_blank"
+                rel="noopener"
+              >Dépôt public Mediatracker-hive</a>
             </p>
           </div>
           <article class="settings-update-now panel stack">

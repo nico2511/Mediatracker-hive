@@ -321,7 +321,11 @@ def test_ruche_detail_quota(client):
     detail = client.get(f"/api/v1/hive/ruches/{rid.hex()}/detail").json()
     assert detail["ruche_id_hex"] == rid.hex()
     assert detail["weekly_quota_bytes"] > 0
+    assert detail.get("quota_week_start")
+    assert detail.get("quota_reset_at")
     assert isinstance(detail["members"], list)
+    for member in detail["members"]:
+        assert "shares_in_ruche" in member
     patch = client.patch(
         f"/api/v1/hive/ruches/{rid.hex()}/quota",
         json={"weekly_quota_bytes": 50_000_000_000},

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from mediatracker.api.deps import get_db, require_scope
 from mediatracker.api.errors import Problem
 from mediatracker.core.pipeline.download_guard import active_download_for_item
+from mediatracker.core.quality_profile import detect_language, normalize_language, normalize_resolution
 from mediatracker.core.source_binding import match_catalog_page_url, upsert_binding_path
 from mediatracker.core.worker_wake import REASON_API_MEDIA, wake_worker
 from mediatracker.db.models import Download, Link, Media, MediaItem, Provider
@@ -112,14 +113,21 @@ def create_link(
         item.state = "ambiguous"
     if item.downloaded and body.start and not needs_slot:
         raise Problem(409, "Conflit", "Cet épisode est déjà dans la bibliothèque.")
+    filename_hint = candidate.filename or ""
+    quality = body.quality or normalize_resolution(filename_hint) or media.pref_quality
+    language = (
+        body.language
+        or normalize_language(detect_language(filename_hint))
+        or media.pref_language
+    )
     link = Link(
         media_item_id=item.id,
         provider_id=provider.id,
         kind=candidate.kind,
         url=candidate.url,
         hoster=candidate.hoster,
-        quality=body.quality or media.pref_quality,
-        language=body.language or media.pref_language,
+        quality=quality,
+        language=language,
         filename=candidate.filename,
         external_id=candidate.external_id,
         discovered_at=datetime.now(timezone.utc),

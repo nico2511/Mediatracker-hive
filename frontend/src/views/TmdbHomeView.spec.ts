@@ -116,6 +116,13 @@ const DASHBOARD = {
   downloads_failed: [],
 };
 
+const TO_SORT = {
+  total: 0,
+  footer:
+    "Rien n'est arrêté sans votre accord. Seules les séries terminées et complètes s'arrêtent d'elles-mêmes.",
+  groups: [],
+};
+
 beforeEach(() => {
   apiMock.mockReset();
   apiMock.mockImplementation((path: string) => {
@@ -124,6 +131,9 @@ beforeEach(() => {
     }
     if (path === "/api/v1/dashboard") {
       return Promise.resolve(DASHBOARD);
+    }
+    if (path === "/api/v1/dashboard/to-sort") {
+      return Promise.resolve(TO_SORT);
     }
     return Promise.reject(new Error(`unexpected ${path}`));
   });
@@ -180,6 +190,9 @@ describe("TmdbHomeView", () => {
       }
       if (path === "/api/v1/dashboard") {
         return Promise.resolve(DASHBOARD);
+      }
+      if (path === "/api/v1/dashboard/to-sort") {
+        return Promise.resolve(TO_SORT);
       }
       if (path.startsWith("/api/v1/hive/catalogue/") && init?.method === "POST") {
         followPosts += 1;

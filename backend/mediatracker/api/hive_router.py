@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
@@ -14,13 +15,26 @@ from mediatracker.hive.fetch_grant import (
     HIVE_FETCH_GRANT_HEADER,
     FetchGrantDenied,
     mint_fetch_grant,
+    revoke_fetch_grant_by_id,
     verify_fetch_grant,
 )
 from mediatracker.hive.file_serve import (
     finalize_response_headers,
     iter_file_byte_range,
+    persist_inbound_quota_bytes,
     prepare_file_response,
     resolve_local_file,
+)
+from mediatracker.hive.hive_busy import (
+    DEFAULT_RETRY_BANDWIDTH,
+    DEFAULT_RETRY_PARALLEL,
+    DEFAULT_RETRY_RATE,
+    HIVE_BUSY_REASON_HEADER,
+    REASON_BANDWIDTH,
+    REASON_PARALLEL,
+    REASON_QUOTA,
+    REASON_RATE,
+    REASON_WINDOW,
 )
 from mediatracker.hive.member_list import latest_signed_member_list
 from mediatracker.hive.peer_auth import PeerAuthDenied, PeerAuthMalformed
@@ -37,15 +51,42 @@ from mediatracker.hive.peer_inbound import authenticate_join_peer, authenticate_
 from mediatracker.hive.peer_info import build_local_instance_snapshot, ingest_peer_info
 from mediatracker.hive.peer_join import process_peer_join_preview, process_peer_join_request
 from mediatracker.hive.peer_rate_limit import PeerRateLimited
+from mediatracker.hive.quota_peer import quota_for_requester_payload
 from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
 from mediatracker.hive.signal_requests import try_auto_accept_incoming
 from mediatracker.hive.transfer_bandwidth import TransferBandwidthDenied, TransferBandwidthLimiter
 from mediatracker.hive.transfer_load import build_local_load_snapshot, ingest_peer_load
 from mediatracker.hive.transfer_parallel import TransferParallelGate
 from mediatracker.hive.transfer_policy import TransferQuotaExceeded, TransferWindowClosed
-from mediatracker.hive.transfer_settings import in_transfer_window, transfer_parallel_limit
+from mediatracker.hive.transfer_settings import (
+    in_transfer_window,
+    seconds_until_transfer_window_open,
+    seconds_until_week_reset,
+    transfer_parallel_limit,
+)
 
 _MAX_PEER_BODY = 1_000_000
+
+logger = logging.getLogger(__name__)
+
+
+def _warn_hive_peer_denied(reason: str, *, kind: str) -> None:
+    code = (reason or "unknown").strip()[:32]
+    if code:
+        logger.warning("hive %s denied: %s", kind, code)
+
+
+def _maybe_revoke_completed_grant(app, grant_id: int, *, content_size: int, bytes_sent: int) -> None:
+    if grant_id <= 0 or content_size <= 0 or bytes_sent < content_size:
+        return
+    session = app.state.session_factory()
+    try:
+        if revoke_fetch_grant_by_id(session, grant_id=grant_id, now=_now()):
+            session.commit()
+    except Exception:
+        session.rollback()
+    finally:
+        session.close()
 
 
 def _now() -> datetime:
@@ -60,8 +101,13 @@ def _peer_401():
     return PlainTextResponse("Unauthorized", status_code=401)
 
 
-def _peer_429():
-    return PlainTextResponse("Too Many Requests", status_code=429)
+def _peer_429(reason: str | None = None, retry_after: int | None = None):
+    headers: dict[str, str] = {}
+    if reason:
+        headers[HIVE_BUSY_REASON_HEADER] = reason
+    if retry_after is not None:
+        headers["Retry-After"] = str(max(1, int(retry_after)))
+    return PlainTextResponse("Too Many Requests", status_code=429, headers=headers)
 
 
 def _peer_503():
@@ -134,8 +180,10 @@ def mount_hive_router(app) -> None:
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except ValueError as exc:
             session.rollback()
@@ -191,8 +239,10 @@ def mount_hive_router(app) -> None:
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except ValueError:
             session.rollback()
@@ -236,12 +286,63 @@ def mount_hive_router(app) -> None:
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except PeerRateLimited:
             session.rollback()
-            return _peer_429()
+            return _peer_429(REASON_RATE, DEFAULT_RETRY_RATE)
+        finally:
+            session.close()
+
+    @router.get("/ruche/{ruche_id_hex}/quota-for-peer")
+    async def hive_quota_for_peer(ruche_id_hex: str, request: Request):
+        ruche_id = _parse_ruche_id(ruche_id_hex)
+        if ruche_id is None:
+            return _peer_404()
+        body = b""
+        session = request.app.state.session_factory()
+        now = _now()
+        settings = request.app.state.settings
+        try:
+            ctx = authenticate_member_peer(
+                session,
+                headers=request.headers,
+                method=request.method,
+                path=request.url.path,
+                query=request.url.query or "",
+                body=body,
+                ruche_id=ruche_id,
+                now=now,
+            )
+            _enforce_peer_rate(request, ctx.hive_id)
+            record_reachability(session, ruche_id=ruche_id, origin_id=ctx.hive_id, now=now)
+            try:
+                payload = quota_for_requester_payload(
+                    session,
+                    settings,
+                    ruche_id=ruche_id,
+                    requester_id=ctx.hive_id,
+                    now=now,
+                )
+            except ValueError:
+                session.rollback()
+                return _peer_401()
+            session.commit()
+            return JSONResponse(payload)
+        except PeerAuthMalformed:
+            session.rollback()
+            return _peer_404()
+        except PeerAuthDenied as exc:
+            session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
+            return _peer_401()
+        except PeerRateLimited:
+            session.rollback()
+            return _peer_429(REASON_RATE, DEFAULT_RETRY_RATE)
         finally:
             session.close()
 
@@ -273,12 +374,14 @@ def mount_hive_router(app) -> None:
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except PeerRateLimited:
             session.rollback()
-            return _peer_429()
+            return _peer_429(REASON_RATE, DEFAULT_RETRY_RATE)
         finally:
             session.close()
 
@@ -427,12 +530,14 @@ def mount_hive_router(app) -> None:
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except PeerRateLimited:
             session.rollback()
-            return _peer_429()
+            return _peer_429(REASON_RATE, DEFAULT_RETRY_RATE)
         finally:
             session.close()
 
@@ -483,7 +588,10 @@ def mount_hive_router(app) -> None:
             _enforce_peer_rate(request, ctx.hive_id)
             if not in_transfer_window(session, now):
                 session.rollback()
-                return _peer_429()
+                return _peer_429(
+                    REASON_WINDOW,
+                    seconds_until_transfer_window_open(session, now),
+                )
             try:
                 minted = mint_fetch_grant(
                     session,
@@ -495,6 +603,7 @@ def mount_hive_router(app) -> None:
                 )
             except FetchGrantDenied as exc:
                 session.rollback()
+                _warn_hive_peer_denied(exc.reason, kind="fetch-grant mint")
                 if exc.reason == "file":
                     return _peer_404()
                 return _peer_401()
@@ -515,12 +624,14 @@ def mount_hive_router(app) -> None:
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except PeerRateLimited:
             session.rollback()
-            return _peer_429()
+            return _peer_429(REASON_RATE, DEFAULT_RETRY_RATE)
         finally:
             session.close()
 
@@ -540,6 +651,9 @@ def mount_hive_router(app) -> None:
         grant_secret = _fetch_grant_header(request)
         is_head = request.method.upper() == "HEAD"
         grant_id: int | None = None
+        parallel_acquired = False
+        parallel_gate: TransferParallelGate | None = None
+        record_quota_bytes = False
         try:
             # En-tête grant présent : fail-closed (401 si invalide), jamais de repli auth pair.
             if grant_secret is not None:
@@ -552,8 +666,9 @@ def mount_hive_router(app) -> None:
                         file_id=file_id,
                         now=now,
                     )
-                except FetchGrantDenied:
+                except FetchGrantDenied as exc:
                     session.rollback()
+                    _warn_hive_peer_denied(exc.reason, kind="fetch-grant verify")
                     return _peer_401()
                 requester_id = grant_ctx.requester_instance_id
                 grant_id = int(grant_ctx.grant_id)
@@ -578,6 +693,7 @@ def mount_hive_router(app) -> None:
                 session.rollback()
                 return _peer_404()
             range_header = request.headers.get("Range") or request.headers.get("range")
+            record_quota_bytes = not is_head
             try:
                 plan = prepare_file_response(
                     session,
@@ -586,47 +702,61 @@ def mount_hive_router(app) -> None:
                     range_header=range_header,
                     now=now,
                     require_chunk_digests=require_chunks,
-                    record_transfer_bytes=not is_head,
+                    record_transfer_bytes=record_quota_bytes,
                 )
             except TransferQuotaExceeded:
                 session.rollback()
-                return _peer_429()
+                return _peer_429(REASON_QUOTA, seconds_until_week_reset(now))
             except TransferWindowClosed:
                 session.rollback()
-                return _peer_429()
+                return _peer_429(
+                    REASON_WINDOW,
+                    seconds_until_transfer_window_open(session, now),
+                )
             except ChunkDigestsNotReady:
                 session.rollback()
                 from mediatracker.hive.fingerprint_wake import poke_fingerprint_fifo_only
 
                 await asyncio.to_thread(poke_fingerprint_fifo_only, request.app.state.settings)
                 return _peer_503()
-            if grant_id is not None and not is_head:
-                parallel_gate = getattr(request.app.state, "hive_transfer_parallel", None)
-                if isinstance(parallel_gate, TransferParallelGate):
-                    limit = transfer_parallel_limit(session)
-                    if not parallel_gate.acquire(grant_id, limit):
-                        session.rollback()
-                        return _peer_429()
             if plan is None:
                 session.rollback()
                 return PlainTextResponse("Requested Range Not Satisfiable", status_code=416)
+            gate = getattr(request.app.state, "hive_transfer_parallel", None)
+            if grant_id is not None and not is_head and isinstance(gate, TransferParallelGate):
+                parallel_gate = gate
+                slot_limit = transfer_parallel_limit(session)
+                if not parallel_gate.acquire(grant_id, slot_limit):
+                    session.rollback()
+                    return _peer_429(REASON_PARALLEL, DEFAULT_RETRY_PARALLEL)
+                parallel_acquired = True
             limiter = getattr(request.app.state, "hive_send_bandwidth", None)
             if limiter is not None and not is_head:
                 try:
                     limiter.reserve(requester_id, plan.byte_range.length)
                 except TransferBandwidthDenied:
                     session.rollback()
-                    return _peer_429()
-            session.commit()
+                    if parallel_acquired and parallel_gate is not None and grant_id is not None:
+                        parallel_gate.release(grant_id)
+                    return _peer_429(REASON_BANDWIDTH, DEFAULT_RETRY_BANDWIDTH)
+            try:
+                session.commit()
+            except Exception:
+                session.rollback()
+                if parallel_acquired and parallel_gate is not None and grant_id is not None:
+                    parallel_gate.release(grant_id)
+                raise
         except PeerAuthMalformed:
             session.rollback()
             return _peer_404()
-        except PeerAuthDenied:
+        except PeerAuthDenied as exc:
             session.rollback()
+            reason = str(exc.args[0]) if exc.args else "member"
+            _warn_hive_peer_denied(reason, kind="peer auth")
             return _peer_401()
         except PeerRateLimited:
             session.rollback()
-            return _peer_429()
+            return _peer_429(REASON_RATE, DEFAULT_RETRY_RATE)
         finally:
             session.close()
         if plan is None:
@@ -634,20 +764,57 @@ def mount_hive_router(app) -> None:
         headers = finalize_response_headers(plan, plan.chunk_digests)
         if is_head:
             return Response(status_code=plan.status, headers=headers)
-        parallel_gate = getattr(request.app.state, "hive_transfer_parallel", None)
-        if grant_id is not None and isinstance(parallel_gate, TransferParallelGate):
+        content_size = int(plan.binding.size)
+        serve_ruche_id = plan.binding.ruche_id
+        if grant_id is not None and parallel_gate is not None:
 
             def _stream_body():
+                stream_sent = 0
                 try:
                     for chunk in iter_file_byte_range(plan.binding.path, plan.byte_range):
                         parallel_gate.record_grant_bytes(grant_id, len(chunk))
+                        stream_sent += len(chunk)
                         yield chunk
                 finally:
+                    inflight = parallel_gate.grant_inflight_count(grant_id)
+                    sent = parallel_gate.grant_bytes_sent(grant_id)
                     parallel_gate.release(grant_id)
+                    if record_quota_bytes:
+                        persist_inbound_quota_bytes(
+                            request.app,
+                            ruche_id=serve_ruche_id,
+                            requester_id=requester_id,
+                            nbytes=stream_sent,
+                            now=_now(),
+                        )
+                    if inflight == 1:
+                        _maybe_revoke_completed_grant(
+                            request.app,
+                            grant_id,
+                            content_size=content_size,
+                            bytes_sent=sent,
+                        )
 
             body_iter = _stream_body()
         else:
-            body_iter = iter_file_byte_range(plan.binding.path, plan.byte_range)
+
+            def _stream_body_plain():
+                total = 0
+                try:
+                    for chunk in iter_file_byte_range(plan.binding.path, plan.byte_range):
+                        total += len(chunk)
+                        yield chunk
+                finally:
+                    if record_quota_bytes:
+                        persist_inbound_quota_bytes(
+                            request.app,
+                            ruche_id=serve_ruche_id,
+                            requester_id=requester_id,
+                            nbytes=total,
+                            now=_now(),
+                        )
+
+            body_iter = _stream_body_plain()
         return StreamingResponse(
             body_iter,
             status_code=plan.status,

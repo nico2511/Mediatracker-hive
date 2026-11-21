@@ -87,3 +87,50 @@ def week_start_date(now: datetime) -> date:
     moment = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
     day = moment.date()
     return day.fromordinal(day.toordinal() - day.weekday())
+
+
+def _aware_utc(moment: datetime) -> datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
+def next_week_start_utc(now: datetime) -> datetime:
+    """Prochain lundi 00:00 UTC (remise à zéro des quotas hebdomadaires)."""
+    moment = _aware_utc(now)
+    ws = week_start_date(moment)
+    next_monday = date.fromordinal(ws.toordinal() + 7)
+    return datetime(next_monday.year, next_monday.month, next_monday.day, tzinfo=timezone.utc)
+
+
+def seconds_until_week_reset(now: datetime) -> int:
+    nxt = next_week_start_utc(now)
+    moment = _aware_utc(now)
+    return max(1, int((nxt - moment).total_seconds()))
+
+
+def seconds_until_transfer_window_open(db: Session, now: datetime) -> int:
+    """Secondes avant réouverture du créneau (heure locale instance)."""
+    start, end = window_bounds_minutes(db)
+    if start == end:
+        return 60
+    minutes = _minutes_since_midnight_local(now)
+    if end > start:
+        if start <= minutes < end:
+            return 60
+        if minutes < start:
+            return max(1, (start - minutes) * 60)
+        return max(1, (24 * 60 - minutes + start) * 60)
+    if minutes >= start or minutes < end:
+        return 60
+    return max(1, (start - minutes) * 60)
+
+
+def quota_usage_status(bytes_used: int, limit: int, *, near_ratio: float = 0.8) -> str:
+    if limit <= 0:
+        return "normal"
+    if bytes_used >= limit:
+        return "exceeded"
+    if bytes_used >= int(limit * near_ratio):
+        return "near"
+    return "normal"

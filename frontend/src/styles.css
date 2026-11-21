@@ -29,6 +29,7 @@
   --info: #8eb4cc;
   --warn: #d4b483;
   --danger: #d08a80;
+  --hive: var(--info);
   --text-on-accent: #141618;
   --space-1: 4px;
   --space-2: 8px;
@@ -1312,14 +1313,24 @@ form.inline label {
   border: 1px solid var(--line);
 }
 
+.pill.ok,
+.pill.warn,
+.pill.danger,
+.pill.info,
+.pill.muted,
+.pill.hive {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
 .pill.ok {
   color: var(--ok);
   border-color: color-mix(in srgb, var(--ok) 45%, transparent);
 }
 
-.pill.info {
-  color: var(--info);
-  border-color: color-mix(in srgb, var(--info) 45%, transparent);
+.pill.info,
+.pill.hive {
+  color: var(--hive);
+  border-color: color-mix(in srgb, var(--hive) 45%, transparent);
 }
 
 .pill.muted {
@@ -1329,6 +1340,11 @@ form.inline label {
 .pill.warn {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+
+.pill.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .fiche-poster-placeholder {
@@ -3688,6 +3704,29 @@ label.check input,
 
 .media-library-year {
   font-size: 0.72rem;
+}
+
+.tmdb-rating-card-line {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.2;
+  min-height: 1.2rem;
+}
+
+.tmdb-rating-card-line--placeholder {
+  margin: 0;
+  padding: 0;
+  visibility: hidden;
+}
+
+.tmdb-rating-star {
+  color: var(--accent);
+}
+
+.fiche-hero-tmdb-rating {
+  margin: 4px 0 0;
+  text-shadow: 0 1px 10px rgb(20 22 24 / 75%);
 }
 
 .media-library-status {
@@ -6487,6 +6526,24 @@ button.linkish {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 0.75rem;
+}
+
+.download-job-force,
+.download-job-cancel-outline {
+  border: 1px solid var(--border);
+  background: transparent;
+}
+
+@media (max-width: 720px) {
+  .download-jobs-queued .download-job-row-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .download-jobs-queued .download-job-force {
+    order: -1;
+  }
 }
 
 @media (max-width: 720px) {

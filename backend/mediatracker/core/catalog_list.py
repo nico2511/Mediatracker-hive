@@ -39,6 +39,17 @@ def library_files(db: Session) -> list[LibraryFile]:
     )
 
 
+def library_tmdb_keys(db: Session) -> set[tuple[str, int]]:
+    rows = db.execute(
+        select(LibraryFile.media_type, LibraryFile.tmdb_id).where(
+            LibraryFile.status == "matched",
+            LibraryFile.missing_at.is_(None),
+            LibraryFile.tmdb_id.isnot(None),
+        )
+    ).all()
+    return {(media_type, int(tmdb_id)) for media_type, tmdb_id in rows}
+
+
 def library_files_for_entries(db: Session, entries: list[CatalogEntry]) -> list[LibraryFile]:
     """Matched library rows that may cover these catalog entries (bounded, columns for matching only)."""
     if not entries:

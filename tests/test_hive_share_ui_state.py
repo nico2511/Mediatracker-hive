@@ -128,7 +128,52 @@ def test_outbound_transfer_fields_present(client, app, settings, tmp_path):
     finally:
         db.close()
     body = client.get(f"/api/v1/hive/items/{item_id}/sharing").json()
-    assert body["transfer_outbound_active"] is True
+    assert body["transfer_outbound_active"] is False
+
+
+def test_outbound_transfer_active_only_with_parallel_gate(client, app, settings, tmp_path):
+    from tests.test_hive_catalog_sharing_worker import _join_ruche
+    from tests.test_hive_t2 import _origin_id
+
+    from mediatracker.hive.share_ui_state import outbound_transfer_progress
+    from mediatracker.hive.transfer_parallel import TransferParallelGate
+
+    login(client)
+    _enable_hive(client)
+    origin = _origin_id(settings)
+    ruche_id = bytes([0xCD] * 15 + [0xCD])
+    gate = TransferParallelGate()
+    db = app.state.session_factory()
+    try:
+        _join_ruche(db, origin, ruche_id, settings)
+        media = Media(type="film", title="Fiction", year=2099, tmdb_id=88105)
+        db.add(media)
+        db.flush()
+        video = tmp_path / "par-88105.mkv"
+        write_sparse_video_file(video, PLAUSIBLE_VIDEO_BYTES)
+        item = MediaItem(media_id=media.id, downloaded=True, file_path=str(video))
+        db.add(item)
+        db.flush()
+        grant = HiveFetchGrant(
+            grant_sha256_hex="c" * 64,
+            ruche_id=ruche_id,
+            file_id=bytes([0x22] * 16),
+            requester_instance_id="peer-test",
+            media_item_id=item.id,
+            content_size=PLAUSIBLE_VIDEO_BYTES,
+            content_mtime_ns=0,
+            created_at=NOW,
+            expires_at=NOW + timedelta(hours=1),
+        )
+        db.add(grant)
+        db.flush()
+        assert gate.acquire(int(grant.id), limit=2)
+        gate.record_grant_bytes(int(grant.id), PLAUSIBLE_VIDEO_BYTES // 2)
+        active, pct = outbound_transfer_progress(db, item, now=NOW, parallel_gate=gate)
+        assert active is True
+        assert pct == 50.0
+    finally:
+        db.close()
 
 
 def test_batch_sharing_endpoint_returns_list(client, app, settings):

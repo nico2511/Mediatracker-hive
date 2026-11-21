@@ -8,6 +8,7 @@ import HomePersonalBlocks from "../components/HomePersonalBlocks.vue";
 import HomeTechnicalFooter from "../components/HomeTechnicalFooter.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
+import TmdbRatingCardLine from "../components/TmdbRatingCardLine.vue";
 import StatusIcon from "../components/StatusIcon.vue";
 import TmdbPosterImg from "../components/TmdbPosterImg.vue";
 import { api, ApiError, isNetworkError, isTransientHttpStatus, userFacingApiError } from "../api";
@@ -112,6 +113,7 @@ interface LatestCard {
   in_library?: boolean;
   ignored?: boolean;
   hive_work_key?: string | null;
+  tmdb_vote_average?: number | null;
 }
 
 interface RecentDownloadCard {
@@ -563,6 +565,7 @@ async function queueAll() {
                   <template v-if="card.year">{{ card.year }} · </template>
                   <template v-if="card.subtitle">{{ card.subtitle }}</template>
                 </span>
+                <TmdbRatingCardLine v-if="card.media_id" :vote-average="card.tmdb_vote_average" />
                 <span v-if="card.followed || card.in_library" class="hint icon-line">
                   <StatusIcon v-if="card.followed" name="followed" label="Suivi" />
                   <StatusIcon v-if="card.in_library" name="disk" label="En bibliothèque" />
@@ -610,6 +613,7 @@ async function queueAll() {
                   <template v-if="card.year">{{ card.year }} · </template>
                   <template v-if="card.subtitle">{{ card.subtitle }}</template>
                 </span>
+                <TmdbRatingCardLine v-if="card.media_id" :vote-average="card.tmdb_vote_average" />
                 <span v-if="card.followed || card.in_library" class="hint icon-line">
                   <StatusIcon v-if="card.followed" name="followed" label="Suivi" />
                   <StatusIcon v-if="card.in_library" name="disk" label="En bibliothèque" />
@@ -657,6 +661,7 @@ async function queueAll() {
                 <span class="hint">
                   <template v-if="card.subtitle">{{ card.subtitle }}</template>
                 </span>
+                <TmdbRatingCardLine v-if="card.media_id" :vote-average="card.tmdb_vote_average" />
                 <span v-if="card.followed || card.in_library" class="hint icon-line">
                   <StatusIcon v-if="card.followed" name="followed" label="Suivi" />
                   <StatusIcon v-if="card.in_library" name="disk" label="En bibliothèque" />

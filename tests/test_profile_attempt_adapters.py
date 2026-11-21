@@ -14,6 +14,7 @@ from mediatracker.core.profile_attempt_adapters import (
     choose_link_for_profile_attempt,
     comet_context_for_attempt,
     legacy_comet_context,
+    rank_link_for_profile_attempt,
     rank_pages_for_profile_attempt,
     reingest_select_pages,
     select_comet_streams_for_profile_attempt,
@@ -162,6 +163,26 @@ def test_reingest_adapter_uses_same_explicit_profile():
         list(DEMO_SERIES), media=media, seasons={1}, profile=repli, exclude=set()
     )
     assert [page.ref for page in pages_repli] == ["vost-1080"]
+
+
+def test_manual_provider_link_always_ranks_before_profile_filter():
+    from mediatracker.db.models import Provider
+
+    profile = _principal_profile()
+    manual_provider = Provider(id=7, kind="source", type="manual", name="Manual", enabled=True)
+    manual_hd = Link(
+        provider_id=manual_provider.id,
+        provider=manual_provider,
+        quality="HD",
+        language="MULTI",
+        hoster="rapidgator",
+        kind="ddl_protected",
+        url="http://manual",
+        priority=1,
+        filename="Exemple.Demo.2099.MULTi.HD.WEB.x264-GROUP.mkv",
+        external_id="manual:hd",
+    )
+    assert rank_link_for_profile_attempt(manual_hd, profile=profile) == -1
 
 
 def test_choose_link_for_profile_attempt_rejects_incompatible_version():

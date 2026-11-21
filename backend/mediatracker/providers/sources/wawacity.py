@@ -615,15 +615,23 @@ def _seasons_covered(results: list[SourceResult], query: SourceQuery) -> bool:
 
 
 def _candidate(link: PageLink, quality: str | None, language: str | None) -> LinkCandidate:
+    from mediatracker.core.quality_profile import normalize_resolution
+
     digest = hashlib.sha256(link.url.encode("utf-8")).hexdigest()
+    picked_quality = link.quality or quality
+    page_hd_label = (
+        not (link.filename or "").strip()
+        and normalize_resolution(picked_quality) == "HD"
+    )
     return LinkCandidate(
         url=link.url,
         kind="ddl_protected",
         hoster=link.hoster,
-        quality=link.quality or quality,
+        quality=picked_quality,
         language=link.language or language,
         season=link.season,
         episode=link.episode,
         filename=link.filename,
+        page_hd_label=page_hd_label,
         external_id=f"wawacity:{digest[:32]}",
     )

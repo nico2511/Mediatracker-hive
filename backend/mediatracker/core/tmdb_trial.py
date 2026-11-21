@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
+from mediatracker.core.catalog_list import library_tmdb_keys
 from mediatracker.core.tmdb.catalog_settings import (
     TmdbCatalogSettings,
     catalog_settings_cache_fragment,
@@ -19,7 +20,7 @@ from mediatracker.core.tmdb.catalog_settings import (
 from mediatracker.core.tmdb.client import open_client
 from mediatracker.core.tmdb_trial_cache import cache_key, cached_tmdb_trial
 from mediatracker.core.tracking import tmdb_page_url
-from mediatracker.db.models import LibraryFile, Media
+from mediatracker.db.models import Media
 from mediatracker.integrations.tmdb import TmdbClient, TmdbError, TmdbHit
 
 _HOME_LIMIT = 20
@@ -34,14 +35,6 @@ def _window(*, past_days: int, ahead_days: int, pivot: date | None = None) -> tu
     start = today - timedelta(days=past_days)
     end = today + timedelta(days=ahead_days)
     return start.isoformat(), end.isoformat()
-
-
-def _library_tmdb_ids(db: Session) -> set[int]:
-    return {
-        row.tmdb_id
-        for row in db.scalars(select(LibraryFile).where(LibraryFile.tmdb_id.is_not(None))).all()
-        if row.tmdb_id is not None
-    }
 
 
 def _followed_map(db: Session) -> dict[tuple[str, int], int]:
@@ -65,14 +58,19 @@ def _cards(
     hits: list[TmdbHit],
     *,
     followed_map: dict[tuple[str, int], int] | None = None,
-    library_ids: set[int] | None = None,
+    library_keys: set[tuple[str, int]] | None = None,
     hide_in_library: bool = False,
 ) -> list[dict[str, Any]]:
+    from mediatracker.core.media_hide import hidden_tmdb_keys
+
     followed_map = followed_map if followed_map is not None else _followed_map(db)
-    library_ids = library_ids if library_ids is not None else _library_tmdb_ids(db)
+    library_keys = library_keys if library_keys is not None else library_tmdb_keys(db)
+    hidden_keys = hidden_tmdb_keys(db)
     found: list[dict[str, Any]] = []
     for hit in hits:
-        in_library = hit.tmdb_id in library_ids
+        if (hit.media_type, hit.tmdb_id) in hidden_keys:
+            continue
+        in_library = (hit.media_type, hit.tmdb_id) in library_keys
         if hide_in_library and in_library:
             continue
         media_id = followed_map.get((hit.media_type, hit.tmdb_id))
@@ -198,10 +196,10 @@ def home_rows(db: Session, settings: Settings) -> dict[str, list[dict[str, Any]]
     )
 
     followed_map = _followed_map(db)
-    library_ids = _library_tmdb_ids(db)
+    library_keys = library_tmdb_keys(db)
 
     def pack(hits: list[TmdbHit]) -> list[dict[str, Any]]:
-        return _cards(db, hits[:_HOME_LIMIT], followed_map=followed_map, library_ids=library_ids)
+        return _cards(db, hits[:_HOME_LIMIT], followed_map=followed_map, library_keys=library_keys)
 
     return {
         "cinema_films": pack(cinema_hits),

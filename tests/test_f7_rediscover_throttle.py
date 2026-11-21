@@ -8,7 +8,7 @@ from tests.conftest import csrf, login
 
 from mediatracker.core.forget import TRACE_FILE_ABSENT, forget_local_file
 from mediatracker.core.pipeline import tick
-from mediatracker.core.pipeline.constants import REDISCOVER, REDISCOVER_RESERVED
+from mediatracker.core.pipeline.constants import REDISCOVER, REDISCOVER_MESSAGE, REDISCOVER_RESERVED
 from mediatracker.core.pipeline.jobs import _ingest_other_versions
 from mediatracker.core.precheck import NO_LINK_RETRY_LATER, REDOWNLOAD_STARTED
 from mediatracker.core.remote_search_limit import REMOTE_SEARCH_COOLDOWN
@@ -203,6 +203,9 @@ def test_schedule_full_retries_one_remote_search_per_fiche(client, app, monkeypa
         assert scheduled == 2
         assert first.error_code == REDISCOVER
         assert second.error_code == REDISCOVER
+        assert first.error == REDISCOVER_MESSAGE
+        assert second.error == REDISCOVER_MESSAGE
+        assert "Wawacity" not in first.error
         db.commit()
         for step in range(6):
             tick(db, app.state.settings, now=NOW + timedelta(seconds=step * 6))

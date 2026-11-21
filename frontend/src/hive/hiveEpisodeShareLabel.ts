@@ -1,7 +1,17 @@
 import type { HiveShareUiState } from "./hiveBadges";
 import { hiveShareFicheStatus } from "./hiveShareStatus";
 
-export type HiveEpisodeShareChipTone = "honey" | "muted" | "danger" | "info" | "ok";
+export type HiveEpisodeShareChipTone = "honey" | "muted" | "danger" | "info" | "ok" | "warn";
+
+function fingerprintTone(pct: number): HiveEpisodeShareChipTone {
+  if (pct >= 67) {
+    return "ok";
+  }
+  if (pct >= 34) {
+    return "warn";
+  }
+  return "muted";
+}
 
 export interface HiveEpisodeShareChip {
   key: string;
@@ -79,7 +89,7 @@ export function hiveEpisodeShareChips(
         key: "empreinte",
         labelShort: label,
         labelLong: label,
-        tone: "honey",
+        tone: fingerprintTone(pct),
         showBar: true,
         barPct: pct,
       });
@@ -92,7 +102,7 @@ export function hiveEpisodeShareChips(
   const activelyShared = Boolean(state.shared && !state.exclude_all);
 
   if (activelyShared) {
-    chips.push({ key: "shared", labelShort: "Partagé", labelLong: "Partagé", tone: "honey" });
+    chips.push({ key: "shared", labelShort: "Partagé", labelLong: "Partagé", tone: "info" });
   } else if (state.received_via_hive) {
     chips.push({
       key: "received",

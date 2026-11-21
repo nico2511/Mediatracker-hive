@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,10 +10,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mediatracker.core.source_state import _source_label
-from mediatracker.db.models import Download, Event, Media, MediaItem
+from mediatracker.db.models import Download, Event, Link, Media, MediaItem
 from mediatracker.events import record_event
+from mediatracker.providers.downloaders.aria2 import scrub_url
+
+_manual_link_logger = logging.getLogger("mediatracker.core.pipeline.manual_link")
+
+MANUAL_LINK_USED_JOURNAL = (
+    "Lien manuel utilisé (sans restriction : profil, taille et ordre hébergeur ignorés)"
+)
 
 _SOURCE_ATTEMPT_TYPE = "download.source_attempt"
+_MANUAL_LINK_ATTEMPT_TYPE = "download.manual_link"
+_MANUAL_SOURCE_PAGE_TYPE = "download.manual_source_page"
 _ISSUES = frozenset({"found", "empty", "refused", "skipped", "error"})
 
 
@@ -50,6 +60,200 @@ def format_source_attempt_message(
         detail = (reason or "erreur").strip()
         return f"{label} : erreur ({detail})."
     return f"{label} : {issue}."
+
+
+def log_manual_link_used(media: Media, item: MediaItem, link: Link) -> None:
+    hoster = (link.hoster or "").strip() or "—"
+    _manual_link_logger.info(
+        "lien manuel utilisé sans restriction (profil, taille, hébergeur ignorés) : "
+        "media=%s item=%s link=%s hébergeur=%s",
+        media.id,
+        item.id,
+        link.id,
+        hoster,
+    )
+
+
+def log_manual_link_failed(
+    media: Media,
+    item: MediaItem,
+    link: Link | None,
+    *,
+    reason: str,
+) -> None:
+    hoster = (link.hoster or "").strip() if link is not None else "—"
+    link_id = link.id if link is not None else "—"
+    detail = scrub_url(reason or "erreur").strip()[:300]
+    _manual_link_logger.warning(
+        "lien manuel en échec (sans restriction profil/taille/hébergeur) : "
+        "media=%s item=%s link=%s hébergeur=%s raison=%s",
+        media.id,
+        item.id,
+        link_id,
+        hoster or "—",
+        detail,
+    )
+
+
+def record_manual_link_used(
+    db: Session,
+    row: Download,
+    media: Media,
+    item: MediaItem,
+    *,
+    link: Link | None = None,
+    now: datetime | None = None,
+) -> Event:
+    moment = _aware(now or datetime.now(timezone.utc))
+    message = MANUAL_LINK_USED_JOURNAL
+    if link is not None:
+        log_manual_link_used(media, item, link)
+    payload: dict[str, Any] = {
+        "download_id": row.id,
+        "message": message,
+        "title": media.title,
+        "season": item.season,
+        "episode": item.episode,
+        "issue": "found",
+    }
+    dedupe_key = f"{_MANUAL_LINK_ATTEMPT_TYPE}:{row.id}:used"
+    existing = db.scalar(
+        select(Event).where(Event.type == _MANUAL_LINK_ATTEMPT_TYPE, Event.dedupe_key == dedupe_key)
+    )
+    if existing is not None:
+        if existing.payload == payload:
+            return existing
+        existing.payload = payload
+        existing.level = "info"
+        existing.ts = moment
+        existing.last_seen_at = moment
+        db.flush()
+        return existing
+    return record_event(
+        db,
+        _MANUAL_LINK_ATTEMPT_TYPE,
+        level="info",
+        media_id=media.id,
+        item_id=item.id,
+        payload=payload,
+        dedupe_key=dedupe_key,
+        when=moment,
+    )
+
+
+def _manual_source_page_used_message(profile_name: str, *, profile_rank: int) -> str:
+    name = profile_name.strip() or "Profil"
+    if profile_rank <= 1:
+        return f"Page source manuelle : lien utilisé (profil « {name} »)"
+    return f"Page source manuelle : lien utilisé (repli « {name} », rang {profile_rank})"
+
+
+def record_manual_source_page_used(
+    db: Session,
+    row: Download,
+    media: Media,
+    item: MediaItem,
+    *,
+    profile_name: str,
+    profile_rank: int = 1,
+    now: datetime | None = None,
+) -> Event:
+    moment = _aware(now or datetime.now(timezone.utc))
+    message = _manual_source_page_used_message(profile_name, profile_rank=profile_rank)
+    payload: dict[str, Any] = {
+        "download_id": row.id,
+        "message": message,
+        "profile_name": profile_name,
+        "profile_rank": profile_rank,
+        "title": media.title,
+        "season": item.season,
+        "episode": item.episode,
+        "issue": "found",
+    }
+    dedupe_key = f"{_MANUAL_SOURCE_PAGE_TYPE}:{row.id}:used"
+    return record_event(
+        db,
+        _MANUAL_SOURCE_PAGE_TYPE,
+        level="info",
+        media_id=media.id,
+        item_id=item.id,
+        payload=payload,
+        dedupe_key=dedupe_key,
+        when=moment,
+    )
+
+
+def record_manual_source_page_empty(
+    db: Session,
+    row: Download,
+    media: Media,
+    item: MediaItem,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> Event:
+    moment = _aware(now or datetime.now(timezone.utc))
+    detail = reason.strip()
+    if detail == "episode":
+        message = "Page source manuelle : aucun lien pour l'épisode"
+    else:
+        message = "Page source manuelle : aucun lien ne correspond au profil"
+    payload: dict[str, Any] = {
+        "download_id": row.id,
+        "message": message,
+        "reason": detail,
+        "title": media.title,
+        "season": item.season,
+        "episode": item.episode,
+        "issue": "empty",
+    }
+    dedupe_key = f"{_MANUAL_SOURCE_PAGE_TYPE}:{row.id}:empty:{detail}"
+    return record_event(
+        db,
+        _MANUAL_SOURCE_PAGE_TYPE,
+        level="warning",
+        media_id=media.id,
+        item_id=item.id,
+        payload=payload,
+        dedupe_key=dedupe_key,
+        when=moment,
+    )
+
+
+def record_manual_link_failed(
+    db: Session,
+    row: Download,
+    media: Media,
+    item: MediaItem,
+    *,
+    reason: str,
+    link: Link | None = None,
+    now: datetime | None = None,
+) -> Event:
+    moment = _aware(now or datetime.now(timezone.utc))
+    detail = scrub_url(reason.strip() or "erreur")[:300]
+    log_manual_link_failed(media, item, link, reason=detail)
+    message = f"Lien manuel en échec sans restriction ({detail})"
+    payload: dict[str, Any] = {
+        "download_id": row.id,
+        "message": message,
+        "reason": detail,
+        "title": media.title,
+        "season": item.season,
+        "episode": item.episode,
+        "issue": "error",
+    }
+    dedupe_key = f"{_MANUAL_LINK_ATTEMPT_TYPE}:{row.id}:fail:{detail}"
+    return record_event(
+        db,
+        _MANUAL_LINK_ATTEMPT_TYPE,
+        level="warning",
+        media_id=media.id,
+        item_id=item.id,
+        payload=payload,
+        dedupe_key=dedupe_key,
+        when=moment,
+    )
 
 
 def record_download_source_attempt(

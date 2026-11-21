@@ -1091,7 +1091,11 @@ def _apply(
             continue
         if media.type == "film" and (item.file_path or _library_has(db, item)):
             continue
-        _store_links(db, item, bucket, provider_id, preference, now)
+        fresh_links = _store_links(db, item, bucket, provider_id, preference, now)
+        from mediatracker.config import get_settings
+        from mediatracker.core.pipeline.source_rounds import wake_pending_after_fresh_links
+
+        wake_pending_after_fresh_links(db, item.id, get_settings(), now, fresh_links=fresh_links > 0)
         fresh = not item.source_available and item.state in {"missing", "available"}
         item.source_available = True
         if item.state == "missing":
@@ -1122,7 +1126,7 @@ def _apply(
             and queues_download(media.new_episode_policy, bool(getattr(media, "download_backlog", False)))
         )
         if queue and not _blocking_download(db, item.id):
-            if _requeue_failed_download(db, item.id, now, poll_quality_profile_id):
+            if _requeue_failed_download(db, item.id, now, poll_quality_profile_id, fresh_links=fresh_links > 0):
                 queued += 1
             else:
                 db.add(
@@ -1146,7 +1150,8 @@ def _store_links(
     provider_id: int,
     preference: list[str],
     now: datetime,
-) -> None:
+) -> int:
+    added = 0
     for link in links:
         existing = db.scalar(select(Link).where(Link.provider_id == provider_id, Link.external_id == link.external_id))
         if existing is not None:
@@ -1168,6 +1173,8 @@ def _store_links(
                 discovered_at=now,
             )
         )
+        added += 1
+    return added
 
 
 _POLL_REQUEUE_FAILURE_CODES = frozenset({"NO_LINK", "PROFILE", "POLL_PROFILE_MISSING"})
@@ -1189,6 +1196,8 @@ def _requeue_failed_download(
     item_id: int,
     now: datetime,
     poll_quality_profile_id: int | None,
+    *,
+    fresh_links: bool = False,
 ) -> Download | None:
     """Remet en file le dernier job ``failed`` « pas de lien », si aucun job actif."""
     if active_download_for_item(db, item_id) is not None:
@@ -1201,6 +1210,10 @@ def _requeue_failed_download(
     )
     if row is None or not _failed_is_poll_requeue_eligible(row):
         return None
+    from mediatracker.core.pipeline.source_rounds import requeue_allowed_after_failure, reset_source_rounds
+
+    if not requeue_allowed_after_failure(row, now, fresh_links=fresh_links):
+        return None
     row.state = "pending"
     row.error_code = None
     row.error = None
@@ -1211,6 +1224,8 @@ def _requeue_failed_download(
     row.skipped_link_ids = []
     row.poll_quality_profile_id = poll_quality_profile_id
     row.created_at = now
+    if fresh_links:
+        reset_source_rounds(row)
     return row
 
 

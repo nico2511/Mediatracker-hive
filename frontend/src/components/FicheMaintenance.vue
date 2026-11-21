@@ -54,6 +54,8 @@ interface DeadLink {
 }
 
 const linkUrl = ref("");
+const linkSeason = ref<number | null>(null);
+const linkEpisode = ref<number | null>(null);
 const sourceDraft = ref("");
 const selectedSeason = ref<number | null>(null);
 const binding = ref<SourceBinding | null>(null);
@@ -276,9 +278,20 @@ async function addLink() {
   }
   busy.value = "link";
   try {
+    const payload: Record<string, unknown> = { media_id: props.mediaId, url: value, start: true };
+    if (isSeries.value) {
+      const season = linkSeason.value;
+      const episode = linkEpisode.value;
+      if (typeof season === "number" && !Number.isNaN(season)) {
+        payload.season = season;
+      }
+      if (typeof episode === "number" && !Number.isNaN(episode)) {
+        payload.episode = episode;
+      }
+    }
     const created = await api<{ needs_slot: boolean; source_binding?: boolean }>("/api/v1/links", {
       method: "POST",
-      body: JSON.stringify({ media_id: props.mediaId, url: value, start: true }),
+      body: JSON.stringify(payload),
     });
     panelMessage.value = created.source_binding
       ? "Page source enregistrée."
@@ -286,6 +299,10 @@ async function addLink() {
         ? "Lien enregistré. Indiquez la saison et l'épisode sur la fiche si besoin."
         : "Lien ajouté à la file.";
     linkUrl.value = "";
+    if (isSeries.value) {
+      linkSeason.value = null;
+      linkEpisode.value = null;
+    }
     emit("updated");
     await reloadPanel();
   } catch (err) {
@@ -379,12 +396,22 @@ async function addLink() {
           Collez un lien dl-protect ou un hébergeur (rapidgator, turbobit, nitroflare, katfile, tezfiles).
           Le lien direct AllDebrid n'est pas conservé.
         </p>
+        <template v-if="isSeries">
+          <label>
+            <span>Saison</span>
+            <input v-model.number="linkSeason" type="number" min="0" inputmode="numeric" placeholder="1" />
+          </label>
+          <label>
+            <span>Épisode</span>
+            <input v-model.number="linkEpisode" type="number" min="0" inputmode="numeric" placeholder="1" />
+          </label>
+        </template>
         <label>
           <span>Adresse du lien</span>
           <input v-model="linkUrl" required placeholder="https://rapidgator.net/file/…" />
         </label>
-        <p class="hint">
-          Pour une série, la saison et l'épisode sont lus dans le nom du fichier après débridage.
+        <p v-if="isSeries" class="hint">
+          Renseignez la saison et l'épisode pour lancer le téléchargement tout de suite.
         </p>
         <button type="submit" class="primary" :disabled="busy !== null">Télécharger</button>
       </form>

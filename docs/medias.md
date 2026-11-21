@@ -66,7 +66,7 @@ Sur mobile, le panneau **Filtres** regroupe ces réglages ; des **pastilles** ra
 
 ## Cartes et pastilles
 
-Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / Série), l’année (sauf en dense), puis :
+Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / Série), l’année (sauf en dense), puis une ligne **★ note TMDB** (une décimale, rien si la fiche n’a pas de note), puis :
 
 **Pastille d’état** (priorité dans cet ordre) :
 
@@ -119,6 +119,7 @@ La fiche charge `GET /api/v1/media/<id>` et, pour une série, `GET /api/v1/media
 ### En-tête commun
 
 - Affiche, titre, année, synopsis ;
+- ligne **★ TMDB X/10 · N votes** (ou « 1 vote ») lorsque la fiche possède une note enrichie — rien si zéro vote ou note nulle en base ;
 - pour une série : statut TMDB, nombre de saisons, barre **X vu sur Y**, prochain épisode ;
 - pastilles **Suivi**, état fichier ou **Pas encore disponible** (film) ;
 - liens **TMDB** / **Jellyfin**, **Bande-annonce** (si TMDB fournit une clé YouTube).
@@ -134,6 +135,10 @@ Le bloc **Suivi** / **Actions** (composant partagé film et série) regroupe :
 - section **État** repliable : progression, fichier, dernière et prochaine vérification, message du moteur de recherche.
 
 Fiche **série** : mise en page dédiée (carte Suivi mobile, barre d’actions bureau).
+
+### Fiche film — dates TMDB par région
+
+Sur une fiche film, sous le résumé, MediaTracker peut afficher les dates **en salle**, **numérique** et **physique** pour la **région du catalogue TMDB** (Réglages → Catalogue TMDB) et pour les **États-Unis**, lorsque TMDB les fournit. La date qui déclenche la recherche des sources est mise en évidence, avec une courte phrase du type *Recherche des liens à partir du …*. L’option **Déclencher dès la première sortie numérique US** (Réglages → Réglages de scan) compare uniquement les sorties numériques région / US et retient la plus précoce.
 
 ### Fiche film — fichier
 
@@ -180,3 +185,12 @@ Sur **Médias** (`/medias`), le bouton **Sélectionner** permet de cocher plusie
 - depuis **une seule fiche**, le dialogue de suppression propose le choix entre corbeille et conservation sur disque.
 
 Le mode sélection est indisponible hors ligne lorsque les actions serveur sont désactivées.
+
+## Masquer une fiche
+
+Sur une fiche (`/medias/<id>`), le menu **Plus d'actions** (⋯) propose **Masquer la fiche** au-dessus des actions destructives. La fiche disparaît de **Médias**, de l'**Accueil** et du rapprochement des **suggestions catalogue** ; fichiers, historique « vu », partage Hive et liens Jellyfin restent en place.
+
+- Si la fiche est **suivie**, une confirmation rappelle que le **suivi sera arrêté** (sans mettre les fichiers à la corbeille). **Réafficher** ne relance pas le suivi.
+- Un bandeau **Fiche masquée · Annuler** permet d'annuler juste après l'action ; plus tard, **Réafficher** sur la fiche ou depuis la liste.
+
+Sur **Médias**, la puce **Masquées N** (œil barré) n'apparaît que s'il existe au moins une fiche masquée. Elle affiche les cartes estompées avec la date de masquage et **Réafficher**. L'API utilise `POST /api/v1/media/<id>/hide` et `/unhide` ; la liste accepte `include_hidden=true` pour les inclure.

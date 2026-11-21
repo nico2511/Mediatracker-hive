@@ -10,6 +10,11 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from mediatracker.config import Settings
+from mediatracker.core.link_hoster_precheck import (
+    HosterUnlockContext,
+    apply_hoster_inspection_to_link,
+    profile_rank_for_attempt,
+)
 from mediatracker.core.pipeline.constants import (
     _BTIH,
     _DEAD_LINK,
@@ -42,6 +47,10 @@ from mediatracker.core.pipeline.jobs import (
 from mediatracker.core.pipeline.source_attempt_journal import (
     format_source_attempt_message,
     record_download_source_attempt,
+    record_manual_link_failed,
+    record_manual_link_used,
+    record_manual_source_page_empty,
+    record_manual_source_page_used,
 )
 from mediatracker.core.precheck import (
     PRESENT,
@@ -156,17 +165,452 @@ def _last_poll_rejected_by_profile(media: Media) -> bool:
 def _stored_links_refused_by_profile(links, preference, profile, skipped: set[int]) -> bool:
     from mediatracker.core.profile_attempt_adapters import (
         link_eligible_for_hoster_attempt,
+        manual_provider_link,
         rank_link_for_profile_attempt,
     )
 
     eligible = False
     for link in links:
+        if manual_provider_link(link):
+            continue
         if not link_eligible_for_hoster_attempt(link, preference, skipped_link_ids=skipped):
             continue
         eligible = True
         if rank_link_for_profile_attempt(link, profile=profile) is not None:
             return False
     return eligible
+
+
+def _attempt_bypass_profile_links(
+    db,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    preference: list[str],
+    debrid_row,
+    debrid,
+    known: list,
+    links: list[Link],
+    *,
+    record_used,
+    record_failed,
+    log_prefix: str,
+    defer_final: bool = True,
+    allow_manual_magnet: bool = False,
+    settings: Settings | None = None,
+    attempt_profile=None,
+    attempt_profile_rank: int = 1,
+    journal_live: dict | None = None,
+):
+    from mediatracker.core.magnet_claim import claim_cached_magnet
+    from mediatracker.core.profile_attempt_adapters import manual_provider_link
+
+    if not links:
+        return None
+    skipped = {int(value) for value in (row.skipped_link_ids or [])}
+    eligible: list[Link] = []
+    for link in links:
+        if link.id in skipped or link.dead:
+            continue
+        if link.kind in {"magnet", "torrent"}:
+            if allow_manual_magnet and manual_provider_link(link):
+                eligible.append(link)
+            continue
+        eligible.append(link)
+    links = eligible
+    if not links:
+        return None
+    last_code = "NO_LINK"
+    last_message = "Aucun lien utilisable."
+    if journal_live is None:
+        journal_live = {
+            "name": getattr(attempt_profile, "name", None),
+            "rank": attempt_profile_rank,
+        }
+    preference = _debrid_hoster_preference(debrid, preference)
+    for link in links:
+        if link.kind in {"magnet", "torrent"} and manual_provider_link(link):
+            if debrid is None or not hasattr(debrid, "upload_magnet"):
+                record_failed(
+                    db,
+                    row,
+                    media,
+                    item,
+                    reason="Aucun débrideur actif.",
+                    now=now,
+                    link=link,
+                )
+                continue
+            row.link_id = link.id
+            row.state = "resolving"
+            if row.attempt_started_at is None:
+                row.attempt_started_at = now
+            _commit(db)
+            try:
+                claimed = claim_cached_magnet(
+                    debrid,
+                    link.url or "",
+                    file_index=getattr(link, "file_index", None),
+                    filename=link.filename,
+                )
+            except DebridError as exc:
+                record_failed(
+                    db,
+                    row,
+                    media,
+                    item,
+                    reason=french_error(exc.code, exc.message),
+                    now=now,
+                    link=link,
+                )
+                if exc.code == "AUTH_BLOCKED":
+                    _block_queue(db, debrid_row, now)
+                    row.state = "pending"
+                    row.error_code = "AUTH_BLOCKED"
+                    row.error = AUTH_BLOCKED_MESSAGE
+                    return "paused"
+                if exc.retryable and exc.code not in _DEAD_LINK:
+                    action = _schedule_retry(
+                        db,
+                        row,
+                        exc.code,
+                        french_error(exc.code, exc.message),
+                        now,
+                        defer_final=defer_final,
+                    )
+                    if action in {"exhausted", "failed"}:
+                        _remember_skip(row, link.id)
+                        row.link_id = None
+                        last_code = exc.code
+                        continue
+                    return "waiting"
+                _bury(db, row, link, exc.code, exc.message)
+                last_code = exc.code
+                continue
+            if claimed is None:
+                record_failed(db, row, media, item, reason="Aimant non disponible.", now=now, link=link)
+                _remember_skip(row, link.id)
+                row.link_id = None
+                continue
+            filename = _prefer_release_name(link.filename, claimed.direct.filename)
+            size = claimed.direct.size or link.size
+            bad = _probed_direct(claimed.direct.url, size)
+            if bad:
+                record_failed(db, row, media, item, reason=bad, now=now, link=link)
+                _bury(db, row, link, "LINK_NOT_VIDEO", bad)
+                continue
+            row.debrid_magnet_id = claimed.magnet_id
+            record_used(db, row, media, item, now=now, link=link)
+            return (link, claimed.direct.url, filename, size, None)
+        if not _hoster_supported(debrid, link):
+            code, message = _debrid_skip_reason(debrid)
+            if code in _DEBRID_PRECHECK_SKIP_CODES:
+                record_failed(
+                    db,
+                    row,
+                    media,
+                    item,
+                    reason=message or code or "hébergeur indisponible",
+                    now=now,
+                    link=link,
+                )
+                _remember_skip(row, link.id)
+                row.link_id = None
+                continue
+            record_failed(db, row, media, item, reason=message or code, now=now, link=link)
+            _bury(db, row, link, code, message)
+            continue
+        row.link_id = link.id
+        row.state = "resolving"
+        if row.attempt_started_at is None:
+            row.attempt_started_at = now
+        _commit(db)
+        direct_url = None
+        filename = link.filename
+        size = link.size
+        hoster_url = None
+        precheck: HosterUnlockContext | None = None
+        if link.kind == "direct":
+            direct_url = link.url
+        else:
+            if debrid is None:
+                record_failed(db, row, media, item, reason="Aucun débrideur actif.", now=now, link=link)
+                _schedule_retry(db, row, "NO_DEBRID", "Aucun débrideur actif.", now)
+                return "waiting"
+            precheck = HosterUnlockContext(
+                db=db,
+                row=row,
+                media=media,
+                item=item,
+                settings=settings,
+                now=now,
+                source_type="manual_source_page",
+                attempt_profile=attempt_profile,
+                attempt_profile_rank=attempt_profile_rank,
+            )
+            try:
+                direct_url, filename, size, hoster_url = _unlock(
+                    debrid, link, known, preference, precheck_ctx=precheck
+                )
+                bad = _probed_direct(direct_url, size or link.size)
+                if bad:
+                    raise DebridError("LINK_NOT_VIDEO", bad, retryable=False)
+            except DebridError as exc:
+                record_failed(
+                    db,
+                    row,
+                    media,
+                    item,
+                    reason=french_error(exc.code, exc.message),
+                    now=now,
+                    link=link,
+                )
+                if exc.code == "AUTH_BLOCKED":
+                    _block_queue(db, debrid_row, now)
+                    row.state = "pending"
+                    row.error_code = "AUTH_BLOCKED"
+                    row.error = AUTH_BLOCKED_MESSAGE
+                    return "paused"
+                if exc.code == "ALREADY_PRESENT":
+                    _cancel_present(db, row, now)
+                    return "waiting"
+                if exc.code == "PROFILE":
+                    _remember_skip(row, link.id)
+                    row.link_id = None
+                    last_code = exc.code
+                    last_message = exc.message or "filtre profil"
+                    continue
+                if _switch_host(exc):
+                    note_hoster_signal(
+                        link.hoster,
+                        up=False,
+                        message=french_error(exc.code, exc.message),
+                    )
+                    _bury(db, row, link, exc.code, exc.message)
+                    last_code = exc.code
+                    continue
+                if exc.retryable and exc.code not in _DEAD_LINK:
+                    action = _schedule_retry(
+                        db,
+                        row,
+                        exc.code,
+                        french_error(exc.code, exc.message),
+                        now,
+                        defer_final=defer_final,
+                    )
+                    if action in {"exhausted", "failed"}:
+                        _remember_skip(row, link.id)
+                        row.link_id = None
+                        last_code = exc.code
+                        continue
+                    return "waiting"
+                _bury(db, row, link, exc.code, exc.message)
+                last_code = exc.code
+                continue
+        if not direct_url:
+            record_failed(db, row, media, item, reason="Lien direct vide.", now=now, link=link)
+            _bury(db, row, link, "LINK_EMPTY", "Lien direct vide.")
+            continue
+        if link.kind == "direct":
+            bad = _probed_direct(direct_url, size or link.size)
+            if bad:
+                record_failed(db, row, media, item, reason=bad, now=now, link=link)
+                _bury(db, row, link, "LINK_NOT_VIDEO", bad)
+                continue
+        if precheck is not None:
+            if precheck.journal_profile_name:
+                journal_live["name"] = precheck.journal_profile_name
+            if precheck.journal_profile_rank is not None:
+                journal_live["rank"] = precheck.journal_profile_rank
+        note_hoster_signal(link.hoster, up=True, message="Débridage réussi.")
+        record_used(db, row, media, item, now=now, link=link)
+        return (link, direct_url, filename, size, hoster_url)
+    logger.info(
+        "%s : aucun succès après essais (job=%s episode=%s code=%s detail=%s)",
+        log_prefix,
+        row.id,
+        _slot_label(item),
+        last_code,
+        last_message,
+    )
+    return None
+
+
+def _from_manual_links(
+    db,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    preference: list[str],
+    debrid_row,
+    debrid,
+    settings: Settings,
+    known: list,
+):
+    """Try non-dead manual-source links first, without profile or hoster-order filters."""
+    del settings
+    manual = db.scalar(select(Provider).where(Provider.kind == "source", Provider.type == "manual"))
+    if manual is None:
+        return None
+    links = list(
+        db.scalars(
+            select(Link).where(
+                Link.media_item_id == item.id,
+                Link.dead.is_(False),
+                Link.provider_id == manual.id,
+            )
+        ).all()
+    )
+    if not links:
+        return None
+    links.sort(key=lambda link: (-(link.priority or 0), link.id or 0))
+    return _attempt_bypass_profile_links(
+        db,
+        row,
+        item,
+        media,
+        now,
+        preference,
+        debrid_row,
+        debrid,
+        known,
+        links,
+        record_used=record_manual_link_used,
+        record_failed=record_manual_link_failed,
+        log_prefix="Liens manuels",
+        defer_final=True,
+        allow_manual_magnet=True,
+        settings=None,
+    )
+
+
+def _from_manual_source_page(
+    db,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    preference: list[str],
+    debrid_row,
+    debrid,
+    settings: Settings,
+    known: list,
+):
+    """Read a user-bound page first: principal profile then replis (same chain as the poll)."""
+    from mediatracker.core.pipeline.manual_source_page import (
+        episode_candidates,
+        fetch_manual_binding_link_candidates,
+        link_for_manual_page_candidate,
+        manual_path_binding_for_item,
+        pick_manual_source_page_link,
+    )
+    from mediatracker.core.profile_attempt_orchestration import (
+        download_attempt_profile,
+        load_profile_chain,
+        profile_chain_from_anchor,
+    )
+    from mediatracker.core.profile_fallback import ProfileResolveError
+
+    binding = manual_path_binding_for_item(db, media, item)
+    if binding is None:
+        return None
+    _commit(db)
+    try:
+        candidates = fetch_manual_binding_link_candidates(db, settings, binding)
+    except Exception as exc:
+        from mediatracker.providers.downloaders.aria2 import scrub_url
+
+        detail = scrub_url(_short_exception_reason(exc)).strip()[:300]
+        logger.info(
+            "Page source manuelle illisible (job=%s episode=%s): %s",
+            row.id,
+            _slot_label(item),
+            detail,
+        )
+        return None
+    if not episode_candidates(candidates, item):
+        record_manual_source_page_empty(db, row, media, item, reason="episode", now=now)
+        return None
+    attempt_profile = download_attempt_profile(db, media, settings, row)
+    if attempt_profile is not None:
+        chain = profile_chain_from_anchor(db, media, settings, attempt_profile)
+    else:
+        try:
+            chain = load_profile_chain(db, media, settings)
+        except ProfileResolveError:
+            return None
+    skipped = {int(value) for value in (row.skipped_link_ids or [])}
+    pick = pick_manual_source_page_link(
+        db,
+        binding.provider_id,
+        chain.profiles,
+        candidates,
+        item,
+        preference,
+        skipped_link_ids=skipped,
+    )
+    if pick is None:
+        record_manual_source_page_empty(db, row, media, item, reason="profile", now=now)
+        return None
+    ordered, profile, _profile_rank_in_slice = pick
+    tour_profile = attempt_profile or profile
+    profile_rank = profile_rank_for_attempt(db, media, settings, tour_profile)
+    stored: list[Link] = []
+    try:
+        for candidate in ordered:
+            link = link_for_manual_page_candidate(
+                db, item, candidate, binding.provider_id, preference, now
+            )
+            if link is None or link.dead or link.id in skipped:
+                continue
+            stored.append(link)
+    except Exception:
+        logger.info(
+            "Page source manuelle : stockage lien impossible (job=%s episode=%s)",
+            row.id,
+            _slot_label(item),
+        )
+        return None
+    if not stored:
+        record_manual_source_page_empty(db, row, media, item, reason="profile", now=now)
+        return None
+
+    journal_live = {"name": tour_profile.name, "rank": profile_rank}
+
+    def _journal_used(db, row, media, item, *, now=None, link=None):
+        del link
+        return record_manual_source_page_used(
+            db,
+            row,
+            media,
+            item,
+            profile_name=journal_live["name"],
+            profile_rank=int(journal_live["rank"]),
+            now=now,
+        )
+
+    return _attempt_bypass_profile_links(
+        db,
+        row,
+        item,
+        media,
+        now,
+        preference,
+        debrid_row,
+        debrid,
+        known,
+        stored,
+        record_used=_journal_used,
+        record_failed=lambda *args, **kwargs: None,
+        log_prefix="Page source manuelle",
+        defer_final=True,
+        settings=settings,
+        attempt_profile=tour_profile,
+        attempt_profile_rank=profile_rank,
+        journal_live=journal_live,
+    )
 
 
 def _from_hosters(
@@ -215,6 +659,9 @@ def _from_hosters(
         _fail(db, row, POLL_PROFILE_MISSING, "Profil du sondage introuvable.", now)
         return "waiting"
     attempt = resolution.profile
+    attempt_rank = (
+        profile_rank_for_attempt(db, media, settings, attempt) if attempt is not None else 1
+    )
     last_code = "NO_LINK"
     last_message = "Aucun lien utilisable."
     looked_for_versions = False
@@ -338,8 +785,21 @@ def _from_hosters(
             if debrid is None:
                 _schedule_retry(db, row, "NO_DEBRID", "Aucun débrideur actif.", now)
                 return "waiting"
+            precheck = HosterUnlockContext(
+                db=db,
+                row=row,
+                media=media,
+                item=item,
+                settings=settings,
+                now=now,
+                source_type=source_type,
+                attempt_profile=attempt,
+                attempt_profile_rank=attempt_rank,
+            )
             try:
-                direct_url, filename, size, hoster_url = _unlock(debrid, link, known, preference)
+                direct_url, filename, size, hoster_url = _unlock(
+                    debrid, link, known, preference, precheck_ctx=precheck
+                )
                 bad = _probed_direct(direct_url, size or link.size)
                 if bad:
                     raise DebridError("LINK_NOT_VIDEO", bad, retryable=False)
@@ -355,6 +815,12 @@ def _from_hosters(
                 if exc.code == "ALREADY_PRESENT":
                     _cancel_present(db, row, now)
                     return "waiting"
+                if exc.code == "PROFILE":
+                    _remember_skip(row, link.id)
+                    row.link_id = None
+                    last_code = exc.code
+                    last_message = exc.message
+                    continue
                 if _switch_host(exc):
                     note_hoster_signal(
                         link.hoster,
@@ -630,6 +1096,12 @@ def _from_episode_source(
             row.error_code = POLL_PROFILE_MISSING
             row.error = "Profil du sondage introuvable."
         return None
+    poll_profile = resolution.profile
+    attempt_rank = (
+        profile_rank_for_attempt(db, media, settings, poll_profile)
+        if poll_profile is not None
+        else 1
+    )
     if resolution.explicit and resolution.profile is not None:
         spec, preferences = comet_context_for_attempt(profile=resolution.profile)
     else:
@@ -806,8 +1278,21 @@ def _from_episode_source(
             return "waiting"
         if not _hoster_supported(debrid, link):
             continue
+        precheck = HosterUnlockContext(
+            db=db,
+            row=row,
+            media=media,
+            item=item,
+            settings=settings,
+            now=now,
+            source_type=source_type,
+            attempt_profile=poll_profile,
+            attempt_profile_rank=attempt_rank,
+        )
         try:
-            direct_url, filename, size, hoster_url = _unlock(debrid, link, known, preference)
+            direct_url, filename, size, hoster_url = _unlock(
+                debrid, link, known, preference, precheck_ctx=precheck
+            )
             bad = _probed_direct(direct_url, size or link.size)
             if bad:
                 raise DebridError("LINK_NOT_VIDEO", bad, retryable=False)
@@ -821,6 +1306,10 @@ def _from_episode_source(
             if exc.code == "ALREADY_PRESENT":
                 _cancel_present(db, row, now)
                 return "waiting"
+            if exc.code == "PROFILE":
+                _remember_skip(row, link.id)
+                row.link_id = None
+                continue
             if _switch_host(exc):
                 note_hoster_signal(
                     link.hoster,
@@ -1068,7 +1557,14 @@ def _switch_host(exc: DebridError) -> bool:
     return host_down(exc.code, exc.message)
 
 
-def _unlock(debrid, link: Link, known: list, preference: list[str]) -> tuple[str | None, str | None, int | None, str]:
+def _unlock(
+    debrid,
+    link: Link,
+    known: list,
+    preference: list[str],
+    *,
+    precheck_ctx: HosterUnlockContext | None = None,
+) -> tuple[str | None, str | None, int | None, str]:
     targets = [link.url]
     if link.kind == "ddl_protected":
         targets = _redirector_targets(list(debrid.resolve(link.url)), preference)
@@ -1111,6 +1607,12 @@ def _unlock(debrid, link: Link, known: list, preference: list[str]) -> tuple[str
         if decision.action == "offline":
             last = DebridError(decision.code or "LINK_DOWN", decision.message or "hors ligne", retryable=False)
             continue
+        apply_hoster_inspection_to_link(
+            link,
+            filename=decision.filename,
+            size=decision.size,
+            ctx=precheck_ctx,
+        )
         try:
             direct = debrid.unlock(url)
         except DebridError as exc:

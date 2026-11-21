@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from mediatracker.core.jellyfin_web import jellyfin_base_url, jellyfin_web_url, 
 from mediatracker.core.polling import EpisodeAir, PollSubject, should_poll_source
 from mediatracker.core.selection import LANGUAGES, QUALITIES
 from mediatracker.core.tmdb import token as tmdb_token
+from mediatracker.core.tmdb_votes import exposed_tmdb_vote_average
 from mediatracker.core.tracking import (
     EpisodeView,
     available_not_downloaded,
@@ -195,6 +196,8 @@ class MediaOut(BaseModel):
     file_absent: bool = False
     film_not_yet_available: bool = False
     film_status_line: str | None = None
+    film_availability_source: str | None = None
+    next_air_date: date | None = None
     last_repair_at: datetime | None = None
     last_repair_summary: str | None = None
     tmdb_identify_status: str | None = None
@@ -212,11 +215,13 @@ class MediaOut(BaseModel):
     tmdb_trailer_youtube_key: str | None = None
     tmdb_trailer_kind: str | None = None
     tmdb_trailer_language: str | None = None
+    hidden_at: datetime | None = None
 
 
 class MediaPage(BaseModel):
     items: list[MediaOut]
     next_cursor: str | None = None
+    hidden_count: int = 0
 
 
 class IdentityChangeOut(BaseModel):
@@ -595,12 +600,14 @@ def _to_media(
         file_absent=film_file_absent,
         film_not_yet_available=waiting_film,
         film_status_line=film_status,
+        film_availability_source=row.film_availability_source,
+        next_air_date=row.next_air_date,
         last_repair_at=row.last_repair_at,
         last_repair_summary=row.last_repair_summary,
         tmdb_identify_status=row.tmdb_identify_status,
         tmdb_identify_candidates=row.tmdb_identify_candidates,
         tmdb_refresh_warning=getattr(row, "_tmdb_refresh_warning", None),
-        tmdb_vote_average=row.tmdb_vote_average,
+        tmdb_vote_average=exposed_tmdb_vote_average(row.tmdb_vote_average, row.tmdb_vote_count),
         tmdb_vote_count=row.tmdb_vote_count,
         tmdb_genres=row.tmdb_genres,
         tmdb_runtime_min=row.tmdb_runtime_min,
@@ -612,6 +619,7 @@ def _to_media(
         tmdb_trailer_youtube_key=row.tmdb_trailer_youtube_key,
         tmdb_trailer_kind=row.tmdb_trailer_kind,
         tmdb_trailer_language=row.tmdb_trailer_language,
+        hidden_at=row.hidden_at,
     )
 
 
@@ -1018,9 +1026,14 @@ def list_media(
     cursor: str | None = None,
     origin: str | None = None,
     identify_status: str | None = None,
+    include_hidden: bool = False,
 ) -> MediaPage:
     del _principal
+    from mediatracker.core.media_hide import media_visible_clause
+
     stmt = select(Media)
+    if not include_hidden:
+        stmt = stmt.where(media_visible_clause())
     if origin == "identification":
         stmt = stmt.where(Media.follow_origin == "identification")
     if identify_status:
@@ -1048,6 +1061,11 @@ def list_media(
 
     jellyfin_base = jellyfin_base_url(db)
     explain_ctx = load_media_explain_context(db, request.app.state.settings, [row.id for row in rows])
+    hidden_count = 0
+    if cursor is None:
+        hidden_count = int(
+            db.scalar(select(func.count()).select_from(Media).where(Media.hidden_at.is_not(None))) or 0
+        )
     return MediaPage(
         items=[
             _to_media(
@@ -1065,6 +1083,7 @@ def list_media(
             for row in rows
         ],
         next_cursor=next_cursor,
+        hidden_count=hidden_count,
     )
 
 
@@ -1695,6 +1714,58 @@ def unfollow_media(
             delete_files(db, request.app.state.settings, media_id=row.id, scope="media", season=None, item_id=None)
         except CleanupError as exc:
             raise Problem(409, "Conflit", str(exc)) from exc
+    db.refresh(row)
+    items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == row.id)).all())
+    file_status_index = FileStatusIndex.load(db, items)
+    return _to_media(row, items, db, request.app.state.settings, file_status_index=file_status_index)
+
+
+@router.post("/{media_id}/hide", response_model=MediaOut)
+def hide_media_fiche(
+    media_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> MediaOut:
+    """Masque la fiche (listes et accueil). Fichiers, historique et Hive inchangés."""
+    del _principal
+    from mediatracker.core.media_hide import hide_media
+    from mediatracker.core.follow import unfollow
+
+    row = _get_media(db, media_id)
+    moment = datetime.now(timezone.utc)
+    if row.followed:
+        unfollow(
+            db,
+            row,
+            reason="user",
+            settings=request.app.state.settings,
+            moment=moment,
+            cancel_queue=True,
+            clear_schedule_flags=True,
+        )
+    hide_media(row, moment=moment)
+    db.commit()
+    db.refresh(row)
+    items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == row.id)).all())
+    file_status_index = FileStatusIndex.load(db, items)
+    return _to_media(row, items, db, request.app.state.settings, file_status_index=file_status_index)
+
+
+@router.post("/{media_id}/unhide", response_model=MediaOut)
+def unhide_media_fiche(
+    media_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> MediaOut:
+    """Réaffiche une fiche masquée (ne relance pas le suivi)."""
+    del _principal
+    from mediatracker.core.media_hide import unhide_media
+
+    row = _get_media(db, media_id)
+    unhide_media(row)
+    db.commit()
     db.refresh(row)
     items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == row.id)).all())
     file_status_index = FileStatusIndex.load(db, items)

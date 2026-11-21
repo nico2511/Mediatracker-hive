@@ -208,6 +208,8 @@ class Media(Base):
     # Versions seen on the last source check, with a rejection reason when refused.
     source_report: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    # Masquage réversible : absent des listes et de l'accueil tant que non nul.
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     items: Mapped[list["MediaItem"]] = relationship(back_populates="media", cascade="all, delete-orphan")
     seasons: Mapped[list["MediaSeason"]] = relationship(back_populates="media", cascade="all, delete-orphan")
@@ -352,6 +354,7 @@ class Link(Base):
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     item: Mapped[MediaItem] = relationship(back_populates="links")
+    provider: Mapped[Provider] = relationship()
 
 
 class Download(Base):
@@ -375,6 +378,7 @@ class Download(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     handle: Mapped[str | None] = mapped_column(String(128), nullable=True)
     filename: Mapped[str | None] = mapped_column(String(500), nullable=True)

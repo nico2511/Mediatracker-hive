@@ -8,6 +8,10 @@ vi.mock("../../api", () => ({
   userFacingApiError: (_e: unknown, fallback: string) => fallback,
 }));
 
+vi.mock("vue-router", () => ({
+  RouterLink: { template: "<a><slot /></a>", props: ["to"] },
+}));
+
 import HiveCatalogueVersionList from "./HiveCatalogueVersionList.vue";
 
 const VERSIONS = [
@@ -58,5 +62,18 @@ describe("HiveCatalogueVersionList", () => {
         body: JSON.stringify({ version_key: "4K+VOSTFR" }),
       }),
     );
+    expect(w.get("[data-testid=hive-version-requested]").text()).toContain("Téléchargements");
+    expect(w.get("[data-testid=hive-version-sent]").text()).toContain("Demande envoyée");
+  });
+
+  it("affiche l’erreur sous la ligne concernée", async () => {
+    apiMock.mockRejectedValue(new Error("x"));
+    const w = mount(HiveCatalogueVersionList, {
+      props: { workKey: "wk-test", versions: [VERSIONS[0]] },
+    });
+    await w.get("[data-testid=hive-version-download-HD+VFF]").trigger("click");
+    await flushPromises();
+    expect(w.get(`[data-testid=hive-version-error-HD+VFF]`).text()).toContain("Transfert indisponible");
+    expect(w.get("[data-testid=hive-version-download-HD+VFF]").text()).toBe("Télécharger");
   });
 });

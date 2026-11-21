@@ -38,6 +38,7 @@ VIDEO_EXT = frozenset({".mkv", ".mp4", ".avi", ".m4v", ".ts", ".webm", ".mov"})
 REDISCOVER = "REDISCOVER"
 # REDISCOVER row whose remote-search slot was taken in redownload_item (do not skip begin_remote_search).
 REDISCOVER_RESERVED = "REDISCOVER_RESERVED"
+REDISCOVER_MESSAGE = "Nouvelle recherche planifiée."
 # AllDebrid marks this retryable. The pipeline still switches hoster at once:
 # waiting on the same Nitroflare link is what left jobs at 0 % overnight.
 _HOST_DOWN = frozenset({"LINK_HOST_UNAVAILABLE"})

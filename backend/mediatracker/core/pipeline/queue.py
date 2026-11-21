@@ -21,6 +21,7 @@ from mediatracker.core.pipeline.constants import (
     ARIA_CDN_REUNLOCK,
     BACKOFFS,
     REDISCOVER,
+    REDISCOVER_MESSAGE,
     REDISCOVER_RESERVED,
     VIDEO_EXT,
     ZERO_PROGRESS_LIMIT,
@@ -60,6 +61,11 @@ from mediatracker.core.pipeline.siblings import (
     _mark_obtained,
     _settle_obtained_siblings,
     _sibling_already_obtained,
+)
+from mediatracker.core.pipeline.source_rounds import (
+    is_poll_style_empty_pass,
+    reset_source_rounds,
+    schedule_after_empty_source_round,
 )
 from mediatracker.core.precheck import (
     load_known_files,
@@ -190,6 +196,7 @@ def retry_job(db: Session, row: Download, settings: Settings) -> None:
     row.eta_seconds = None
     row.finished_at = None
     row.attempt_started_at = None
+    reset_source_rounds(row)
     from mediatracker.core.dead_links import revive_links_for_retry
 
     revive_links_for_retry(db, row.media_item_id, now)
@@ -558,9 +565,9 @@ def _finalize_download_row(
     from mediatracker.core.series_follow import stop_following_complete_series
 
     if media.type == "film":
-        stop_following_downloaded_film(db, media, reason="downloaded")
+        stop_following_downloaded_film(db, media, reason="downloaded", settings=settings)
     else:
-        stop_following_complete_series(db, media, today=now.date())
+        stop_following_complete_series(db, media, today=now.date(), settings=settings)
     import_path = library_path_for_import or str(dest)
     record_library_imported(db, media, item, import_path)
     from mediatracker.integrations.jellyfin_sync import schedule_library_refresh
@@ -576,6 +583,21 @@ def _finalize_download_row(
     from mediatracker.core.cleanup_classify import request_classify
 
     request_classify(db)
+    if item.id is not None:
+        from mediatracker.hive.identity import hive_enabled_in_db
+
+        if hive_enabled_in_db(db):
+            from mediatracker.hive.catalog import sync_hive_catalog_item
+
+            try:
+                with db.begin_nested():
+                    sync_hive_catalog_item(db, settings, item.id, now=now)
+            except Exception as exc:
+                logger.warning(
+                    "Synchronisation catalogue Hive ignorée après téléchargement (%s, créneau %s).",
+                    type(exc).__name__,
+                    item.id,
+                )
 
 
 def _finish_download(
@@ -880,7 +902,7 @@ def _begin(
     disk_free,
     known: list,
 ) -> str:
-    from mediatracker.core.pipeline.unlock import _from_named_source
+    from mediatracker.core.pipeline.unlock import _from_manual_links, _from_manual_source_page, _from_named_source
 
     item = db.get(MediaItem, row.media_item_id)
     media = db.get(Media, item.media_id) if item is not None else None
@@ -926,7 +948,45 @@ def _begin(
     )
 
     found = None
-    while True:
+    effective_known = [] if should_bypass_remote_dedup(row, item) else known
+    reset_pass_error_fields(row)
+    begin_download_pass(row)
+    manual_outcome = _from_manual_links(
+        db,
+        row,
+        item,
+        media,
+        now,
+        preference,
+        debrid_row,
+        debrid,
+        settings,
+        effective_known,
+    )
+    if isinstance(manual_outcome, str):
+        return manual_outcome
+    if manual_outcome is not None:
+        found = manual_outcome
+        reset_source_rounds(row)
+    if found is None:
+        page_outcome = _from_manual_source_page(
+            db,
+            row,
+            item,
+            media,
+            now,
+            preference,
+            debrid_row,
+            debrid,
+            settings,
+            effective_known,
+        )
+        if isinstance(page_outcome, str):
+            return page_outcome
+        if page_outcome is not None:
+            found = page_outcome
+            reset_source_rounds(row)
+    while found is None:
         reset_pass_error_fields(row)
         begin_download_pass(row)
         effective_known = [] if should_bypass_remote_dedup(row, item) else known
@@ -954,6 +1014,7 @@ def _begin(
                     _record_download_source_switch(db, row, media, item, order[index], order[index + 1], now=now)
                 continue
             found = outcome
+            reset_source_rounds(row)
             break
         if found is not None:
             break
@@ -980,7 +1041,16 @@ def _begin(
         else:
             code = row.error_code or "NO_LINK"
             message = row.error or "Aucun lien utilisable."
-        if row.state != "failed":
+        if is_poll_style_empty_pass(row, code):
+            schedule_after_empty_source_round(
+                db,
+                row,
+                media,
+                settings,
+                now,
+                fast_wawacity_poll=wawacity_had_no_stored_links(row),
+            )
+        elif row.state != "failed":
             _fail(db, row, code, french_error(code, message), now)
             if wawacity_had_no_stored_links(row):
                 _fast_source_poll(db, media, settings, now)
@@ -1093,7 +1163,7 @@ def schedule_full_retries(db: Session, rows: list[Download], now: datetime, sett
         when = now + gap * scheduled
         row.state = "pending"
         row.error_code = REDISCOVER
-        row.error = "Nouvelle recherche Wawacity planifiée."
+        row.error = REDISCOVER_MESSAGE
         row.next_retry_at = when
         row.attempts = 0
         row.skipped_link_ids = []
@@ -1106,6 +1176,7 @@ def schedule_full_retries(db: Session, rows: list[Download], now: datetime, sett
         row.finished_at = None
         row.attempt_started_at = None
         row.dismissed = False
+        reset_source_rounds(row)
         from mediatracker.core.dead_links import revive_links_for_retry
 
         revive_links_for_retry(db, row.media_item_id, now)

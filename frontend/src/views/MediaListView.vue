@@ -8,6 +8,7 @@ import MediaLibraryBulkSelectionBar from "../components/MediaLibraryBulkSelectio
 import FilterHelpHint from "../components/FilterHelpHint.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
+import TmdbRatingCardLine from "../components/TmdbRatingCardLine.vue";
 import StatusIcon from "../components/StatusIcon.vue";
 import { api, userFacingApiError } from "../api";
 import { useConnectivity } from "../pwa/connectivity";
@@ -55,11 +56,13 @@ interface MediaRow {
   poll: { allowed: boolean; reason: string };
   cleanup_reason?: string | null;
   tmdb_identify_status?: string | null;
+  tmdb_vote_average?: number | null;
+  hidden_at?: string | null;
 }
 
 type Density = "airy" | "dense";
-type StateFilter = "all" | "available" | "waiting" | "disk" | "paused";
-const STATE_FILTERS: StateFilter[] = ["all", "available", "waiting", "disk", "paused"];
+type StateFilter = "all" | "available" | "waiting" | "disk" | "paused" | "hidden";
+const STATE_FILTERS: StateFilter[] = ["all", "available", "waiting", "disk", "paused", "hidden"];
 const LEGACY_STATE_FILTER_IDENTIFIED = "identified";
 
 const STATE_FILTER_HELP: Record<StateFilter, string> = {
@@ -68,6 +71,8 @@ const STATE_FILTER_HELP: Record<StateFilter, string> = {
   waiting: "En attente de téléchargement, pas encore marquées vues (hors « pas encore disponible »).",
   disk: "Fichier présent sur le disque (y compris série partielle).",
   paused: "Fiches dont le suivi est en pause.",
+  hidden:
+    "Fiches masquées : absentes de la vue normale, de l'Accueil et des suggestions. Fichiers et historique inchangés.",
 };
 
 const FOLLOW_FILTER_HELP = {
@@ -116,6 +121,8 @@ const loadFailed = ref(false);
 const refreshNote = ref("");
 const error = ref("");
 const note = ref("");
+const hiddenCount = ref(0);
+const undoUnhideId = ref<number | null>(null);
 const query = ref("");
 const sort = ref<"alpha" | "added">("alpha");
 const filter = ref<StateFilter>("all");
@@ -208,6 +215,12 @@ const visible = computed(() => {
     if (filter.value === "paused" && !item.on_hold) {
       return false;
     }
+    if (filter.value === "hidden") {
+      return Boolean(item.hidden_at);
+    }
+    if (filter.value !== "hidden" && item.hidden_at) {
+      return false;
+    }
     if (filter.value === "available" && item.availability !== "available") {
       return false;
     }
@@ -257,7 +270,7 @@ const filteredStats = computed(() => {
 const filtersActive = computed(() => {
   return (
     Boolean(query.value.trim()) ||
-    filter.value !== "all" ||
+    (filter.value !== "all" && filter.value !== "hidden") ||
     followFilter.value !== "all" ||
     watchFilter.value !== "all" ||
     typeFilter.value !== "all" ||
@@ -283,7 +296,7 @@ const activeFilterCount = computed(() => {
 });
 
 const mobileStateFilterHelp = computed(() => {
-  if (filter.value === "all") {
+  if (filter.value === "all" || filter.value === "hidden") {
     return "";
   }
   return STATE_FILTER_HELP[filter.value];
@@ -455,6 +468,10 @@ function resetAdvancedFilters() {
   filter.value = "all";
 }
 
+function onHiddenFilterToggle() {
+  filter.value = filter.value === "hidden" ? "all" : "hidden";
+}
+
 function clearFilterChip(key: string) {
   if (key === "follow") {
     followFilter.value = "all";
@@ -466,6 +483,15 @@ function clearFilterChip(key: string) {
     originFilter.value = "all";
   }
 }
+
+watch(
+  () => filter.value,
+  (next, prev) => {
+    if ((next === "hidden") !== (prev === "hidden")) {
+      void reload();
+    }
+  },
+);
 
 watch(density, (value) => {
   persistDensity(value);
@@ -538,6 +564,44 @@ function applyMediaListSnapshot(noteSuffix = ""): boolean {
   return true;
 }
 
+function hiddenLabel(iso: string | null | undefined): string {
+  if (!iso) {
+    return "Masquée";
+  }
+  return `Masquée le ${formatParis(iso).slice(0, 10)}`;
+}
+
+async function unhideFromList(item: MediaRow) {
+  if (serverActionsDisabled.value) {
+    return;
+  }
+  error.value = "";
+  try {
+    await api(`/api/v1/media/${item.id}/unhide`, { method: "POST" });
+    undoUnhideId.value = item.id;
+    note.value = "Fiche réaffichée.";
+    await reload();
+  } catch (err) {
+    error.value = userFacingApiError(err, "Réaffichage impossible.");
+  }
+}
+
+async function undoUnhideFromList() {
+  const id = undoUnhideId.value;
+  if (id === null || serverActionsDisabled.value) {
+    return;
+  }
+  error.value = "";
+  try {
+    await api(`/api/v1/media/${id}/hide`, { method: "POST" });
+    undoUnhideId.value = null;
+    note.value = "Réaffichage annulé.";
+    await reload();
+  } catch (err) {
+    error.value = userFacingApiError(err, "Annulation impossible.");
+  }
+}
+
 async function reload() {
   const generation = ++reloadGeneration;
   hiveSummaryGeneration += 1;
@@ -547,6 +611,8 @@ async function reload() {
   const hadSnapshot = applyMediaListSnapshot();
   loading.value = true;
   loadingCount.value = items.value.length;
+  const extraParams =
+    filter.value === "hidden" ? { include_hidden: "true" } : undefined;
   try {
     const all = await fetchAllMediaPages<MediaRow>(
       (path: string) => api(path),
@@ -558,6 +624,15 @@ async function reload() {
         items.value = partial;
         loadingCount.value = partial.length;
         cacheNote.value = "";
+      },
+      extraParams,
+      (meta) => {
+        if (generation !== reloadGeneration) {
+          return;
+        }
+        if (typeof meta.hidden_count === "number") {
+          hiddenCount.value = meta.hidden_count;
+        }
       },
     );
     if (generation !== reloadGeneration) {
@@ -845,10 +920,13 @@ onMounted(async () => {
         <span class="media-library-loading-spinner" aria-hidden="true"></span>
         Chargement… {{ formatTitleCount(loadingCount) }} reçu{{ loadingCount > 1 ? "s" : "" }}
       </p>
-      <p v-if="libraryStats.total" class="hint media-library-stats">
+      <p v-if="libraryStats.total || hiddenCount" class="hint media-library-stats">
         {{ formatTitleCount(libraryStats.total) }}
         · {{ formatSeriesCount(libraryStats.series) }}
         · {{ formatFilmCount(libraryStats.films) }}
+        <template v-if="hiddenCount">
+          · {{ formatCount(hiddenCount, "masquée", "masquées") }}
+        </template>
       </p>
       <p v-if="filtersActive && libraryStats.total" class="hint media-library-stats media-library-stats-filtered">
         {{ formatTitleCount(filteredStats.total) }} affiché{{ filteredStats.total > 1 ? "s" : "" }}
@@ -893,6 +971,18 @@ onMounted(async () => {
         <span class="media-library-filter-control">
           <button type="button" :class="{ active: filter === 'paused' }" @click="filter = 'paused'">En pause</button>
           <FilterHelpHint label="En pause" :text="STATE_FILTER_HELP.paused" />
+        </span>
+        <span v-if="hiddenCount" class="media-library-filter-control">
+          <button
+            type="button"
+            :class="{ active: filter === 'hidden' }"
+            data-testid="medias-hidden-chip"
+            @click="onHiddenFilterToggle"
+          >
+            <StatusIcon name="hide" label="" />
+            Masquées {{ hiddenCount }}
+          </button>
+          <FilterHelpHint label="Masquées" :text="STATE_FILTER_HELP.hidden" />
         </span>
       </p>
       <p v-if="!selecting && visible.length" class="actions media-library-select-action">
@@ -1084,8 +1174,17 @@ onMounted(async () => {
       </div>
     </form>
 
+    <p v-if="filter === 'hidden'" class="hint media-library-hidden-help panel">
+      Ces fiches sont absentes de la vue normale de Médias, de l'Accueil et des suggestions. Leurs fichiers et leur
+      historique restent en place.
+    </p>
+
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="note" class="hint">{{ note }}</p>
+    <p v-if="undoUnhideId !== null" class="profile-repl-banner" role="status">
+      Fiche réaffichée.
+      <button type="button" class="linkish" @click="undoUnhideFromList">Annuler</button>
+    </p>
+    <p v-else-if="note" class="hint">{{ note }}</p>
     <p v-if="!visible.length && filtersActive && !loading" class="hint media-library-empty">
       Aucun titre ne correspond aux filtres.
       <button type="button" class="linkish" @click="resetAdvancedFilters">Réinitialiser</button>
@@ -1119,7 +1218,10 @@ onMounted(async () => {
         v-for="item in visible"
         :key="item.id"
         class="media-library-card"
-        :class="{ 'is-selected': selecting && isSelected(item.id) }"
+        :class="{
+          'is-selected': selecting && isSelected(item.id),
+          'media-library-card--hidden': filter === 'hidden' || Boolean(item.hidden_at),
+        }"
         :poster-url="item.poster_url"
         :title="item.title"
         :kind-label="mediaKind(item.type)"
@@ -1146,6 +1248,7 @@ onMounted(async () => {
             <template v-if="item.year">{{ item.year }}</template>
             <template v-if="item.year"> · </template>{{ mediaKind(item.type) }}
           </span>
+          <TmdbRatingCardLine :vote-average="item.tmdb_vote_average" />
           <span class="media-library-status icon-line" :class="`tone-${mediaBadge(item).name}`">
             <span class="media-library-status-dot" aria-hidden="true"></span>
             {{ mediaBadge(item).label }}
@@ -1157,6 +1260,16 @@ onMounted(async () => {
             <StatusIcon v-if="item.followed" name="followed" label="Suivi" />
             <StatusIcon v-if="mediaOnDisk(item)" name="disk" label="Sur le disque" />
           </span>
+          <span v-if="item.hidden_at" class="hint media-library-hidden-meta">{{ hiddenLabel(item.hidden_at) }}</span>
+          <button
+            v-if="item.hidden_at"
+            type="button"
+            class="linkish media-library-unhide"
+            :disabled="serverActionsDisabled"
+            @click.stop="unhideFromList(item)"
+          >
+            Réafficher
+          </button>
         </template>
         <template #actions>
           <p class="card-actions">
@@ -1268,5 +1381,25 @@ onMounted(async () => {
 }
 .hive-list-badge.tone-info {
   color: var(--info);
+}
+
+.media-library-card--hidden :deep(.pc-poster-hit),
+.media-library-card--hidden :deep(.pc-meta) {
+  opacity: 0.45;
+}
+
+.media-library-hidden-help {
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+.media-library-hidden-meta {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.media-library-unhide {
+  margin-top: 0.15rem;
+  font-size: 0.875rem;
 }
 </style>

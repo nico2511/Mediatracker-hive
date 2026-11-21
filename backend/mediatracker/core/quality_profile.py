@@ -27,6 +27,8 @@ LANGUAGE_ALIASES = {
 RESOLUTION_RANK = {"SD": 1, "HDLight": 2, "HD": 3, "HDLight1080": 4, "1080p": 5, "4K": 6}
 HDLIGHT1080_RESOLUTION = "HDLight1080"
 DEFAULT_NAME = "VF/Multi 1080p"
+PROVISIONAL_HD_SORT_PENALTY = 20
+_EXPLICIT_RESOLUTION = re.compile(r"(?i)\b(?:2160p|1080p|720p|480p|4k|uhd)\b")
 
 _TOKEN = r"(?:^|[^a-z0-9])({name})(?:[^a-z0-9]|$)"
 _LANG_BEFORE_CA = re.compile(r"(?i)(?:multi|vff|vfq|vf2|truefrench|french|vostfr|vf)[.\s_\-()]*ca(?:[^a-z0-9]|$)")
@@ -131,6 +133,82 @@ def normalize_language(value: str | None) -> str | None:
     if token in LANGUAGE_CODES:
         return token
     return detect_language(value)
+
+
+def explicit_resolution_in_text(text: str | None) -> bool:
+    return bool(_EXPLICIT_RESOLUTION.search(text or ""))
+
+
+def release_candidate_from_inspection(
+    *,
+    language: str | None,
+    quality: str | None,
+    filename: str,
+    size: int | None = None,
+) -> ReleaseCandidate:
+    return ReleaseCandidate(
+        language=normalize_language(language) or detect_language(filename),
+        resolution=normalize_resolution(quality),
+        size=size,
+        text=filename or profile_rank_text(hint="", quality=quality, language=language),
+    )
+
+
+def wawacity_page_hd_label_candidate(candidate: object) -> bool:
+    from mediatracker.providers.base import LinkCandidate
+
+    if isinstance(candidate, LinkCandidate) and candidate.page_hd_label:
+        return True
+    filename = (getattr(candidate, "filename", None) or "").strip()
+    if filename:
+        return False
+    quality = normalize_resolution(getattr(candidate, "quality", None))
+    if quality != "HD":
+        return False
+    return not explicit_resolution_in_text(str(getattr(candidate, "quality", "") or ""))
+
+
+def wawacity_page_hd_label_link(link: object) -> bool:
+    filename = (getattr(link, "filename", None) or "").strip()
+    if filename:
+        return False
+    if (getattr(link, "quality", None) or "").upper() != "HD":
+        return False
+    provider = getattr(link, "provider", None)
+    if provider is not None and getattr(provider, "type", None) == "wawacity":
+        return True
+    from sqlalchemy import inspect as sa_inspect
+
+    from mediatracker.db.models import Provider
+
+    state = sa_inspect(link, raiseerr=False)
+    session = state.session if state is not None else None
+    provider_id = getattr(link, "provider_id", None)
+    if session is not None and provider_id is not None:
+        row = session.get(Provider, provider_id)
+        if row is not None and row.type == "wawacity":
+            return True
+    return False
+
+
+def provisional_hd_acceptance_rank(candidate: ReleaseCandidate, profile: Profile) -> int | None:
+    if profile.max_resolution and RESOLUTION_RANK.get(profile.max_resolution, 0) < RESOLUTION_RANK["1080p"]:
+        return None
+    if profile.min_resolution and RESOLUTION_RANK.get(profile.min_resolution, 0) > RESOLUTION_RANK["1080p"]:
+        return None
+    language = candidate.language or detect_language(candidate.text)
+    if not language or language not in profile.languages:
+        return None
+    probe = ReleaseCandidate(
+        language=language,
+        resolution="1080p",
+        size=candidate.size,
+        text=candidate.text,
+    )
+    base = acceptance_rank(probe, profile, enforce_size=False)
+    if base is None:
+        return None
+    return base + PROVISIONAL_HD_SORT_PENALTY
 
 
 def normalize_resolution(value: str | None) -> str | None:

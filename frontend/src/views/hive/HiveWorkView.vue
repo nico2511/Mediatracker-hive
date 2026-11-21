@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 
 import { api, userFacingApiError } from "../../api";
 import ActionMenuPopover from "../../components/ActionMenuPopover.vue";
@@ -16,6 +16,7 @@ import {
   type HiveCatalogueCardState,
 } from "../../hive/hiveCatalogueCard";
 import { mediaKind } from "../../labels";
+import { useHiveCatalogueRequestRow } from "../../composables/useHiveCatalogueRequestRow";
 import { useHiveOutOfProfileConfirm } from "../../composables/useHiveOutOfProfileConfirm";
 import { hiveVersionProfileCompatible } from "../../hive/hiveVersionProfile";
 
@@ -60,6 +61,7 @@ const selectedEpisodeVersionKey = ref<string | null>(null);
 const outOfProfileVersionPickConfirmed = ref(false);
 const { pendingId: confirmTargetId, resetConfirm, beginOrConfirm, needsConfirm } = useHiveOutOfProfileConfirm();
 const HERO_REQUEST_ID = "hero";
+const { stateFor, errorFor, postRequest } = useHiveCatalogueRequestRow();
 const { hiveEnabled } = useHiveEnabled();
 const hiveEmpreintesSignal = ref(0);
 
@@ -161,31 +163,50 @@ async function follow() {
   }
 }
 
-async function requestTarget(target: WorkRow, version?: VersionRow) {
+function requestBody(target: WorkRow, version?: VersionRow): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const vk = version?.version_key;
+  if (vk) {
+    body.version_key = vk;
+  }
+  if (target.season != null) {
+    body.season = target.season;
+  }
+  if (target.episode != null) {
+    body.episode = target.episode;
+  }
+  return body;
+}
+
+async function requestTarget(target: WorkRow, version?: VersionRow, rowKey?: string) {
+  const key = rowKey ?? target.work_key;
   busy.value = true;
   error.value = "";
   try {
-    const body: { version_key?: string; season?: number; episode?: number } = {};
-    const vk = version?.version_key;
-    if (vk) {
-      body.version_key = vk;
-    }
-    if (target.season != null) {
-      body.season = target.season;
-    }
-    if (target.episode != null) {
-      body.episode = target.episode;
-    }
-    await api(`/api/v1/hive/catalogue/${target.work_key}/request`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    await load();
-  } catch (err) {
-    error.value = userFacingApiError(err, "Transfert indisponible.");
+    await postRequest(key, target.work_key, requestBody(target, version));
   } finally {
     busy.value = false;
   }
+}
+
+function heroRequestLabel(): string {
+  if (heroNeedsConfirm()) {
+    return "Confirmer";
+  }
+  if (stateFor(HERO_REQUEST_ID) === "sending") {
+    return "Envoi…";
+  }
+  return "Télécharger via Hive";
+}
+
+function episodeRequestLabel(ep: WorkRow): string {
+  if (episodeNeedsConfirm(ep)) {
+    return "Confirmer";
+  }
+  if (stateFor(ep.work_key) === "sending") {
+    return "Envoi…";
+  }
+  return "Télécharger";
 }
 
 function requestEpisodeFromSelection(ep: WorkRow) {
@@ -194,7 +215,7 @@ function requestEpisodeFromSelection(ep: WorkRow) {
     error.value = "Choisissez une version dans la liste.";
     return;
   }
-  const run = () => void requestTarget(ep, ver);
+  const run = () => void requestTarget(ep, ver, ep.work_key);
   if (isSeriesShell.value && outOfProfileVersionPickConfirmed.value) {
     void run();
     return;
@@ -207,7 +228,7 @@ function requestFilmAuto() {
     return;
   }
   resetConfirm();
-  void requestTarget(work.value);
+  void requestTarget(work.value, undefined, HERO_REQUEST_ID);
 }
 
 function onHeroHiveDownload() {
@@ -216,7 +237,7 @@ function onHeroHiveDownload() {
   }
   const ver = selectedVersion.value;
   if (ver && !hiveVersionProfileCompatible(ver)) {
-    beginOrConfirm(HERO_REQUEST_ID, ver, () => void requestTarget(work.value!, ver));
+    beginOrConfirm(HERO_REQUEST_ID, ver, () => void requestTarget(work.value!, ver, HERO_REQUEST_ID));
     return;
   }
   requestFilmAuto();
@@ -320,17 +341,40 @@ const showHeroMenu = computed(
               >
                 Suivre
               </button>
+              <RouterLink
+                v-if="showHeroRequest && stateFor(HERO_REQUEST_ID) === 'requested'"
+                class="action-menu-item ok"
+                role="menuitem"
+                to="/telechargements"
+                data-testid="hive-work-requested"
+              >
+                Demandé · voir dans Téléchargements
+              </RouterLink>
               <button
-                v-if="showHeroRequest"
+                v-else-if="showHeroRequest"
                 type="button"
                 class="action-menu-item"
                 role="menuitem"
-                :disabled="busy"
+                :disabled="busy || stateFor(HERO_REQUEST_ID) === 'sending'"
                 data-testid="hive-work-request"
                 @click="onHeroHiveDownload"
               >
-                {{ heroNeedsConfirm() ? "Confirmer" : "Télécharger via Hive" }}
+                {{ heroRequestLabel() }}
               </button>
+              <p
+                v-if="showHeroRequest && stateFor(HERO_REQUEST_ID) === 'requested'"
+                class="hint hive-request-sent"
+                data-testid="hive-hero-request-sent"
+              >
+                Demande envoyée.
+              </p>
+              <p
+                v-if="errorFor(HERO_REQUEST_ID)"
+                class="error hive-request-error"
+                data-testid="hive-hero-request-error"
+              >
+                {{ errorFor(HERO_REQUEST_ID) }}
+              </p>
               <button
                 v-if="showHeroRequest && heroNeedsConfirm()"
                 type="button"
@@ -381,35 +425,50 @@ const showHeroMenu = computed(
               <p v-if="ep.error_line" class="error">{{ ep.error_line }}</p>
             </div>
             <div class="row stack episode-actions">
-              <p
-                v-if="episodeNeedsConfirm(ep)"
-                class="hint hive-version-confirm"
-                data-testid="hive-episode-version-confirm"
-              >
-                Télécharger quand même ?
-              </p>
-              <div class="row">
-                <button
-                  v-if="canRequest(ep)"
-                  type="button"
-                  class="btn btn-sm primary"
-                  :disabled="busy || !selectedEpisodeVersionKey"
-                  data-testid="hive-episode-request"
-                  @click="requestEpisodeFromSelection(ep)"
-                >
-                  {{ episodeNeedsConfirm(ep) ? "Confirmer" : "Télécharger" }}
-                </button>
-                <button
+              <template v-if="stateFor(ep.work_key) === 'requested'">
+                <p class="ok hive-request-sent" data-testid="hive-episode-requested">
+                  <RouterLink to="/telechargements">Demandé · voir dans Téléchargements</RouterLink>
+                </p>
+                <p class="hint">Demande envoyée.</p>
+              </template>
+              <template v-else>
+                <p
                   v-if="episodeNeedsConfirm(ep)"
-                  type="button"
-                  class="btn btn-sm btn-ghost"
-                  :disabled="busy"
-                  data-testid="hive-episode-cancel-confirm"
-                  @click="resetConfirm"
+                  class="hint hive-version-confirm"
+                  data-testid="hive-episode-version-confirm"
                 >
-                  Annuler
-                </button>
-              </div>
+                  Télécharger quand même ?
+                </p>
+                <div class="row">
+                  <button
+                    v-if="canRequest(ep)"
+                    type="button"
+                    class="btn btn-sm primary"
+                    :disabled="busy || !selectedEpisodeVersionKey || stateFor(ep.work_key) === 'sending'"
+                    data-testid="hive-episode-request"
+                    @click="requestEpisodeFromSelection(ep)"
+                  >
+                    {{ episodeRequestLabel(ep) }}
+                  </button>
+                  <button
+                    v-if="episodeNeedsConfirm(ep)"
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    :disabled="busy"
+                    data-testid="hive-episode-cancel-confirm"
+                    @click="resetConfirm"
+                  >
+                    Annuler
+                  </button>
+                </div>
+                <p
+                  v-if="errorFor(ep.work_key)"
+                  class="error hive-request-error"
+                  :data-testid="`hive-episode-request-error-${ep.work_key}`"
+                >
+                  {{ errorFor(ep.work_key) }}
+                </p>
+              </template>
             </div>
           </div>
         </li>
@@ -428,7 +487,7 @@ const showHeroMenu = computed(
         :pick-only="isSeriesShell"
         :selected-version-key="selectedEpisodeVersionKey"
         @pick="onVersionPicked"
-        @requested="load"
+        @requested="() => {}"
       />
       <p v-else class="hint">Aucune version annoncée pour le moment.</p>
       <p v-if="isSeriesShell" class="hint">Choisissez une version, puis un épisode pour lancer le transfert.</p>

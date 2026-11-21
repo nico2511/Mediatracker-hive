@@ -223,7 +223,15 @@ def finalize_received_hive_file(
         db.flush()
         if hive_catalog_auto_share_enabled(db):
             grant_share_intent(db, item.id)
-        sync_hive_catalog_item(db, settings, item.id, now=moment)
+        try:
+            with db.begin_nested():
+                sync_hive_catalog_item(db, settings, item.id, now=moment)
+        except Exception as exc:
+            logger.warning(
+                "Synchronisation catalogue Hive ignorée après rangement (%s, créneau %s).",
+                type(exc).__name__,
+                item.id,
+            )
         from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
 
         maybe_try_auto_accept_stored_incoming(db, settings, now=moment)

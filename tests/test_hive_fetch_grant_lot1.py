@@ -14,10 +14,10 @@ from tests.conftest import catalog_min_logical_video_bytes, csrf, login
 from tests.test_hive_t3_peer_http import _enable
 from tests.test_hive_t5 import NOW, URL_A, URL_B, _join_ruche, _seed_file_on_a
 
-from mediatracker.db.models import HiveFetchGrant, HiveFileFingerprint, Setting
+from mediatracker.db.models import HiveEntry, HiveFetchGrant, HiveFileFingerprint, Setting
 from mediatracker.hive.chunk_digest import TRANSFER_CHUNK_SIZE
 from mediatracker.hive.fetch_grant import HIVE_FETCH_GRANT_HEADER, FetchGrantDenied, mint_fetch_grant
-from mediatracker.hive.identity import load_private_key
+from mediatracker.hive.identity import hive_public_id_from_public_key, load_private_key
 from mediatracker.hive.membership import exclude_member
 from mediatracker.hive.peer_auth import sign_request_headers
 from mediatracker.hive.peer_transport import set_peer_asgi_apps_for_tests
@@ -329,20 +329,79 @@ def test_db_stores_grant_hash_not_plaintext(transfer_pair):
             db.close()
 
 
+def _seed_file_variant(app_a, ruche_id: bytes, payload: bytes, *, tmdb_id: int) -> tuple[str, str, str]:
+    settings = app_a.state.settings
+    pk = load_private_key(settings)
+    assert pk
+    db = app_a.state.session_factory()
+    try:
+        from mediatracker.core.storage import storage_layout
+        from mediatracker.db.models import HiveShareIntent, Media, MediaItem
+        from mediatracker.hive.catalog import publish_available
+        from mediatracker.library.scanner import remember_filed
+
+        layout = storage_layout(db, settings)
+        folder = layout.movies_dir / f"Fiction ({tmdb_id}) [tmdbid-{tmdb_id}]"
+        folder.mkdir(parents=True, exist_ok=True)
+        video = folder / f"f-{tmdb_id}.bin"
+        video.write_bytes(payload)
+        media = Media(type="movie", title="Fiction", year=2099, tmdb_id=tmdb_id)
+        db.add(media)
+        db.flush()
+        item = MediaItem(media_id=media.id, state="downloaded", downloaded=True, file_path=str(video.resolve()))
+        db.add(item)
+        db.flush()
+        remember_filed(db, video.resolve(), media, item, NOW)
+        from mediatracker.hive.chunk_digest import file_sha256_hex
+
+        sha = file_sha256_hex(video)
+        fp = HiveFileFingerprint(
+            media_item_id=item.id,
+            path=str(video.resolve()),
+            size=len(payload),
+            mtime_ns=video.stat().st_mtime_ns,
+            sha256_hex=sha,
+            partial_size=len(payload),
+            updated_at=NOW,
+        )
+        db.merge(fp)
+        db.flush()
+        db.merge(HiveShareIntent(media_item_id=item.id))
+        publish_available(db, settings, ruche_id=ruche_id, media=media, item=item, fingerprint_hex=sha, now=NOW)
+        from tests.hive_chunk_digest_testutil import persist_chunk_digests_for_test_file
+
+        row = db.get(HiveFileFingerprint, item.id)
+        assert row is not None
+        persist_chunk_digests_for_test_file(db, row)
+        db.commit()
+        entry = db.scalar(
+            select(HiveEntry)
+            .where(HiveEntry.ruche_id == ruche_id, HiveEntry.media_item_id == item.id)
+            .order_by(HiveEntry.seq.desc())
+            .limit(1)
+        )
+        assert entry and entry.file_id
+        origin = hive_public_id_from_public_key(pk.public_key())
+        return origin, entry.file_id.hex(), sha
+    finally:
+        db.close()
+
+
 def test_mint_cap_limits_active_grants(transfer_pair, monkeypatch):
     monkeypatch.setattr("mediatracker.hive.fetch_grant.MAX_ACTIVE_GRANTS_PER_REQUESTER", 3)
     app_a, app_b = transfer_pair
     blob = b"cap-" * 700
     with TestClient(app_a) as ca, TestClient(app_b) as cb:
         rid = _setup_pair(app_a, app_b, ca, cb)
-        _, fid, _ = _seed_file_on_a(app_a, rid, blob)
-        grants = [_mint(ca, app_b, rid, fid) for _ in range(3)]
-        assert len(grants) == 3
-        path, headers = _sign_mint(app_b, rid, fid)
+        for index in range(3):
+            _, fid, _ = _seed_file_variant(app_a, rid, blob, tmdb_id=88150 + index)
+            _mint(ca, app_b, rid, fid)
+        _, fid_extra, _ = _seed_file_variant(app_a, rid, blob, tmdb_id=88160)
+        path, headers = _sign_mint(app_b, rid, fid_extra)
         assert ca.post(path, headers=headers).status_code == 401
 
 
-def test_renewed_mint_does_not_invalidate_prior_grant(transfer_pair):
+def test_remint_while_prior_still_valid_revokes_old(transfer_pair):
     app_a, app_b = transfer_pair
     blob = b"renew-" * 900
     with TestClient(app_a) as ca, TestClient(app_b) as cb:
@@ -350,11 +409,51 @@ def test_renewed_mint_does_not_invalidate_prior_grant(transfer_pair):
         _, fid, _ = _seed_file_on_a(app_a, rid, blob)
         g1 = _mint(ca, app_b, rid, fid)
         g2 = _mint(ca, app_b, rid, fid)
+        assert g1 != g2
+        db = app_a.state.session_factory()
+        try:
+            active = db.scalar(
+                select(func.count())
+                .select_from(HiveFetchGrant)
+                .where(HiveFetchGrant.revoked_at.is_(None))
+            )
+            assert int(active or 0) == 1
+            old = db.scalar(
+                select(HiveFetchGrant).where(
+                    HiveFetchGrant.grant_sha256_hex == hashlib.sha256(g1.encode()).hexdigest()
+                )
+            )
+            assert old is not None and old.revoked_at is not None
+        finally:
+            db.close()
         fpath = _file_path(fid)
-        assert ca.get(fpath, headers=_grant_headers(rid, g1, extra={"Range": "bytes=0-15"})).status_code in (
+        assert ca.get(fpath, headers=_grant_headers(rid, g1, extra={"Range": "bytes=0-15"})).status_code == 401
+        assert ca.get(fpath, headers=_grant_headers(rid, g2, extra={"Range": "bytes=16-31"})).status_code in (
             200,
             206,
         )
+
+
+def test_mint_replaces_grant_inside_renew_window(transfer_pair):
+    from mediatracker.hive.fetch_grant import GRANT_RENEW_LEAD
+
+    app_a, app_b = transfer_pair
+    blob = b"renew2-" * 900
+    with TestClient(app_a) as ca, TestClient(app_b) as cb:
+        rid = _setup_pair(app_a, app_b, ca, cb)
+        _, fid, _ = _seed_file_on_a(app_a, rid, blob)
+        g1 = _mint(ca, app_b, rid, fid)
+        db = app_a.state.session_factory()
+        try:
+            row = db.scalar(select(HiveFetchGrant).limit(1))
+            assert row is not None
+            row.expires_at = NOW + GRANT_RENEW_LEAD - timedelta(minutes=1)
+            db.commit()
+        finally:
+            db.close()
+        g2 = _mint(ca, app_b, rid, fid)
+        fpath = _file_path(fid)
+        assert ca.get(fpath, headers=_grant_headers(rid, g1, extra={"Range": "bytes=0-15"})).status_code == 401
         assert ca.get(fpath, headers=_grant_headers(rid, g2, extra={"Range": "bytes=16-31"})).status_code in (
             200,
             206,
@@ -515,19 +614,22 @@ def test_mint_cap_concurrent_sqlite_respects_max(transfer_pair, monkeypatch):
     blob = b"conc-" * 800
     with TestClient(app_a) as ca, TestClient(app_b) as cb:
         rid = _setup_pair(app_a, app_b, ca, cb)
-        _, fid, _ = _seed_file_on_a(app_a, rid, blob)
+        file_ids: list[bytes] = []
+        for index in range(3):
+            _, fid, _ = _seed_file_variant(app_a, rid, blob, tmdb_id=88200 + index)
+            file_ids.append(bytes.fromhex(fid))
         requester = cb.get("/api/v1/hive/identity").json()["instance_id"]
-    file_id = bytes.fromhex(fid)
     outcomes: list[str] = []
 
-    def _attempt() -> None:
+    def _attempt(_n: int) -> None:
+        fid = file_ids[_n % len(file_ids)]
         db = app_a.state.session_factory()
         try:
             mint_fetch_grant(
                 db,
                 app_a.state.settings,
                 ruche_id=rid,
-                file_id=file_id,
+                file_id=fid,
                 requester_id=requester,
                 now=NOW,
             )
@@ -539,13 +641,50 @@ def test_mint_cap_concurrent_sqlite_respects_max(transfer_pair, monkeypatch):
             db.close()
 
     with ThreadPoolExecutor(max_workers=5) as pool:
-        list(pool.map(lambda _: _attempt(), range(5)))
+        list(pool.map(_attempt, range(5)))
 
-    assert outcomes.count("ok") == 3
-    assert outcomes.count("cap") == 2
+    assert outcomes.count("ok") == 5
     db = app_a.state.session_factory()
     try:
-        n = db.scalar(select(func.count()).select_from(HiveFetchGrant))
-        assert n == 3
+        active = db.scalar(
+            select(func.count()).select_from(HiveFetchGrant).where(HiveFetchGrant.revoked_at.is_(None))
+        )
+        assert int(active or 0) == 3
     finally:
         db.close()
+
+
+def test_sequential_episode_mints_revoke_after_full_serve(transfer_pair, monkeypatch):
+    """33 transferts terminés n'épuisent plus le plafond de 32 grants actifs."""
+    from mediatracker.hive.fetch_grant import MAX_ACTIVE_GRANTS_PER_REQUESTER
+
+    monkeypatch.setattr(
+        "mediatracker.hive.fetch_grant.MAX_ACTIVE_GRANTS_PER_REQUESTER",
+        MAX_ACTIVE_GRANTS_PER_REQUESTER,
+    )
+    app_a, app_b = transfer_pair
+    blob = b"ep-" * 512
+    with TestClient(app_a) as ca, TestClient(app_b) as cb:
+        rid = _setup_pair(app_a, app_b, ca, cb)
+        for index in range(33):
+            _, fid, _ = _seed_file_variant(app_a, rid, blob, tmdb_id=87000 + index)
+            grant = _mint(ca, app_b, rid, fid)
+            resp = ca.get(_file_path(fid), headers=_grant_headers(rid, grant))
+            assert resp.status_code == 200, resp.text
+            db = app_a.state.session_factory()
+            try:
+                row = db.scalar(
+                    select(HiveFetchGrant).where(
+                        HiveFetchGrant.grant_sha256_hex == hashlib.sha256(grant.encode()).hexdigest()
+                    )
+                )
+                assert row is not None and row.revoked_at is not None
+                active = db.scalar(
+                    select(func.count()).select_from(HiveFetchGrant).where(HiveFetchGrant.revoked_at.is_(None))
+                )
+                assert int(active or 0) == 0
+            finally:
+                db.close()
+        _, fid_extra, _ = _seed_file_variant(app_a, rid, blob, tmdb_id=87050)
+        path, headers = _sign_mint(app_b, rid, fid_extra)
+        assert ca.post(path, headers=headers).status_code == 200, "un 34e mint ne doit pas heurter le plafond"

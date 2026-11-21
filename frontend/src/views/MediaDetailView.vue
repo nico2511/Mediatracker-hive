@@ -7,9 +7,11 @@ import TmdbPosterImg from "../components/TmdbPosterImg.vue";
 import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
 import FicheMaintenance from "../components/FicheMaintenance.vue";
 import FicheStateActions from "../components/FicheStateActions.vue";
+import FicheHideMenuEntry from "../components/FicheHideMenuEntry.vue";
 import TrailerPlayerDialog from "../components/TrailerPlayerDialog.vue";
 import { trailerSubtitle } from "../trailerSubtitle";
 import FilmFileBlock from "../components/FilmFileBlock.vue";
+import FilmReleaseDatesBlock from "../components/FilmReleaseDatesBlock.vue";
 import ProfileReplacementBanner from "../components/ProfileReplacementBanner.vue";
 import LineMoreActions from "../components/LineMoreActions.vue";
 import SourceRank from "../components/SourceRank.vue";
@@ -37,17 +39,20 @@ import {
   catalogEpisodeCount,
   missingCatalogLabel,
   missingCatalogSlots,
+  onDiskTone,
   presentOnDiskCount,
   readyWithoutFileCount,
   readyWithoutFileLabel,
   seasonProgressDetail,
   watchedCount,
+  watchedTone,
 } from "../fiche/seasonCounts";
 import { useProgressStream, type ProgressPayload } from "../composables/useProgressStream";
 import { fileStatusIcon, fileStatusLabel } from "../fileStatus";
 import { formatParis } from "../time";
 import { useHiveEnabled } from "../composables/useHive";
 import { tmdbBackdropSrc, tmdbPosterSrc } from "../tmdbImages";
+import { tmdbRatingLabel, tmdbVoteCountPhrase } from "../tmdbRatingLabel";
 import HiveContextMenuItems from "../components/HiveContextMenuItems.vue";
 import HiveMediaShareRow from "../components/HiveMediaShareRow.vue";
 import HiveMediaRequestCard from "../components/hive/HiveMediaRequestCard.vue";
@@ -108,9 +113,15 @@ interface MediaRow {
   on_disk?: boolean;
   film_not_yet_available?: boolean;
   film_status_line?: string | null;
+  film_availability_source?: string | null;
+  next_air_date?: string | null;
+  tmdb_release_by_region?: Record<string, { theatrical?: string | null; digital?: string | null; physical?: string | null }> | null;
   tmdb_trailer_youtube_key?: string | null;
   tmdb_trailer_kind?: string | null;
   tmdb_trailer_language?: string | null;
+  tmdb_vote_average?: number | null;
+  tmdb_vote_count?: number | null;
+  hidden_at?: string | null;
 }
 
 interface Episode {
@@ -159,6 +170,7 @@ const reglagesOpen = ref(route.query.reglages === "ouverts");
 const suiviOpen = ref(route.query.suivi === "ouvert");
 const openSeasonFromQuery = ref(route.query.saison === "ouverte" || route.query.saison === "1");
 const ficheDelete = ref(false);
+const hideJustDone = ref(false);
 const media = ref<MediaRow | null>(null);
 const heroTrailerOpen = ref(false);
 const heroTrailerSubtitle = computed(() =>
@@ -206,6 +218,7 @@ interface QualityProfileOption extends QualityProfileLike {
 const qualityProfiles = ref<QualityProfileOption[]>([]);
 const globalFallbackOrderIds = ref<number[]>([]);
 const globalAllowFallback = ref(false);
+const catalogRegion = ref("FR");
 const prefsContextStatus = ref<"loading" | "ready" | "error">("loading");
 const prefsContextError = ref("");
 const keepMedia = ref(false);
@@ -424,6 +437,10 @@ async function loadPrefsContext() {
     );
     const allowRow = settingsBody.settings.find((row) => row.key === GLOBAL_ALLOW_FALLBACK_KEY);
     globalAllowFallback.value = allowRow?.value === true;
+    const regionRow = settingsBody.settings.find((row) => row.key === "tmdb_region");
+    if (regionRow && typeof regionRow.value === "string" && regionRow.value.trim()) {
+      catalogRegion.value = regionRow.value.trim().toUpperCase();
+    }
     qualityProfiles.value = profilesBody.profiles;
     prefsContextStatus.value = "ready";
   } catch (err) {
@@ -980,6 +997,52 @@ async function setPause(paused: boolean) {
   await reload();
 }
 
+async function hideFiche() {
+  if (!media.value || media.value.hidden_at) {
+    return;
+  }
+  const extra = media.value.followed
+    ? " Le suivi sera aussi arrêté ; fichiers et historique inchangés."
+    : "";
+  if (
+    !window.confirm(
+      `Masquer « ${media.value.title} » ?${extra} La fiche disparaît de Médias, de l'Accueil et des suggestions.`,
+    )
+  ) {
+    return;
+  }
+  error.value = "";
+  try {
+    await api(`/api/v1/media/${media.value.id}/hide`, { method: "POST" });
+    hideJustDone.value = true;
+    await reload();
+  } catch (err) {
+    error.value = userFacingApiError(err, "Masquage impossible.");
+  }
+}
+
+async function unhideFiche() {
+  if (!media.value?.hidden_at) {
+    return;
+  }
+  error.value = "";
+  try {
+    await api(`/api/v1/media/${media.value.id}/unhide`, { method: "POST" });
+    hideJustDone.value = false;
+    message.value = "Fiche réaffichée.";
+    await reload();
+  } catch (err) {
+    error.value = userFacingApiError(err, "Réaffichage impossible.");
+  }
+}
+
+async function undoHideFiche() {
+  await unhideFiche();
+  if (!error.value) {
+    message.value = "Masquage annulé.";
+  }
+}
+
 async function unfollow() {
   if (!media.value) {
     return;
@@ -1332,6 +1395,9 @@ const typeYearLine = computed(() => {
   return row.year ? `${kind} · ${row.year}` : kind;
 });
 
+const tmdbHeroRatingScore = computed(() => tmdbRatingLabel(media.value?.tmdb_vote_average ?? null));
+const tmdbHeroVotePhrase = computed(() => tmdbVoteCountPhrase(media.value?.tmdb_vote_count ?? null));
+
 const filmFileAbsent = computed(
   () => Boolean(media.value?.file_absent) || Boolean(filmItem.value?.file_absent),
 );
@@ -1647,6 +1713,11 @@ function episodeStatusIconName(episodeRow: Episode): string {
             <template v-if="seasonCount"> · {{ seasonCount }} saison{{ seasonCount > 1 ? "s" : "" }}</template>
           </p>
           <p v-else class="meta hint fiche-hero-meta">{{ typeYearLine }}</p>
+          <p v-if="tmdbHeroRatingScore" class="meta hint fiche-hero-tmdb-rating">
+            <span class="tmdb-rating-star" aria-hidden="true">★</span>
+            TMDB {{ tmdbHeroRatingScore }}/10
+            <template v-if="tmdbHeroVotePhrase"> · {{ tmdbHeroVotePhrase }}</template>
+          </p>
           <p v-if="!media.followed && media.tmdb_url" class="fiche-hero-links hint">
             <a class="fiche-ext-link" :href="media.tmdb_url" target="_blank" rel="noopener noreferrer">TMDB</a>
           </p>
@@ -1660,7 +1731,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             </span>
             <span
               v-if="hiveEnabled && media.type === 'film' && hiveShare && hiveShare.shared && !hiveShare.exclude_all && filmFilePresent"
-              class="pill honey hive-hero-share-pill"
+              class="pill info hive-hero-share-pill"
             >
               Partage actif
             </span>
@@ -1685,6 +1756,13 @@ function episodeStatusIconName(episodeRow: Episode): string {
       </div>
       <div class="fiche-hero-stream">
         <p v-if="media.type !== 'series' && media.overview" class="overview fiche-overview hint">{{ media.overview }}</p>
+        <FilmReleaseDatesBlock
+          v-if="media.type === 'film' && media.tmdb_release_by_region"
+          :release-by-region="media.tmdb_release_by_region"
+          :catalog-region="catalogRegion"
+          :search-from="media.next_air_date"
+          :availability-source="media.film_availability_source"
+        />
         <template v-if="!media.followed">
           <p class="fiche-primary-row fiche-actions">
             <button
@@ -1718,6 +1796,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             :tmdb-trailer-kind="media.tmdb_trailer_kind"
             :tmdb-trailer-language="media.tmdb_trailer_language"
             :followed="media.followed"
+            :hidden="Boolean(media.hidden_at)"
             :on-hold="media.on_hold"
             :auto-download="media.auto_download"
             :poll="media.poll"
@@ -1738,6 +1817,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             @auto="setAuto"
             @restore="restoreFilm"
             @redownload="redownloadFilm"
+            @hide="hideFiche"
             @unfollow="unfollow"
             @follow-again="followAgain"
             @watch="markWatched"
@@ -1776,6 +1856,10 @@ function episodeStatusIconName(episodeRow: Episode): string {
           <button type="button" class="action-menu-item" role="menuitem" @click="reglagesOpen = true">
             Changer l'identifiant TMDB
           </button>
+          <template v-if="!media.hidden_at">
+            <hr class="action-menu-separator" role="none" />
+            <FicheHideMenuEntry @hide="hideFiche" />
+          </template>
           <hr class="action-menu-separator" role="none" />
           <button
             v-if="ficheHasFiles"
@@ -1835,6 +1919,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
           :tmdb-trailer-kind="media.tmdb_trailer_kind"
           :tmdb-trailer-language="media.tmdb_trailer_language"
           :followed="media.followed"
+          :hidden="Boolean(media.hidden_at)"
           :on-hold="media.on_hold"
           :auto-download="media.auto_download"
           :poll="media.poll"
@@ -1884,6 +1969,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             section="etat"
             :media-type="media.type"
             :followed="media.followed"
+            :hidden="Boolean(media.hidden_at)"
             :on-hold="media.on_hold"
             :auto-download="media.auto_download"
             :poll="media.poll"
@@ -1937,6 +2023,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             :tmdb-trailer-kind="media.tmdb_trailer_kind"
             :tmdb-trailer-language="media.tmdb_trailer_language"
             :followed="media.followed"
+            :hidden="Boolean(media.hidden_at)"
             :on-hold="media.on_hold"
             :auto-download="media.auto_download"
             :poll="media.poll"
@@ -1957,6 +2044,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
             @auto="setAuto"
             @restore="restoreFilm"
             @redownload="redownloadFilm"
+            @hide="hideFiche"
             @unfollow="unfollow"
             @follow-again="followAgain"
             @watch="markWatched"
@@ -2043,6 +2131,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
           section="etat"
           :media-type="media.type"
           :followed="media.followed"
+          :hidden="Boolean(media.hidden_at)"
           :on-hold="media.on_hold"
           :auto-download="media.auto_download"
           :poll="media.poll"
@@ -2094,6 +2183,20 @@ function episodeStatusIconName(episodeRow: Episode): string {
       @refresh="hiveSharePolling.manualRefresh"
       @changed="onHiveShareMenuChanged"
     />
+
+    <p
+      v-if="hideJustDone && media.hidden_at"
+      class="profile-repl-banner"
+      role="status"
+      data-testid="fiche-hidden-undo-banner"
+    >
+      Fiche masquée.
+      <button type="button" class="linkish" @click="undoHideFiche">Annuler</button>
+    </p>
+    <p v-else-if="media.hidden_at" class="profile-repl-banner" role="status" data-testid="fiche-hidden-banner">
+      Fiche masquée : absente de Médias, de l'Accueil et des suggestions. Rien n'est supprimé.
+      <button type="button" class="linkish" @click="unhideFiche">Réafficher</button>
+    </p>
 
     <p v-if="error" class="error" data-force-status>{{ error }}</p>
     <p v-else-if="message" class="hint" data-force-status>{{ message }}</p>
@@ -2167,8 +2270,10 @@ function episodeStatusIconName(episodeRow: Episode): string {
           <div class="season-title">
             <strong>{{ seasonTitle(group) }}</strong>
             <div class="counts">
-              <span class="pill muted">{{ watchedCount(group) }} {{ watchedCount(group) === 1 ? "vu" : "vus" }}</span>
-              <span class="pill muted"
+              <span class="pill" :class="watchedTone(group)"
+                >{{ watchedCount(group) }} {{ watchedCount(group) === 1 ? "vu" : "vus" }}</span
+              >
+              <span class="pill" :class="onDiskTone(group)"
                 >{{ presentOnDiskCount(group) }}
                 {{ presentOnDiskCount(group) === 1 ? "fichier sur disque" : "fichiers sur disque" }}</span
               >
@@ -2178,10 +2283,10 @@ function episodeStatusIconName(episodeRow: Episode): string {
               >
               <span v-if="missingCatalogSlots(group) > 0" class="pill warn">{{ missingCatalogLabel(group) }}</span>
               <span v-if="readyWithoutFileCount(group) > 0" class="pill warn">{{ readyWithoutFileLabel(group) }}</span>
-              <span v-if="absentWithoutSourceCount(group) > 0" class="pill muted">{{
+              <span v-if="absentWithoutSourceCount(group) > 0" class="pill danger">{{
                 absentWithoutSourceLabel(group)
               }}</span>
-              <span v-if="hiveEnabled && seasonShareLabel(group)" class="pill hive-season-share">{{
+              <span v-if="hiveEnabled && seasonShareLabel(group)" class="pill info hive-season-share">{{
                 seasonShareLabel(group)
               }}</span>
             </div>
@@ -2844,13 +2949,14 @@ function episodeStatusIconName(episodeRow: Episode): string {
 .hive-season-share {
   font-size: 0.74rem;
   font-weight: 700;
-  color: var(--honey, #d9b46a);
+  color: var(--info);
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   padding: 0.12rem 0.45rem;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  background: color-mix(in srgb, currentColor 14%, transparent);
   line-height: 1.2;
 }
 .hive-ep-chip.tone-muted {
@@ -2859,11 +2965,15 @@ function episodeStatusIconName(episodeRow: Episode): string {
 .hive-ep-chip.tone-danger {
   color: var(--danger);
 }
-.hive-ep-chip.tone-info {
-  color: var(--accent, #6eb5ff);
+.hive-ep-chip.tone-info,
+.hive-ep-chip.tone-honey {
+  color: var(--info);
 }
 .hive-ep-chip.tone-ok {
-  color: var(--ok, #79c9a4);
+  color: var(--ok);
+}
+.hive-ep-chip.tone-warn {
+  color: var(--warn);
 }
 .hive-ep-chip .chip-label-long {
   display: none;
@@ -2885,10 +2995,6 @@ function episodeStatusIconName(episodeRow: Episode): string {
 }
 .force-dl-long {
   display: none;
-}
-.pill.honey.hive-hero-share-pill {
-  color: var(--honey, #d9b46a);
-  border-color: color-mix(in srgb, var(--honey, #d9b46a) 45%, transparent);
 }
 @media (min-width: 721px) {
   .hive-ep-chip .chip-label-short {

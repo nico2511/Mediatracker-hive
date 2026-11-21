@@ -23,6 +23,8 @@ NON_WIRED_PROFILE_ATTEMPT_CALL_SITES: tuple[str, ...] = (
     "mediatracker.core.pipeline.jobs._choose_link (repli pref_* si résolution profil impossible)",
 )
 
+MANUAL_LINK_ACCEPTANCE_RANK = -1
+
 
 @dataclass(frozen=True)
 class AttemptSelectionCriteria:
@@ -32,6 +34,25 @@ class AttemptSelectionCriteria:
     allow_fallback: bool
     quality_fallback: tuple[str, ...]
     language_fallback: tuple[str, ...]
+
+
+def manual_provider_link(link: Link) -> bool:
+    """True when the link row belongs to the built-in manual paste source."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from mediatracker.db.models import Provider
+
+    provider = getattr(link, "provider", None)
+    if provider is not None and getattr(provider, "type", None) == "manual":
+        return True
+    state = sa_inspect(link, raiseerr=False)
+    session = state.session if state is not None else None
+    provider_id = getattr(link, "provider_id", None)
+    if session is not None and provider_id is not None:
+        row = session.get(Provider, provider_id)
+        if row is not None and row.type == "manual":
+            return True
+    return False
 
 
 def attempt_selection_criteria(profile: Profile) -> AttemptSelectionCriteria:
@@ -119,12 +140,13 @@ def reingest_select_pages(
 
 def rank_link_for_profile_attempt(link: Link, *, profile: Profile) -> int | None:
     from mediatracker.core.quality_profile import (
-        ReleaseCandidate,
         acceptance_rank,
         detect_language,
         normalize_language,
-        normalize_resolution,
     )
+
+    if manual_provider_link(link):
+        return MANUAL_LINK_ACCEPTANCE_RANK
 
     if not link.quality:
         return None
@@ -132,28 +154,25 @@ def rank_link_for_profile_attempt(link: Link, *, profile: Profile) -> int | None
     if not language:
         return None
     enforce_size = True
-    if link.size is None or link.size <= 0:
-        from sqlalchemy import inspect as sa_inspect
-
-        from mediatracker.db.models import Provider
-
-        state = sa_inspect(link, raiseerr=False)
-        session = state.session if state is not None else None
-        provider_id = getattr(link, "provider_id", None)
-        if session is not None and provider_id is not None:
-            row = session.get(Provider, provider_id)
-            if row is not None and row.type == "manual":
-                enforce_size = False
-    return acceptance_rank(
-        ReleaseCandidate(
-            language=language,
-            resolution=normalize_resolution(link.quality),
-            size=link.size,
-            text=link.filename or "",
-        ),
-        profile,
-        enforce_size=enforce_size,
+    if (link.size is None or link.size <= 0) and manual_provider_link(link):
+        enforce_size = False
+    from mediatracker.core.quality_profile import (
+        provisional_hd_acceptance_rank,
+        release_candidate_from_inspection,
+        wawacity_page_hd_label_link,
     )
+
+    release = release_candidate_from_inspection(
+        language=language,
+        quality=link.quality,
+        filename=link.filename or "",
+        size=link.size,
+    )
+    if wawacity_page_hd_label_link(link):
+        provisional = provisional_hd_acceptance_rank(release, profile)
+        if provisional is not None:
+            return provisional
+    return acceptance_rank(release, profile, enforce_size=enforce_size)
 
 
 _HOSTER_ATTEMPT_KINDS = frozenset({"magnet", "torrent"})
@@ -172,6 +191,8 @@ def link_eligible_for_hoster_attempt(
         return False
     if link.kind in _HOSTER_ATTEMPT_KINDS:
         return False
+    if manual_provider_link(link):
+        return True
     from mediatracker.core.pipeline.jobs import _hoster_ok
 
     return _hoster_ok(link, preference)

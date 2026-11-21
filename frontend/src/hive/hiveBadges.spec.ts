@@ -32,4 +32,9 @@ describe("hiveBadgesForState", () => {
     ).map((b) => b.label);
     expect(labels).not.toContain("Non partageable : à télécharger");
   });
+
+  it("badge Partagé en bleu info", () => {
+    const badge = hiveBadgesForState(state({ shared: true })).find((b) => b.key === "shared");
+    expect(badge?.tone).toBe("info");
+  });
 });

@@ -1,7 +1,7 @@
 """Queue a new download when the episode file is absent from disk.
 
 Uses stored hoster links when they are still alive. Otherwise schedules a
-fresh Wawacity pass (REDISCOVER), subject to the per-fiche remote search cooldown.
+fresh pass on active sources (REDISCOVER), subject to the per-fiche remote search cooldown.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from mediatracker.config import Settings
 from mediatracker.core.file_status import FileStatusIndex
 from mediatracker.core.force_download import _revive_links
 from mediatracker.core.forget import is_voluntarily_deleted
-from mediatracker.core.pipeline.constants import REDISCOVER_RESERVED
+from mediatracker.core.pipeline.constants import REDISCOVER_MESSAGE, REDISCOVER_RESERVED
 from mediatracker.core.pipeline.download_guard import active_download_for_item
 from mediatracker.core.pipeline.jobs import _choose_link
 from mediatracker.core.precheck import DUPLICATE_IGNORED, NO_LINK_RETRY_LATER, REDOWNLOAD_STARTED
@@ -27,9 +27,6 @@ from mediatracker.db.models import Download, Media, MediaItem
 from mediatracker.events import record_event
 
 RedownloadStatus = Literal["started", "duplicate_ignored", "no_link", "busy", "not_absent"]
-
-_REDISCOVER_MESSAGE = "Nouvelle recherche Wawacity planifiée."
-
 
 @dataclass(frozen=True)
 class RedownloadResult:
@@ -86,7 +83,7 @@ def redownload_item(
         forced=True,
         created_at=now,
         error_code=REDISCOVER_RESERVED,
-        error=_REDISCOVER_MESSAGE,
+        error=REDISCOVER_MESSAGE,
     )
     db.add(row)
     db.flush()

@@ -54,6 +54,8 @@ EVENT_TYPES = frozenset(
         "download.source_switched",
         "download.profile_repli",
         "download.source_attempt",
+        "download.manual_link",
+        "download.manual_source_page",
         "download.source_error",
         LIBRARY_IMPORTED,
         "library.scanned",

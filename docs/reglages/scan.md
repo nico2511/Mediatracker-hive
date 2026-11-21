@@ -10,6 +10,7 @@ URL : `/reglages/scan`
 | `scan_ongoing_only` | true | bool | Ne repoller que les séries encore en cours |
 | `scan_air_window_days` | 3 | 0–30 | Fenêtre autour de la date de diffusion (séries) |
 | `film_theatrical_fallback_months` | 4 | 0–24 | Mois après sortie salle si TMDB sans date numérique |
+| `film_trigger_us_digital` | false | bool | Prendre aussi la première sortie numérique US pour lancer la recherche (min. avec la région du catalogue TMDB) |
 
 L’ordre des sources se règle dans [Sources](sources.md).
 

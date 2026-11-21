@@ -177,14 +177,6 @@ def prepare_file_response(
         "Accept-Ranges": "bytes",
     }
     status = 200 if br.start == 0 and br.end == binding.size - 1 else 206
-    if record_transfer_bytes:
-        record_inbound_bytes(
-            db,
-            ruche_id=binding.ruche_id,
-            requester_id=requester_id,
-            nbytes=br.length,
-            now=now,
-        )
     chunk_digests: list[str] = []
     if require_chunk_digests:
         chunk_digests = load_chunk_digests_for_media(db, binding.media_item_id)
@@ -226,6 +218,34 @@ def iter_file_byte_range(
 
 def content_range_header(byte_range: ByteRange, total: int) -> str:
     return f"bytes {byte_range.start}-{byte_range.end}/{total}"
+
+
+def persist_inbound_quota_bytes(
+    app,
+    *,
+    ruche_id: bytes,
+    requester_id: str,
+    nbytes: int,
+    now: datetime,
+) -> None:
+    """Compteur quota après envoi réel (requêtes Range et reprises)."""
+    if nbytes <= 0:
+        return
+    session = app.state.session_factory()
+    try:
+        record_inbound_bytes(
+            session,
+            ruche_id=ruche_id,
+            requester_id=requester_id,
+            nbytes=nbytes,
+            now=now,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def exposed_chunk_size() -> int:

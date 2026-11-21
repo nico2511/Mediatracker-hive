@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { RouterLink } from "vue-router";
 
-import { api, userFacingApiError } from "../../api";
+import { useHiveCatalogueRequestRow } from "../../composables/useHiveCatalogueRequestRow";
 import { formatBytes } from "../../diskFormat";
 import { hiveVersionProfileCompatible, hiveVersionRecommended } from "../../hive/hiveVersionProfile";
 
@@ -31,9 +32,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{ requested: []; pick: [versionKey: string] }>();
 
+const { stateFor, errorFor, postRequest } = useHiveCatalogueRequestRow();
 const localBusy = ref(false);
 const confirmKey = ref<string | null>(null);
-const error = ref("");
 
 function compatible(ver: HiveCatalogueVersionRow): boolean {
   return hiveVersionProfileCompatible(ver);
@@ -46,6 +47,10 @@ function versionLabel(ver: HiveCatalogueVersionRow): string {
   if (q && lang) {
     return `${q} · ${lang}`;
   }
+  return ver.version_key;
+}
+
+function rowKey(ver: HiveCatalogueVersionRow): string {
   return ver.version_key;
 }
 
@@ -63,7 +68,6 @@ async function submit(ver: HiveCatalogueVersionRow) {
     return;
   }
   localBusy.value = true;
-  error.value = "";
   try {
     const body: { version_key: string; season?: number; episode?: number } = {
       version_key: ver.version_key,
@@ -74,19 +78,24 @@ async function submit(ver: HiveCatalogueVersionRow) {
     if (props.episode != null) {
       body.episode = props.episode;
     }
-    await api(`/api/v1/hive/catalogue/${props.workKey}/request`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    emit("requested");
-  } catch (err) {
-    error.value = userFacingApiError(err, "Transfert indisponible.");
+    const ok = await postRequest(rowKey(ver), props.workKey, body);
+    if (ok) {
+      emit("requested");
+    }
   } finally {
     localBusy.value = false;
   }
 }
 
 const disabled = () => Boolean(props.busy || localBusy.value);
+
+function buttonLabel(ver: HiveCatalogueVersionRow): string {
+  const state = stateFor(rowKey(ver));
+  if (state === "sending") {
+    return "Envoi…";
+  }
+  return "Télécharger";
+}
 </script>
 
 <template>
@@ -111,26 +120,32 @@ const disabled = () => Boolean(props.busy || localBusy.value);
       <p v-if="confirmKey === ver.version_key" class="hint hive-version-confirm" data-testid="hive-version-confirm">
         Télécharger quand même ?
       </p>
-      <div class="hive-version-actions row wrap">
+      <template v-if="stateFor(rowKey(ver)) === 'requested'">
+        <p class="ok hive-version-requested" data-testid="hive-version-requested">
+          <RouterLink to="/telechargements">Demandé · voir dans Téléchargements</RouterLink>
+        </p>
+        <p class="hint hive-version-sent" data-testid="hive-version-sent">Demande envoyée.</p>
+      </template>
+      <div v-else class="hive-version-actions row wrap">
         <button
           v-if="compatible(ver)"
           type="button"
           class="btn btn-sm primary"
-          :disabled="disabled() || !ver.disponible"
+          :disabled="disabled() || !ver.disponible || stateFor(rowKey(ver)) === 'sending'"
           :data-testid="`hive-version-download-${ver.version_key}`"
           @click="submit(ver)"
         >
-          Télécharger
+          {{ buttonLabel(ver) }}
         </button>
         <template v-else>
           <button
             v-if="confirmKey !== ver.version_key"
             type="button"
             class="btn btn-sm"
-            :disabled="disabled() || !ver.disponible"
+            :disabled="disabled() || !ver.disponible || stateFor(rowKey(ver)) === 'sending'"
             @click="submit(ver)"
           >
-            Télécharger
+            {{ buttonLabel(ver) }}
           </button>
           <button
             v-else
@@ -153,9 +168,16 @@ const disabled = () => Boolean(props.busy || localBusy.value);
           </button>
         </template>
       </div>
+      <p
+        v-if="errorFor(rowKey(ver))"
+        class="error hive-version-row-error"
+        role="alert"
+        :data-testid="`hive-version-error-${ver.version_key}`"
+      >
+        {{ errorFor(rowKey(ver)) }}
+      </p>
     </li>
   </ul>
-  <p v-if="error" class="error" role="alert">{{ error }}</p>
 </template>
 
 <style scoped>
@@ -179,6 +201,13 @@ const disabled = () => Boolean(props.busy || localBusy.value);
 }
 .hive-version-actions {
   gap: 0.5rem;
+}
+.hive-version-requested a {
+  font-weight: 600;
+}
+.hive-version-row-error {
+  margin: 0;
+  font-size: 0.9rem;
 }
 .pill.warn {
   background: color-mix(in srgb, var(--warn, #c9a227) 22%, transparent);

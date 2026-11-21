@@ -7,7 +7,7 @@ import StatusIcon from "../components/StatusIcon.vue";
 import { api, userFacingApiError } from "../api";
 import { mediaKind, tmdbPage } from "../labels";
 import type { QuickTarget } from "../quick";
-import { tmdbTrialRatingLabel } from "../tmdbTrialRating";
+import { tmdbRatingLabel } from "../tmdbRatingLabel";
 
 interface TmdbCard {
   tmdb_id: number;
@@ -103,7 +103,7 @@ function metaHint(card: TmdbCard): string {
     parts.push(String(card.year));
   }
   parts.push(mediaKind(card.media_type));
-  const rating = tmdbTrialRatingLabel(card.vote_average ?? null);
+  const rating = tmdbRatingLabel(card.vote_average ?? null);
   if (rating) {
     parts.push(`TMDB ${rating}/10`);
   }

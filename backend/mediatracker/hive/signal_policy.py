@@ -221,6 +221,21 @@ def maybe_catchup_cherche_for_followed(
         if publish_on_follow:
             maybe_publish_cherche_on_follow(db, settings, media=media, item=item, now=moment)
             touched = True
+    from mediatracker.hive.signal_requests import _media_item_for_cherche_cle, iter_local_active_cherche_cle
+
+    for cle in iter_local_active_cherche_cle(db, settings):
+        resolved = _media_item_for_cherche_cle(db, cle)
+        if resolved is None:
+            continue
+        media, item = resolved
+        if item.id is None:
+            continue
+        if not (item_file_present(db, item) or item.watched):
+            continue
+        retract_cherche_for_item(db, settings, media=media, item=item, now=moment)
+        clear_cherche_miss_prompt(db, item.id)
+        clear_cherche_retract(db, item.id)
+        touched = True
     _touch_catchup_at(db, moment)
     return touched
 

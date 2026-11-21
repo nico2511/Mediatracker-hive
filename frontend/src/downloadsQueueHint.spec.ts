@@ -26,4 +26,20 @@ describe("downloadQueueHint", () => {
     const hint = downloadQueueHint({ id: 1, state: "pending" }, [1], false);
     expect(hint).toBe("Position 1 · En attente de débridage");
   });
+
+  it("affiche le message de nouvelle recherche planifiée avec heure de reprise", () => {
+    const hint = downloadQueueHint(
+      {
+        id: 1,
+        state: "pending",
+        error: "Nouvelle recherche planifiée.",
+        error_code: "REDISCOVER",
+        next_retry_at: "2026-11-12T13:45:00.000Z",
+      },
+      [1],
+      false,
+    );
+    expect(hint).toBe("Position 1 · Nouvelle recherche planifiée. · prochain essai 14:45");
+    expect(hint).not.toContain("Wawacity");
+  });
 });

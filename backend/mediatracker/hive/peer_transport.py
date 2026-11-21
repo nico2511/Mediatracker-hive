@@ -44,13 +44,17 @@ def peer_request(
     url_path: str,
     headers: dict[str, str],
     body: bytes,
+    timeout: float | None = None,
 ) -> httpx.Response:
     resolved = _resolve_test_app(base_url)
     if resolved is not None:
         from starlette.testclient import TestClient
 
         client = TestClient(resolved, base_url=base_url.rstrip("/"))
-        raw = client.request(method.upper(), url_path, content=body, headers=headers)
+        kwargs: dict[str, object] = {}
+        if timeout is not None:
+            kwargs["timeout"] = httpx.Timeout(timeout)
+        raw = client.request(method.upper(), url_path, content=body, headers=headers, **kwargs)
         return httpx.Response(
             status_code=raw.status_code,
             headers=dict(raw.headers),
@@ -63,4 +67,7 @@ def peer_request(
         follow_redirects=True,
         event_hooks=httpx_request_event_hooks(),
     ) as client:
-        return client.request(method.upper(), url_path, content=body, headers=headers)
+        kwargs: dict[str, object] = {}
+        if timeout is not None:
+            kwargs["timeout"] = httpx.Timeout(timeout)
+        return client.request(method.upper(), url_path, content=body, headers=headers, **kwargs)

@@ -16,7 +16,7 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 
 | Écran | Rôle |
 | --- | --- |
-| **Accueil** (`/`) | Tableau de bord personnel et rangées de nouveautés TMDB (France, français) |
+| **Accueil** (`/`) | Tableau de bord personnel, rangées de nouveautés TMDB (France, français) et bloc **À trier** en bas de page |
 | **Derniers films** (`/nouveautes/films`) | Parcourir les films (cinéma, streaming, supports physiques) |
 | **Dernières séries** (`/nouveautes/series`) | Séries et diffusions à l’antenne |
 | **Suivre** | Rechercher un titre et l’ajouter à votre liste de suivi |
@@ -24,6 +24,18 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 | Fiche média (`/medias/<id>`) | Métadonnées, suivi, saisons et épisodes — voir [medias.md](medias.md) |
 
 Les anciennes URL d’essai `/tmdb`, `/tmdb/films` et `/tmdb/series` redirigent vers les écrans ci-dessus.
+
+Lors de l’enrichissement d’une fiche, MediaTracker enregistre la **note moyenne TMDB** et le **nombre de votes** (`tmdb_vote_average`, `tmdb_vote_count`). L’API n’expose pas de note lorsque le compteur de votes vaut 0 ou la note vaut 0 (sans modifier la base). À l’écran : **★ TMDB X/10 · N votes** sur la fiche, et **★ X** sous l’année sur les cartes **Médias** / accueil (cartes liées à une fiche uniquement).
+
+## À trier (accueil)
+
+En bas de l’**Accueil**, le bloc **À trier** regroupe les signalements utiles sans rien décider à votre place :
+
+- **Renouvelées, non suivies** — une saison annoncée par TMDB sur une fiche que vous ne suivez plus (saisons synchronisées lors de l’enrichissement hebdomadaire TMDB des fiches non suivies, sans nouvel appel dédié) ;
+- **Saisons jamais regardées** — fichiers présents sur le disque pour une saison, aucun épisode marqué vu ;
+- **Arrêter le suivi ?** — série suivie sans vision depuis six mois et au moins trois épisodes en attente.
+
+Chaque ligne propose une action principale et **Ignorer** (ou **Garder** pour l’arrêt de suivi). Les ignorés sont mémorisés par fiche et par motif ; pour une saison renouvelée, l’ignoré porte le numéro de saison (le signalement peut revenir pour la suivante). **Aucun arrêt de suivi** n’est appliqué sans votre clic ; seules les séries terminées et complètes s’arrêtent encore automatiquement, comme ailleurs dans l’application.
 
 ## Fiche non suivie
 

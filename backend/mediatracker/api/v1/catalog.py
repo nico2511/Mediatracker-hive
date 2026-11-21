@@ -219,6 +219,9 @@ def list_catalog(
     db.commit()
     by_tmdb, by_title = _followed_index(db)
     fiche_tmdb, fiche_title = _fiche_index(db)
+    from mediatracker.core.media_hide import hidden_media_ids
+
+    hidden_ids = hidden_media_ids(db)
     files = _library_files(db)
     from mediatracker.core.catalog_source_visibility import (
         NOTICE_NO_LATEST_SOURCES,
@@ -227,16 +230,21 @@ def list_catalog(
 
     last, nxt, error = catalog_clock(db)
     usable = any_latest_catalog_usable(db, settings)
-    return CatalogPage(
-        items=[
+    catalog_items = []
+    for row in page.rows:
+        media_id = _fiche_id(row, fiche_tmdb, fiche_title)
+        if media_id is not None and media_id in hidden_ids:
+            continue
+        catalog_items.append(
             _entry(
                 row,
                 followed=_is_followed(row, by_tmdb, by_title),
                 in_library=_in_library(row, files),
-                media_id=_fiche_id(row, fiche_tmdb, fiche_title),
+                media_id=media_id,
             )
-            for row in page.rows
-        ],
+        )
+    return CatalogPage(
+        items=catalog_items,
         total=page.total,
         last_refresh_at=last,
         next_refresh_at=nxt,

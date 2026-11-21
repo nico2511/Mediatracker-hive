@@ -525,6 +525,7 @@ URL : `/reglages/scan`
 | `scan_ongoing_only` | true | bool | Ne repoller que les séries encore en cours |
 | `scan_air_window_days` | 3 | 0–30 | Fenêtre autour de la date de diffusion (séries) |
 | `film_theatrical_fallback_months` | 4 | 0–24 | Mois après sortie salle si TMDB sans date numérique |
+| `film_trigger_us_digital` | false | bool | Prendre aussi la première sortie numérique US pour lancer la recherche (min. avec la région du catalogue TMDB) |
 
 L’ordre des sources se règle dans [Sources](#docs-reglages-sources).
 
@@ -965,7 +966,7 @@ Sur mobile, le panneau **Filtres** regroupe ces réglages ; des **pastilles** ra
 
 ### Cartes et pastilles
 
-Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / Série), l’année (sauf en dense), puis :
+Chaque carte affiche l’affiche TMDB (cache local), le titre, le type (Film / Série), l’année (sauf en dense), puis une ligne **★ note TMDB** (une décimale, rien si la fiche n’a pas de note), puis :
 
 **Pastille d’état** (priorité dans cet ordre) :
 
@@ -1018,6 +1019,7 @@ La fiche charge `GET /api/v1/media/<id>` et, pour une série, `GET /api/v1/media
 #### En-tête commun
 
 - Affiche, titre, année, synopsis ;
+- ligne **★ TMDB X/10 · N votes** (ou « 1 vote ») lorsque la fiche possède une note enrichie — rien si zéro vote ou note nulle en base ;
 - pour une série : statut TMDB, nombre de saisons, barre **X vu sur Y**, prochain épisode ;
 - pastilles **Suivi**, état fichier ou **Pas encore disponible** (film) ;
 - liens **TMDB** / **Jellyfin**, **Bande-annonce** (si TMDB fournit une clé YouTube).
@@ -1033,6 +1035,10 @@ Le bloc **Suivi** / **Actions** (composant partagé film et série) regroupe :
 - section **État** repliable : progression, fichier, dernière et prochaine vérification, message du moteur de recherche.
 
 Fiche **série** : mise en page dédiée (carte Suivi mobile, barre d’actions bureau).
+
+#### Fiche film — dates TMDB par région
+
+Sur une fiche film, sous le résumé, MediaTracker peut afficher les dates **en salle**, **numérique** et **physique** pour la **région du catalogue TMDB** (Réglages → Catalogue TMDB) et pour les **États-Unis**, lorsque TMDB les fournit. La date qui déclenche la recherche des sources est mise en évidence, avec une courte phrase du type *Recherche des liens à partir du …*. L’option **Déclencher dès la première sortie numérique US** (Réglages → Réglages de scan) compare uniquement les sorties numériques région / US et retient la plus précoce.
 
 #### Fiche film — fichier
 
@@ -1274,7 +1280,7 @@ L’entrée de menu **Hive** n’apparaît que lorsque Hive est activé.
 
 - **Créer une ruche** : depuis Réglages Hive ou la navigation Hive.
 - **Inviter** : lien d’invitation généré par l’application ; page **Rejoindre** (`/hive/rejoindre`).
-- **Membres** (`/hive/ruches/<id>/membres`) : validation des demandes (créateur de la ruche), quotas, exclusion. Chaque membre affiche une pastille de version MediaTracker (connue via le gossip pair, sans toucher à la liste signée des membres) : **à jour** si le protocole Hive annoncé est au moins égal au vôtre, **ancienne version** sinon, **version inconnue** pour un pair qui n’a pas encore annoncé.
+- **Membres** (`/hive/ruches/<id>/membres`) : validation des demandes (créateur de la ruche), quota hebdomadaire de la ruche (un seul encadré), consommation locale par membre qui ne partage pas, remise à zéro du compteur d’un membre (`POST /api/v1/hive/ruches/<id>/members/<instance>/quota/reset`, créateur uniquement), exclusion. Un membre qui n’est pas créateur ne voit pas les barres de consommation des autres (les compteurs affichés localement reflètent l’envoi, pas la réception). Chaque membre affiche une pastille de version MediaTracker (connue via le gossip pair, sans toucher à la liste signée des membres) : **à jour** si le protocole Hive annoncé est au moins égal au vôtre, **ancienne version** sinon, **version inconnue** pour un pair qui n’a pas encore annoncé.
 
 Le mode **tirage seul** (`pull_only`) : l’instance peut recevoir des fichiers sans en envoyer (affiché dans l’interface si applicable).
 

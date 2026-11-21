@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from mediatracker.config import Settings
 from mediatracker.core.follow import unfollow_complete_series as _unfollow_complete_series
 from mediatracker.core.polling import TERMINAL_STATUSES
 from mediatracker.db.models import Media, MediaItem
@@ -47,6 +48,7 @@ def stop_following_complete_series(
     *,
     today: date | None = None,
     emit_event: bool = True,
+    settings: Settings | None = None,
 ) -> bool:
     """Unfollow a terminal series once every aired episode (except season 0) is done."""
     if media.type != "series" or not media.followed:
@@ -80,6 +82,7 @@ def stop_following_complete_series(
         emit_event=emit_event,
         via=via,
         message=message,
+        settings=settings,
     ):
         return False
     media.series_auto_unfollow_key = fingerprint

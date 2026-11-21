@@ -91,6 +91,57 @@ def _film_item_for_requester(db: Session, *, media_id: int) -> MediaItem | None:
     return None
 
 
+def _media_item_for_cherche_cle(db: Session, cle: dict) -> tuple[Media, MediaItem] | None:
+    tmdb_id = cle.get("tmdb_id")
+    if tmdb_id is None:
+        return None
+    media_type = media_type_from_cle(cle)
+    media = db.scalar(select(Media).where(Media.tmdb_id == tmdb_id, Media.type == media_type).limit(1))
+    if media is None:
+        return None
+    if media_type == "series":
+        season, episode = cle.get("saison"), cle.get("episode")
+        if season is None or episode is None:
+            return None
+        item = db.scalar(
+            select(MediaItem).where(
+                MediaItem.media_id == media.id,
+                MediaItem.season == season,
+                MediaItem.episode == episode,
+            ).limit(1)
+        )
+    else:
+        item = db.scalar(select(MediaItem).where(MediaItem.media_id == media.id).limit(1))
+    if item is None:
+        return None
+    return media, item
+
+
+def iter_local_active_cherche_cle(db: Session, settings: Settings) -> list[dict]:
+    """Demandes cherche encore actives émises par cette instance (une entrée par œuvre)."""
+    self_origin = _self_origin(settings)
+    if self_origin is None:
+        return []
+    seen: set[str] = set()
+    out: list[dict] = []
+    for ruche in ruches_for_instance(db, self_origin):
+        rid = ruche.ruche_id
+        for row in latest_cherche_rows_for_ruche(db, ruche_id=rid):
+            if row.origin_instance_id != self_origin:
+                continue
+            cle = parse_cle(row.cle_json)
+            if not cle:
+                continue
+            work = _stable_work_key(cle) or cle_hash(cle)
+            if work in seen:
+                continue
+            if not local_cherche_active_for_work(db, ruche_id=rid, origin=self_origin, cle=cle):
+                continue
+            seen.add(work)
+            out.append(cle)
+    return out
+
+
 def _find_local_item_for_cle(db: Session, cle: dict) -> tuple[Media, MediaItem] | None:
     tmdb_id = cle.get("tmdb_id")
     media_type = media_type_from_cle(cle)

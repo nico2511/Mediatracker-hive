@@ -64,15 +64,17 @@ def mark_hive_peer_busy(
     now: datetime,
     *,
     retry_after: timedelta | None = None,
+    uncap_retry: bool = False,
 ) -> None:
     if download_id is None or not peer_key:
         return
     delay = retry_after if retry_after is not None else HIVE_PEER_BUSY_MARK_DEFAULT
     if delay < timedelta(0):
         delay = HIVE_PEER_BUSY_MARK_DEFAULT
-    cap = timedelta(minutes=5)
-    if delay > cap:
-        delay = cap
+    if not uncap_retry:
+        cap = timedelta(minutes=5)
+        if delay > cap:
+            delay = cap
     _peer_busy_until[(int(download_id), peer_key)] = _aware_utc(now) + delay
 
 
@@ -123,20 +125,71 @@ def clear_hive_peer_busy_strike(download_id: int | None) -> None:
                 del _peer_busy_until[key]
 
 
-def defer_hive_peer_busy(row: Download, now: datetime, *, clear_handle: bool = True) -> None:
+def peer_label_from_instance_id(instance_id: str) -> str:
+    text = (instance_id or "").strip()
+    if not text:
+        return "le pair"
+    if len(text) <= 12:
+        return f"Instance {text}"
+    return f"Instance {text[:8]}"
+
+
+def defer_hive_peer_busy_from_remote(
+    row: Download,
+    now: datetime,
+    *,
+    busy_reason: str | None,
+    retry_after_seconds: float | None,
+    peer_instance_id: str,
+    clear_handle: bool = True,
+) -> None:
+    """Respecte Retry-After et Hive-Busy-Reason renvoyés par l'envoyeur."""
+    from mediatracker.hive.hive_busy import hive_busy_user_message
+
+    retry_after: timedelta | None = None
+    if retry_after_seconds is not None:
+        retry_after = timedelta(seconds=float(retry_after_seconds))
+    resume_at = _aware_utc(now) + retry_after if retry_after is not None else None
+    label = peer_label_from_instance_id(peer_instance_id)
+    message = hive_busy_user_message(busy_reason, peer_label=label, resume_at=resume_at)
+    defer_hive_peer_busy(
+        row,
+        now,
+        clear_handle=clear_handle,
+        busy_reason=busy_reason,
+        retry_after=retry_after,
+        error_message=message,
+    )
+
+
+def defer_hive_peer_busy(
+    row: Download,
+    now: datetime,
+    *,
+    clear_handle: bool = True,
+    busy_reason: str | None = None,
+    retry_after: timedelta | None = None,
+    error_message: str | None = None,
+) -> None:
     """File d'attente Hive occupée : pending court, sans consommer attempts ni enterrer de lien."""
     moment = _aware_utc(now)
     download_id = row.id
-    if row.error_code == "HIVE_PEER_BUSY" and download_id is not None:
-        strike = min(_peer_busy_strikes.get(int(download_id), 0) + 1, len(HIVE_PEER_BUSY_BACKOFFS) - 1)
+    use_backoff = retry_after is None
+    if use_backoff:
+        if row.error_code == "HIVE_PEER_BUSY" and download_id is not None:
+            strike = min(_peer_busy_strikes.get(int(download_id), 0) + 1, len(HIVE_PEER_BUSY_BACKOFFS) - 1)
+        else:
+            strike = 0
+        if download_id is not None:
+            _peer_busy_strikes[int(download_id)] = strike
+        next_at = moment + HIVE_PEER_BUSY_BACKOFFS[strike]
     else:
-        strike = 0
-    if download_id is not None:
-        _peer_busy_strikes[int(download_id)] = strike
+        delay = retry_after if retry_after >= timedelta(0) else HIVE_PEER_BUSY_MARK_DEFAULT
+        next_at = moment + delay
     row.state = "pending"
     row.error_code = "HIVE_PEER_BUSY"
-    row.error = HIVE_PEER_BUSY_MESSAGE
-    row.next_retry_at = moment + HIVE_PEER_BUSY_BACKOFFS[strike]
+    row.error = error_message if error_message else HIVE_PEER_BUSY_MESSAGE
+    row.next_retry_at = next_at
     if clear_handle:
         row.handle = None
         row.attempt_started_at = None

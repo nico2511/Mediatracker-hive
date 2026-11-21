@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     scan_air_window_days: int = 3
     # When TMDB has no digital date, availability = theatrical + this many months.
     film_theatrical_fallback_months: int = 4
+    film_trigger_us_digital: bool = False
     allow_fallback: bool = False
     # Ordered quality-profile ids for global fallback (comma-separated). Empty = no fallbacks.
     profile_fallback_order: str = ""

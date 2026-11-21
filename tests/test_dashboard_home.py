@@ -141,6 +141,33 @@ def test_dashboard_includes_home_grid_sections(client, app):
     assert any(card["title"] == "Sortie Démo" for card in payload["upcoming_releases"])
     assert any(card["title"] == "Film Démo" for card in payload["catalog_films"])
     assert any(card["title"] == "Série Démo" for card in payload["catalog_series"])
+
+    linked = client.post(
+        "/api/v1/media",
+        json={"type": "film", "title": "Film Démo", "year": 2025, "tmdb_id": 88001},
+        headers=csrf(client),
+    )
+    assert linked.status_code == 201, linked.text
+    linked_id = linked.json()["id"]
+    db = app.state.session_factory()
+    try:
+        media_linked = db.get(Media, linked_id)
+        media_linked.tmdb_vote_average = 7.4
+        media_linked.followed = True
+        db.commit()
+        board3 = client.get("/api/v1/dashboard").json()
+        film_card = next(card for card in board3["catalog_films"] if card["title"] == "Film Démo")
+        assert film_card["media_id"] == linked_id
+        assert film_card["tmdb_vote_average"] == 7.4
+        media_linked.tmdb_vote_average = 9.0
+        media_linked.tmdb_vote_count = 0
+        db.commit()
+        film_card_zero = next(
+            card for card in client.get("/api/v1/dashboard").json()["catalog_films"] if card["title"] == "Film Démo"
+        )
+        assert film_card_zero["tmdb_vote_average"] is None
+    finally:
+        db.close()
     followed = client.post(
         "/api/v1/media",
         json={"type": "film", "title": "Archipel Pilote", "year": 2021, "tmdb_id": 11},

@@ -346,6 +346,42 @@ def _retract_superseded_cherche_slot(
         )
 
 
+def _retract_cherche_slot(
+    db: Session,
+    settings: Settings,
+    *,
+    ruche_id: bytes,
+    origin_id: str,
+    private_key,
+    slot_cle: dict,
+    media_item_id: int | None,
+    now: datetime,
+) -> None:
+    """Retire tous les cherche actifs sur le même créneau (toutes les versions)."""
+    from mediatracker.hive.hive_catalogue import _stable_work_key
+
+    target_wk = _stable_work_key(slot_cle)
+    if not target_wk:
+        return
+    for row in latest_cherche_rows_for_ruche(db, ruche_id=ruche_id):
+        if row.origin_instance_id != origin_id:
+            continue
+        old_cle = parse_cle(row.cle_json)
+        if not old_cle or _stable_work_key(old_cle) != target_wk:
+            continue
+        _publish_signal(
+            db,
+            settings,
+            ruche_id=ruche_id,
+            origin_id=origin_id,
+            private_key=private_key,
+            signal="retire",
+            cle=old_cle,
+            media_item_id=media_item_id,
+            now=now,
+        )
+
+
 def retract_cherche_for_item(
     db: Session,
     settings: Settings,
@@ -362,17 +398,13 @@ def retract_cherche_for_item(
         return
     cle = cle_doc(media, item)
     for rid in ruches_fn(db, origin_id):
-        latest = _latest_signal_row(db, ruche_id=rid, origin_id=origin_id, cle=cle)
-        if latest is None or latest.signal != "cherche":
-            continue
-        _publish_signal(
+        _retract_cherche_slot(
             db,
             settings,
             ruche_id=rid,
             origin_id=origin_id,
             private_key=private_key,
-            signal="retire",
-            cle=cle,
+            slot_cle=cle,
             media_item_id=item.id,
             now=now,
         )

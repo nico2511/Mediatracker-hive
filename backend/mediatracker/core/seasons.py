@@ -1,6 +1,6 @@
 """Notice when TMDB adds a season that was not on the fiche yet."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -19,6 +19,82 @@ _FILM_CURSOR = "tmdb.film_cursor"
 _UNFOLLOWED_CURSOR = "tmdb.unfollowed_enrich_cursor"
 _IDENTIFY_CURSOR = "tmdb.identify_retry_cursor"
 _IDENTIFY_BACKOFF_KEY = "tmdb.identify_backoff_until"
+_BACKFILL_MAX_AGE = timedelta(days=60)
+
+
+def _season_backfill_eligible(air_date: date | None, today: date) -> bool:
+    if air_date is None:
+        return True
+    if air_date >= today:
+        return True
+    return (today - air_date).days <= _BACKFILL_MAX_AGE.days
+
+
+def _season_has_episodes(db: Session, media_id: int, season_number: int) -> bool:
+    return (
+        db.scalar(
+            select(MediaItem.id)
+            .where(
+                MediaItem.media_id == media_id,
+                MediaItem.season == season_number,
+                MediaItem.episode.is_not(None),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def sync_unfollowed_series_seasons(db: Session, media: Media, fetched: TmdbTitle, now: datetime) -> int:
+    """Update season rows for a non-followed series from an already-fetched TMDB title.
+
+    Does not emit events, create episodes, search, or download — metadata only.
+    """
+    if media.type != "series" or media.followed:
+        return 0
+    known = {
+        row.number: row
+        for row in db.scalars(select(MediaSeason).where(MediaSeason.media_id == media.id)).all()
+    }
+    touched = 0
+    for season in fetched.seasons:
+        if season.number is None or season.number <= 0:
+            continue
+        existing = known.get(season.number)
+        if existing is None:
+            db.add(
+                MediaSeason(
+                    media_id=media.id,
+                    number=season.number,
+                    name=season.name,
+                    overview=season.overview,
+                    air_date=season.air_date,
+                    episode_count=season.episode_count,
+                    tmdb_id=season.tmdb_id,
+                )
+            )
+            touched += 1
+            continue
+        if season.name and existing.name != season.name:
+            existing.name = season.name
+            touched += 1
+        if season.overview and existing.overview != season.overview:
+            existing.overview = season.overview
+            touched += 1
+        if season.air_date and existing.air_date != season.air_date:
+            existing.air_date = season.air_date
+            touched += 1
+        if season.episode_count is not None and existing.episode_count != season.episode_count:
+            existing.episode_count = season.episode_count
+            touched += 1
+        if season.tmdb_id is not None and existing.tmdb_id != season.tmdb_id:
+            existing.tmdb_id = season.tmdb_id
+            touched += 1
+    from mediatracker.integrations.tmdb_enrichment import apply_tmdb_enrichment
+
+    apply_tmdb_enrichment(media, fetched)
+    media.tmdb_refreshed_at = now
+    return touched
 
 
 def apply_new_seasons(db: Session, media: Media, fetched: TmdbTitle, now: datetime) -> list[int]:
@@ -37,8 +113,38 @@ def apply_new_seasons(db: Session, media: Media, fetched: TmdbTitle, now: dateti
         for row in db.scalars(select(MediaSeason).where(MediaSeason.media_id == media.id)).all()
     }
     announced: list[int] = []
+    today = now.date() if now.tzinfo else now.replace(tzinfo=timezone.utc).date()
     for season in fetched.seasons:
-        if season.number in known:
+        if season.number is None or season.number <= 0:
+            continue
+        already_known = season.number in known
+        if already_known and _season_has_episodes(db, media.id, season.number):
+            continue
+        if already_known:
+            if not _season_backfill_eligible(season.air_date, today):
+                continue
+            for episode in season.episodes:
+                exists = db.scalar(
+                    select(MediaItem.id).where(
+                        MediaItem.media_id == media.id,
+                        MediaItem.season == episode.season,
+                        MediaItem.episode == episode.episode,
+                    )
+                )
+                if exists is not None:
+                    continue
+                db.add(
+                    MediaItem(
+                        media_id=media.id,
+                        season=episode.season,
+                        episode=episode.episode,
+                        title=episode.title,
+                        air_date=episode.air_date,
+                        still_url=episode.still_url,
+                        tmdb_episode_id=episode.tmdb_episode_id,
+                        state="missing",
+                    )
+                )
             continue
         db.add(
             MediaSeason(
@@ -51,6 +157,7 @@ def apply_new_seasons(db: Session, media: Media, fetched: TmdbTitle, now: dateti
                 tmdb_id=season.tmdb_id,
             )
         )
+        known.add(season.number)
         for episode in season.episodes:
             exists = db.scalar(
                 select(MediaItem.id).where(
@@ -170,14 +277,16 @@ def maybe_refresh_unfollowed_enrichment(
         row.tmdb_refreshed_at = moment
         db.commit()
         return 0
-    from mediatracker.integrations.tmdb_enrichment import apply_tmdb_enrichment
+    if row.type == "series":
+        sync_unfollowed_series_seasons(db, row, fetched, moment)
+    else:
+        from mediatracker.integrations.tmdb_enrichment import apply_tmdb_enrichment
 
-    apply_tmdb_enrichment(row, fetched)
-    if row.type == "film":
+        apply_tmdb_enrichment(row, fetched)
         from mediatracker.core.film_availability import apply_film_from_tmdb
 
         apply_film_from_tmdb(db, row, fetched)
-    row.tmdb_refreshed_at = moment
+        row.tmdb_refreshed_at = moment
     db.commit()
     return 1
 

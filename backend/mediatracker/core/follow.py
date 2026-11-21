@@ -358,6 +358,9 @@ def follow(
         row, items = _follow_patch(db, media, moment=when)
     else:
         raise FollowError(422, "Requête invalide", "Source de suivi inconnue.")
+    from mediatracker.core.media_hide import unhide_on_follow
+
+    unhide_on_follow(row)
     _publish_hive_cherche_after_follow(db, settings, row, items, when)
     return row, items
 
@@ -448,10 +451,17 @@ def unfollow(
     return True
 
 
-def unfollow_downloaded_film(db: Session, media: Media, *, reason: str, emit_event: bool = True) -> bool:
+def unfollow_downloaded_film(
+    db: Session,
+    media: Media,
+    *,
+    reason: str,
+    emit_event: bool = True,
+    settings=None,
+) -> bool:
     if media.type != "film":
         return False
-    return unfollow(db, media, reason=reason, emit_event=emit_event)
+    return unfollow(db, media, reason=reason, emit_event=emit_event, settings=settings)
 
 
 def unfollow_complete_series(
@@ -461,6 +471,7 @@ def unfollow_complete_series(
     emit_event: bool = True,
     via: str = "watched",
     message: str | None = None,
+    settings=None,
 ) -> bool:
     if media.type != "series":
         return False
@@ -478,4 +489,5 @@ def unfollow_complete_series(
         reason="complete",
         emit_event=emit_event,
         event_payload=extra,
+        settings=settings,
     )

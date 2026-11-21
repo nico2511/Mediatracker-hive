@@ -113,7 +113,20 @@ def pick_trailer_from_videos(videos: dict[str, Any] | None) -> TmdbTrailerPick |
 TMDB_DIGITAL = 4
 TMDB_PHYSICAL = 5
 TMDB_THEATRICAL = 3
-_REGIONS = ("FR", "US")
+_DEFAULT_RELEASE_REGIONS = ("FR", "US")
+
+
+def regions_for_display(catalog_region: str) -> tuple[str, ...]:
+    catalog = (catalog_region or "FR").strip().upper() or "FR"
+    if catalog == "US":
+        return ("US",)
+    if catalog == "FR":
+        return _DEFAULT_RELEASE_REGIONS
+    seen: list[str] = []
+    for code in ("US", catalog):
+        if code not in seen:
+            seen.append(code)
+    return tuple(seen)
 
 
 def _parse_day(raw: object) -> date | None:
@@ -155,10 +168,14 @@ def _first_in_region(
     return min(pool) if pool else None
 
 
-def release_by_region(release_dates: dict[str, Any] | None) -> dict[str, dict[str, str | None]]:
+def release_by_region(
+    release_dates: dict[str, Any] | None,
+    *,
+    regions: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, str | None]]:
     entries = _release_entries(release_dates)
     out: dict[str, dict[str, str | None]] = {}
-    for region in _REGIONS:
+    for region in regions or _DEFAULT_RELEASE_REGIONS:
         theatrical = _first_in_region(entries, region=region, kinds=(TMDB_THEATRICAL,))
         digital = _first_in_region(entries, region=region, kinds=(TMDB_DIGITAL,))
         physical = _first_in_region(entries, region=region, kinds=(TMDB_PHYSICAL,))
@@ -249,7 +266,7 @@ def apply_tmdb_enrichment(media: Media, fetched: TmdbTitle) -> None:
     media.tmdb_collection_id = fetched.collection_id
     media.tmdb_collection_name = fetched.collection_name
     media.tmdb_watch_providers_fr = list(fetched.watch_providers_fr) if fetched.watch_providers_fr else None
-    if fetched.release_by_region:
+    if fetched.release_by_region and media.type != "film":
         media.tmdb_release_by_region = fetched.release_by_region
     if fetched.imdb_id and not media.imdb_id:
         media.imdb_id = fetched.imdb_id

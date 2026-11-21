@@ -16,6 +16,7 @@ from mediatracker.core.pipeline.download_guard import (
     DOWNLOAD_TERMINAL_STATES,
     active_download_for_item,
 )
+from mediatracker.core.pipeline.source_rounds import force_source_search
 from mediatracker.core.queue_hold import downloads_held, set_downloads_held
 from mediatracker.db.models import Download, Link, Media, MediaItem, Provider
 
@@ -80,6 +81,7 @@ class DownloadOut(BaseModel):
     error: str | None
     check: str | None
     attempts: int
+    source_rounds: int = 0
     next_retry_at: datetime | None
     created_at: datetime
     finished_at: datetime | None
@@ -159,6 +161,7 @@ def _out(
         error=error,
         check=check,
         attempts=row.attempts,
+        source_rounds=int(row.source_rounds or 0),
         next_retry_at=row.next_retry_at,
         created_at=row.created_at,
         finished_at=row.finished_at,
@@ -377,12 +380,31 @@ def retry_download_from_scratch(
     db: Session = Depends(get_db),
     _principal=Depends(require_scope("write")),
 ) -> DownloadOut:
-    """Fresh Wawacity discovery, then every hoster in the configured order."""
+    """Nouvelle recherche sur les sources actives, puis les hébergeurs dans l'ordre réglé."""
     del _principal
     row = _get(db, download_id)
     scheduled = schedule_full_retries(db, [row], datetime.now(timezone.utc), request.app.state.settings)
     if scheduled == 0:
         raise Problem(409, "Conflit", "Seuls les échecs peuvent être relancés depuis le début.")
+    db.commit()
+    db.refresh(row)
+    return _one(db, row)
+
+
+@router.post("/{download_id}/force-search", response_model=DownloadOut)
+def force_search_download(
+    download_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> DownloadOut:
+    del _principal
+    row = _get(db, download_id)
+    now = datetime.now(timezone.utc)
+    try:
+        force_source_search(db, row, request.app.state.settings, now)
+    except RuntimeError as exc:
+        raise Problem(409, "Conflit", "Ce téléchargement ne peut pas être relancé maintenant.") from exc
     db.commit()
     db.refresh(row)
     return _one(db, row)

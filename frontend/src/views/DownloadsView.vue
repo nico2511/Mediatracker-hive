@@ -30,6 +30,7 @@ interface Job {
   filename: string | null;
   release: string | null;
   attempts: number;
+  source_rounds?: number;
   next_retry_at?: string | null;
 }
 
@@ -278,6 +279,16 @@ async function cancel(id: number) {
   }
 }
 
+async function forceSearch(id: number) {
+  error.value = "";
+  try {
+    await api(`/api/v1/downloads/${id}/force-search`, { method: "POST" });
+    await reload();
+  } catch (err) {
+    error.value = userFacingApiError(err, "Relance impossible.");
+  }
+}
+
 function onProgress(page: ProgressPayload) {
   if (document.visibilityState !== "visible") {
     return;
@@ -388,10 +399,11 @@ useProgressStream(onProgress);
             <span class="hint">{{ queueHint(job) }}</span>
           </div>
           <div class="download-job-row-actions">
+            <button type="button" class="download-job-force" @click="forceSearch(job.id)">Forcer la recherche</button>
             <router-link class="download-job-journal" :to="{ path: '/journal', query: journalQuery(job) }">
               Voir dans le journal
             </router-link>
-            <button type="button" @click="cancel(job.id)">Annuler</button>
+            <button type="button" class="download-job-cancel-outline" @click="cancel(job.id)">Annuler</button>
           </div>
         </li>
       </ul>

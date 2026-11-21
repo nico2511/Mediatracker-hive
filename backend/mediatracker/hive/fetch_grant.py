@@ -135,6 +135,38 @@ def _count_active_grants_locked(db: Session, *, ruche_id: bytes, requester_id: s
     return sum(1 for row in rows if _aware_utc(row.expires_at) > moment)
 
 
+def _revoke_active_grants_for_requester_file(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    requester_id: str,
+    file_id: bytes,
+    now: datetime,
+) -> int:
+    moment = _aware_utc(now)
+    revoked = 0
+    for row in _active_grant_rows(
+        db, ruche_id=ruche_id, requester_id=requester_id, for_update=True
+    ):
+        if row.file_id != file_id:
+            continue
+        row.revoked_at = moment
+        revoked += 1
+    if revoked:
+        db.flush()
+    return revoked
+
+
+def revoke_fetch_grant_by_id(db: Session, *, grant_id: int, now: datetime) -> bool:
+    moment = _aware_utc(now)
+    row = db.get(HiveFetchGrant, grant_id)
+    if row is None or row.revoked_at is not None:
+        return False
+    row.revoked_at = moment
+    db.flush()
+    return True
+
+
 def mint_fetch_grant(
     db: Session,
     settings,
@@ -153,6 +185,13 @@ def mint_fetch_grant(
         raise FetchGrantDenied("file")
     if not file_share_allows_ruche(db, media_item_id=binding.media_item_id, ruche_id=ruche_id):
         raise FetchGrantDenied("share")
+    _revoke_active_grants_for_requester_file(
+        db,
+        ruche_id=ruche_id,
+        requester_id=requester_id,
+        file_id=file_id,
+        now=now,
+    )
     active = _count_active_grants_locked(db, ruche_id=ruche_id, requester_id=requester_id, now=now)
     if active >= MAX_ACTIVE_GRANTS_PER_REQUESTER:
         raise FetchGrantDenied("cap")
