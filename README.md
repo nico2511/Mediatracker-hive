@@ -1,4 +1,4 @@
-> Instantané public de MediaTracker, commit source 5655ff1. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
+> Instantané public de MediaTracker, commit source 10441c2. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
 
 # MediaTracker
 

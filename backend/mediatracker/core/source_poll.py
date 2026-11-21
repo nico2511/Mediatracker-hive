@@ -454,10 +454,15 @@ def _collect(
     catching = backlog or (bool(media.catch_up_pending) and media.new_episode_policy == "auto" and not media.on_hold)
     slots = expected_slots(media, items, today=now.date(), window_days=window, force=force, catch_up=catching)
     if not slots:
+        no_slots = (
+            "Aucun film attendu pour le moment."
+            if media.type == "film"
+            else "Aucun épisode attendu pour le moment."
+        )
         if network_only:
             return PollReport(
                 result="nothing",
-                message="Aucun épisode attendu pour le moment.",
+                message=no_slots,
                 episodes=0,
                 queued=0,
                 proposed=0,
@@ -471,7 +476,7 @@ def _collect(
             now,
             rng,
             result="nothing",
-            message="Aucun épisode attendu pour le moment.",
+            message=no_slots,
             episodes=0,
             queued=0,
             proposed=0,

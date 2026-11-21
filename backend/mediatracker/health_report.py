@@ -230,3 +230,25 @@ def _secret(db: Session, key: str, settings: Settings) -> str:
     if not raw:
         return ""
     return decrypt_secret(raw, settings.secret_key)
+
+
+_COMPONENT_PROBES: dict[str, object] = {
+    "aria2": _aria2,
+    "alldebrid": _alldebrid,
+    "tmdb": _tmdb,
+    "jellyfin": _jellyfin,
+    "wawacity": _wawacity,
+    "notifier": _notifier,
+    "disk": _disk,
+    "library": _library,
+    "volumes": _volumes,
+}
+
+
+def retest_component(name: str, db: Session, settings: Settings) -> Component:
+    probe = _COMPONENT_PROBES.get(name)
+    if probe is None:
+        raise KeyError(name)
+    if name in {"notifier", "library"}:
+        return probe(db)  # type: ignore[operator]
+    return probe(db, settings)  # type: ignore[operator]

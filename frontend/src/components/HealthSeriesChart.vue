@@ -115,7 +115,14 @@ function yFor(value: number): number {
         <text :x="4" :y="yFor(tick) + 4" class="health-series-label">{{ formatValue(tick) }}{{ unit }}</text>
       </g>
       <g v-for="(mark, index) in xLabels" :key="index">
-        <text :x="mark.x - 16" :y="chartHeight - 6" class="health-series-label">{{ mark.label }}</text>
+        <text
+          :x="mark.x"
+          :y="chartHeight - 6"
+          :text-anchor="index === 0 ? 'start' : index === xLabels.length - 1 ? 'end' : 'middle'"
+          class="health-series-label"
+        >
+          {{ mark.label }}
+        </text>
       </g>
       <path v-if="path" :d="path" class="health-series-line" fill="none" />
     </svg>

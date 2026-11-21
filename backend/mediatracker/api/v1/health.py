@@ -11,7 +11,7 @@ from mediatracker.api.errors import Problem
 from mediatracker.core.build_info import app_version, build_date, short_sha
 from mediatracker.core.disk_usage import needs_refresh, schedule, snapshot
 from mediatracker.core.source_state import current_states, recent_changes
-from mediatracker.health_report import Component, components, database_ok
+from mediatracker.health_report import Component, components, database_ok, retest_component
 
 router = APIRouter(tags=["health"])
 
@@ -33,6 +33,11 @@ class ComponentOut(BaseModel):
 class ComponentsOut(BaseModel):
     status: str
     components: list[ComponentOut]
+
+
+class ComponentRetestOut(BaseModel):
+    status: str
+    component: ComponentOut
 
 
 class DiskFileOut(BaseModel):
@@ -203,6 +208,25 @@ def api_components(
     return ComponentsOut(
         status=overall,
         components=[ComponentOut(name=row.name, status=row.status, message=row.message) for row in rows],
+    )
+
+
+@router.post("/health/components/{name}/retest", response_model=ComponentRetestOut)
+def api_component_retest(
+    name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("read")),
+) -> ComponentRetestOut:
+    del _principal
+    settings = request.app.state.settings
+    try:
+        row = retest_component(name, db, settings)
+    except KeyError as exc:
+        raise Problem(404, "Introuvable", f"Service inconnu : {name}.") from exc
+    return ComponentRetestOut(
+        status=row.status,
+        component=ComponentOut(name=row.name, status=row.status, message=row.message),
     )
 
 

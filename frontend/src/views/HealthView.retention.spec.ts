@@ -22,6 +22,17 @@ vi.mock("../api", () => ({
     if (url === "/api/v1/health/disk") {
       return { volumes: [] };
     }
+    if (url === "/api/v1/health/sources") {
+      return { targets: [], changes: [] };
+    }
+    if (url === "/api/v1/ha/update") {
+      return {
+        detail: "",
+        update_available: false,
+        watchtower_configured: false,
+        checked_at: null,
+      };
+    }
     throw new Error(`unexpected ${url}`);
   }),
   userFacingApiError: (_e: unknown, fallback: string) => fallback,
@@ -35,8 +46,22 @@ describe("HealthView retention label — chargement tardif", () => {
   it("met à jour le titre après chargement tardif du cache", async () => {
     setFixedRetentionForTests(null);
     const wrapper = mount(HealthView, {
-      global: { stubs: { SourceStatesCard: true, DiskSpaceCard: true, HealthHiveRucheCard: true, HealthSeriesChart: true, MetricSparkline: true } },
+      global: {
+        stubs: {
+          SourceStatesCard: true,
+          DiskSpaceCard: true,
+          HealthHiveRucheCard: true,
+          HealthSeriesChart: true,
+          MetricSparkline: true,
+        },
+      },
     });
+    await flushPromises();
+    const measures = wrapper.find(".health-measures");
+    await measures.trigger("toggle");
+    const tech = wrapper.find(".health-tech-details");
+    (tech.element as HTMLDetailsElement).open = true;
+    await tech.trigger("toggle");
     await flushPromises();
     expect(wrapper.text()).toContain("Historique");
     expect(wrapper.text()).not.toContain("Historique (");
@@ -63,8 +88,22 @@ describe("HealthView retention label", () => {
 
   it("affiche la durée d’historique métriques depuis l’API", async () => {
     const wrapper = mount(HealthView, {
-      global: { stubs: { SourceStatesCard: true, DiskSpaceCard: true, HealthHiveRucheCard: true, HealthSeriesChart: true, MetricSparkline: true } },
+      global: {
+        stubs: {
+          SourceStatesCard: true,
+          DiskSpaceCard: true,
+          HealthHiveRucheCard: true,
+          HealthSeriesChart: true,
+          MetricSparkline: true,
+        },
+      },
     });
+    await flushPromises();
+    const measures = wrapper.find(".health-measures");
+    await measures.trigger("toggle");
+    const tech = wrapper.find(".health-tech-details");
+    (tech.element as HTMLDetailsElement).open = true;
+    await tech.trigger("toggle");
     await flushPromises();
     expect(wrapper.text()).toContain("Historique (9 jours)");
   });

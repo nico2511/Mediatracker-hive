@@ -2037,6 +2037,23 @@
         "title": "ComponentOut",
         "type": "object"
       },
+      "ComponentRetestOut": {
+        "properties": {
+          "component": {
+            "$ref": "#/components/schemas/ComponentOut"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "component"
+        ],
+        "title": "ComponentRetestOut",
+        "type": "object"
+      },
       "ComponentsOut": {
         "properties": {
           "components": {
@@ -17140,6 +17157,48 @@
           }
         },
         "summary": "Api Components",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/health/components/{name}/retest": {
+      "post": {
+        "operationId": "api_component_retest_api_v1_health_components__name__retest_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentRetestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Component Retest",
         "tags": [
           "health"
         ]

@@ -41,7 +41,14 @@ def run_hive_follow_poll(
     schedule_finish: bool = True,
 ):
     """Contrôle Hive pour les épisodes manquants. Retourne un PollReport ou None si hors périmètre."""
-    from mediatracker.core.source_poll import PollReport, _finish, _gate, expected_slots, queues_download
+    from mediatracker.core.source_poll import (
+        PollReport,
+        _finish,
+        _gate,
+        expected_slots,
+        poll_found_message,
+        queues_download,
+    )
 
     if not hive_enabled_in_db(db):
         return None
@@ -67,6 +74,11 @@ def run_hive_follow_poll(
     catching = backlog or (bool(media.catch_up_pending) and media.new_episode_policy == "auto" and not media.on_hold)
     slots = expected_slots(media, items, today=moment.date(), window_days=window, force=force, catch_up=catching)
     if not slots:
+        no_slots = (
+            "Aucun film attendu pour le moment."
+            if media.type == "film"
+            else "Aucun épisode attendu pour le moment."
+        )
         return _finish(
             db,
             media,
@@ -74,7 +86,7 @@ def run_hive_follow_poll(
             moment,
             draw,
             result="nothing",
-            message="Aucun épisode attendu pour le moment.",
+            message=no_slots,
             episodes=0,
             queued=0,
             proposed=0,
@@ -151,11 +163,17 @@ def run_hive_follow_poll(
     if episodes == 0:
         return None
     if queued > 0:
-        message = f"{episodes} épisode(s) trouvé(s), {queued} téléchargement(s) Hive en file."
+        if media.type == "film":
+            message = poll_found_message(media, episodes=episodes, queued=queued, auto=True)
+        else:
+            message = f"{episodes} épisode(s) trouvé(s), {queued} téléchargement(s) Hive en file."
         result = "found"
     elif had_pending:
         message = "Version connue mais indisponible pour l'instant dans la ruche."
         result = "nothing"
+    elif media.type == "film":
+        message = poll_found_message(media, episodes=episodes, queued=0, auto=False)
+        result = "found"
     else:
         message = f"{episodes} épisode(s) repéré(s), en attente de confirmation."
         result = "found"
