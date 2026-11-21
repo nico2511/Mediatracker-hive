@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
+import HiveBulkFicheShareDialog from "../components/HiveBulkFicheShareDialog.vue";
+import MediaLibraryBulkSelectionBar from "../components/MediaLibraryBulkSelectionBar.vue";
 import FilterHelpHint from "../components/FilterHelpHint.vue";
 import MediaQuickView from "../components/MediaQuickView.vue";
 import PosterCard from "../components/PosterCard.vue";
@@ -127,6 +129,18 @@ const selecting = ref(false);
 const selectedIds = ref<number[]>([]);
 const deleteOpen = ref(false);
 const deleteBusy = ref(false);
+const hiveShareConfirmOpen = ref(false);
+const hiveShareBusy = ref(false);
+const hiveShareResult = ref<{ primary: string; secondary: string } | null>(null);
+
+interface HiveBulkSharingOut {
+  exclude_all: boolean;
+  acted_count: number;
+  ignored_no_file_count: number;
+  ignored_pull_only_count: number;
+  failed_count: number;
+  results: { media_id: number; status: string; message?: string | null }[];
+}
 let reloadGeneration = 0;
 let hiveSummaryGeneration = 0;
 let hiveSummaryInFlight: Promise<void> | null = null;
@@ -595,6 +609,48 @@ const selectedTitlesForDialog = computed(() => {
   return items.value.filter((row) => wanted.has(row.id)).map((row) => row.title);
 });
 
+const selectedFicheLinesForHiveShare = computed(() => {
+  const wanted = new Set(selectedIds.value);
+  return items.value
+    .filter((row) => wanted.has(row.id))
+    .map((row) => (row.year ? `${row.title} (${row.year})` : row.title));
+});
+
+function formatHiveBulkShareResult(body: HiveBulkSharingOut): { primary: string; secondary: string } {
+  const sharing = !body.exclude_all;
+  const parts: string[] = [];
+  if (body.acted_count > 0) {
+    const label = sharing
+      ? `${body.acted_count} élément${body.acted_count > 1 ? "s" : ""} partagé${body.acted_count > 1 ? "s" : ""}`
+      : `${body.acted_count} élément${body.acted_count > 1 ? "s" : ""} ne ${body.acted_count > 1 ? "sont" : "est"} plus partagé${body.acted_count > 1 ? "s" : ""}`;
+    parts.push(label);
+  }
+  if (body.ignored_no_file_count > 0) {
+    parts.push(
+      `${body.ignored_no_file_count} sans fichier ignoré${body.ignored_no_file_count > 1 ? "s" : ""}`,
+    );
+  }
+  const pullOnly = body.ignored_pull_only_count ?? 0;
+  if (pullOnly > 0) {
+    parts.push(`${pullOnly} ignorée${pullOnly > 1 ? "s" : ""} en mode tirage`);
+  }
+  if (body.failed_count > 0) {
+    parts.push(`${body.failed_count} en échec`);
+  }
+  const primary = parts.length ? `${parts.join(", ")}.` : "Aucune fiche modifiée.";
+  let secondary = "";
+  if (sharing && body.acted_count > 0) {
+    secondary = "Pour les séries, seuls les épisodes présents sur disque ont été partagés.";
+  } else if (pullOnly > 0 && body.acted_count === 0) {
+    secondary = "Mode tirage : cette instance ne publie pas vers Hive.";
+  }
+  return { primary, secondary };
+}
+
+function dismissHiveShareResult() {
+  hiveShareResult.value = null;
+}
+
 function isSelected(id: number): boolean {
   return selectedIds.value.includes(id);
 }
@@ -619,6 +675,7 @@ function cancelSelection() {
   selecting.value = false;
   selectedIds.value = [];
   deleteOpen.value = false;
+  hiveShareConfirmOpen.value = false;
 }
 
 function selectAllVisible() {
@@ -641,6 +698,10 @@ function onBulkEscape(event: KeyboardEvent) {
     deleteOpen.value = false;
     return;
   }
+  if (hiveShareConfirmOpen.value) {
+    hiveShareConfirmOpen.value = false;
+    return;
+  }
   cancelSelection();
 }
 
@@ -655,6 +716,41 @@ watch(selecting, (active) => {
 onUnmounted(() => {
   window.removeEventListener("keydown", onBulkEscape);
 });
+
+function openHiveShareConfirm() {
+  if (!hiveEnabled.value || !selectedIds.value.length || hiveShareBusy.value || serverActionsDisabled.value) {
+    return;
+  }
+  hiveShareConfirmOpen.value = true;
+}
+
+async function submitHiveBulkSharing(excludeAll: boolean) {
+  const ids = [...selectedIds.value];
+  if (!ids.length || !hiveEnabled.value) {
+    return;
+  }
+  hiveShareConfirmOpen.value = false;
+  hiveShareBusy.value = true;
+  error.value = "";
+  try {
+    const body = await api<HiveBulkSharingOut>("/api/v1/hive/media/bulk-sharing", {
+      method: "PATCH",
+      body: JSON.stringify({ media_ids: ids, exclude_all: excludeAll, excluded_ruche_ids: [] }),
+    });
+    hiveShareResult.value = formatHiveBulkShareResult(body);
+    cancelSelection();
+    scheduleHiveSummaryRefresh();
+    try {
+      await reload();
+    } catch (err) {
+      error.value = userFacingApiError(err, "Liste indisponible.");
+    }
+  } catch (err) {
+    error.value = userFacingApiError(err, excludeAll ? "Arrêt du partage impossible." : "Partage Hive impossible.");
+  } finally {
+    hiveShareBusy.value = false;
+  }
+}
 
 async function deleteSelectedFiches() {
   const ids = [...selectedIds.value];
@@ -760,6 +856,21 @@ onMounted(async () => {
         · {{ formatFilmCount(filteredStats.films) }}
       </p>
     </header>
+
+    <div v-if="hiveShareResult" class="media-library-share-result panel" role="status">
+      <div class="media-library-share-result-copy">
+        <p class="media-library-share-result-primary">{{ hiveShareResult.primary }}</p>
+        <p v-if="hiveShareResult.secondary" class="hint">{{ hiveShareResult.secondary }}</p>
+      </div>
+      <button
+        type="button"
+        class="icon-button media-library-share-result-close"
+        aria-label="Fermer"
+        @click="dismissHiveShareResult"
+      >
+        ×
+      </button>
+    </div>
 
     <div class="media-library-state-filters">
       <p class="actions media-library-filters" role="group" aria-label="Filtres d'état">
@@ -983,24 +1094,21 @@ onMounted(async () => {
       Aucun suivi. <router-link to="/suivre">Suivre un titre</router-link>.
     </p>
 
-    <div
+    <MediaLibraryBulkSelectionBar
       v-if="selecting && visible.length"
-      class="media-library-bulk-bar media-library-bulk-bar--top actions"
-      role="toolbar"
-      aria-label="Sélection des fiches"
-    >
-      <span class="hint">{{ selectedCount }} sélectionnée{{ selectedCount > 1 ? "s" : "" }}</span>
-      <button type="button" :disabled="!visible.length" @click="selectAllVisible">Tout sélectionner</button>
-      <button type="button" @click="cancelSelection">Annuler</button>
-      <button
-        type="button"
-        class="danger"
-        :disabled="!selectedCount || deleteBusy || serverActionsDisabled"
-        @click="deleteOpen = true"
-      >
-        Supprimer les fiches
-      </button>
-    </div>
+      variant="top"
+      :selected-count="selectedCount"
+      :visible-count="visible.length"
+      :hive-enabled="hiveEnabled"
+      :hive-share-busy="hiveShareBusy"
+      :delete-busy="deleteBusy"
+      :server-actions-disabled="serverActionsDisabled"
+      @share="openHiveShareConfirm"
+      @unshare="submitHiveBulkSharing(true)"
+      @select-all="selectAllVisible"
+      @cancel="cancelSelection"
+      @delete="deleteOpen = true"
+    />
 
     <div
       v-if="visible.length"
@@ -1071,24 +1179,30 @@ onMounted(async () => {
       Fin de liste · {{ formatTitleCount(filteredStats.total) }} affiché{{ filteredStats.total > 1 ? "s" : "" }} sur {{ formatTitleCount(libraryStats.total) }}
     </p>
 
-    <div
+    <MediaLibraryBulkSelectionBar
       v-if="selecting && visible.length"
-      class="media-library-bulk-bar media-library-bulk-bar--mobile actions"
-      role="toolbar"
-      aria-label="Sélection des fiches"
-    >
-      <span class="hint">{{ selectedCount }} sélectionnée{{ selectedCount > 1 ? "s" : "" }}</span>
-      <button type="button" :disabled="!visible.length" @click="selectAllVisible">Tout sélectionner</button>
-      <button type="button" @click="cancelSelection">Annuler</button>
-      <button
-        type="button"
-        class="danger"
-        :disabled="!selectedCount || deleteBusy || serverActionsDisabled"
-        @click="deleteOpen = true"
-      >
-        Supprimer les fiches
-      </button>
-    </div>
+      variant="mobile"
+      :selected-count="selectedCount"
+      :visible-count="visible.length"
+      :hive-enabled="hiveEnabled"
+      :hive-share-busy="hiveShareBusy"
+      :delete-busy="deleteBusy"
+      :server-actions-disabled="serverActionsDisabled"
+      @share="openHiveShareConfirm"
+      @unshare="submitHiveBulkSharing(true)"
+      @select-all="selectAllVisible"
+      @cancel="cancelSelection"
+      @delete="deleteOpen = true"
+    />
+
+    <HiveBulkFicheShareDialog
+      :open="hiveShareConfirmOpen"
+      :count="selectedCount"
+      :titles="selectedFicheLinesForHiveShare"
+      :busy="hiveShareBusy"
+      @cancel="hiveShareConfirmOpen = false"
+      @confirm="submitHiveBulkSharing(false)"
+    />
 
     <DeleteFicheDialog
       :open="deleteOpen"
@@ -1109,11 +1223,44 @@ onMounted(async () => {
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
+.media-library-share-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0.85rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.media-library-share-result-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.media-library-share-result-primary {
+  margin: 0;
+  font-weight: 600;
+}
+
+.media-library-share-result-copy .hint {
+  margin: 0.25rem 0 0;
+}
+
+.media-library-share-result-close {
+  flex-shrink: 0;
+  margin-left: auto;
+  line-height: 1;
+}
+
 .hive-list-badge {
   display: inline-flex;
-  font-size: 0.74rem;
+  align-items: center;
+  font-size: 0.72rem;
   font-weight: 700;
+  line-height: 1.2;
   margin-right: 0.35rem;
+  padding: 0.12rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #d9b46a 55%, transparent);
   color: #d9b46a;
 }
 .hive-list-badge.tone-muted {

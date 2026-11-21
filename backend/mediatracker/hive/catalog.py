@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -44,6 +45,8 @@ from mediatracker.integrations.tmdb import TMDB_IMAGE_BASE
 from mediatracker.library.release_name import hive_gossip_basename
 
 TOMBSTONE_RETENTION = timedelta(days=30)
+
+_logger = logging.getLogger(__name__)
 
 
 def _gossip_poster_url(url: str | None) -> str | None:
@@ -809,3 +812,57 @@ def sync_hive_catalog(db: Session, settings: Settings, *, now: datetime | None =
         if media is None:
             continue
         sync_possede_for_item(db, settings, media=media, item=item, now=moment)
+
+
+def maybe_sync_hive_catalog_item_isolated(
+    db: Session,
+    settings: Settings,
+    media_item_id: int,
+    *,
+    now: datetime | None = None,
+    revoke_outbound_grants: bool = False,
+) -> None:
+    """Synchronise un épisode avec le catalogue Hive sans faire échouer l'appelant."""
+    from mediatracker.hive.identity import hive_enabled_in_db
+
+    if not hive_enabled_in_db(db):
+        return
+    moment = now or datetime.now(timezone.utc)
+    if revoke_outbound_grants:
+        try:
+            from mediatracker.hive.fetch_grant import revoke_active_fetch_grants_for_item
+
+            with db.begin_nested():
+                revoke_active_fetch_grants_for_item(db, media_item_id=media_item_id, now=moment)
+        except Exception:
+            _logger.exception(
+                "Révocation des grants Hive ignorée pour l'épisode %s.",
+                media_item_id,
+            )
+    try:
+        with db.begin_nested():
+            sync_hive_catalog_item(db, settings, media_item_id, now=moment)
+    except Exception:
+        _logger.exception(
+            "Synchronisation catalogue Hive ignorée pour l'épisode %s.",
+            media_item_id,
+        )
+
+
+def maybe_sync_hive_catalog_items_after_local_file_change(
+    db: Session,
+    settings: Settings,
+    media_item_ids: set[int],
+    *,
+    now: datetime | None = None,
+    revoke_outbound_grants: bool = False,
+) -> None:
+    """Après corbeille, restauration ou rattachement : sync immédiat par épisode touché."""
+    for item_id in media_item_ids:
+        maybe_sync_hive_catalog_item_isolated(
+            db,
+            settings,
+            item_id,
+            now=now,
+            revoke_outbound_grants=revoke_outbound_grants,
+        )

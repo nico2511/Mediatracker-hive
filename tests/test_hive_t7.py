@@ -14,6 +14,91 @@ def test_overview_disabled(client):
     login(client)
     body = client.get("/api/v1/hive/overview").json()
     assert body["enabled"] is False
+    assert body["next_gossip_at"] is None
+    assert body["last_gossip_at"] is None
+
+
+def test_overview_gossip_schedule_iso(client):
+    login(client)
+    _enable(client)
+    from datetime import datetime
+
+    from mediatracker.db.models import Setting
+    from mediatracker.hive.gossip_worker import HIVE_GOSSIP_LAST_AT_KEY, HIVE_GOSSIP_NEXT_AT_KEY
+
+    db = client.app.state.session_factory()
+    try:
+        db.add(Setting(key=HIVE_GOSSIP_NEXT_AT_KEY, value="2025-06-01T12:10:00Z"))
+        db.add(Setting(key=HIVE_GOSSIP_LAST_AT_KEY, value="2025-06-01T12:00:00Z"))
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.get("/api/v1/hive/overview").json()
+    assert body["enabled"] is True
+    assert body["next_gossip_at"] == "2025-06-01T12:10:00Z"
+    assert body["last_gossip_at"] == "2025-06-01T12:00:00Z"
+    assert datetime.fromisoformat(body["next_gossip_at"].replace("Z", "+00:00")).tzinfo is not None
+
+
+def test_overview_disabled_hides_schedule_even_if_keys_exist(client):
+    login(client)
+    from mediatracker.db.models import Setting
+    from mediatracker.hive.gossip_worker import HIVE_GOSSIP_LAST_AT_KEY, HIVE_GOSSIP_NEXT_AT_KEY
+
+    db = client.app.state.session_factory()
+    try:
+        db.add(Setting(key=HIVE_GOSSIP_NEXT_AT_KEY, value="2025-06-01T12:10:00Z"))
+        db.add(Setting(key=HIVE_GOSSIP_LAST_AT_KEY, value="2025-06-01T12:00:00Z"))
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.get("/api/v1/hive/overview").json()
+    assert body["enabled"] is False
+    assert body["next_gossip_at"] is None
+    assert body["last_gossip_at"] is None
+
+
+def test_overview_normalizes_offset_iso_to_z(client):
+    login(client)
+    _enable(client)
+    from mediatracker.db.models import Setting
+    from mediatracker.hive.gossip_worker import HIVE_GOSSIP_LAST_AT_KEY, HIVE_GOSSIP_NEXT_AT_KEY
+
+    db = client.app.state.session_factory()
+    try:
+        db.add(Setting(key=HIVE_GOSSIP_NEXT_AT_KEY, value="2025-06-01T12:10:00+00:00"))
+        db.add(Setting(key=HIVE_GOSSIP_LAST_AT_KEY, value="2025-06-01T12:00:00+00:00"))
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.get("/api/v1/hive/overview").json()
+    assert body["next_gossip_at"] == "2025-06-01T12:10:00Z"
+    assert body["last_gossip_at"] == "2025-06-01T12:00:00Z"
+
+
+def test_gossip_tick_writes_last_at_then_commits(client):
+    login(client)
+    _enable(client)
+    from datetime import datetime, timezone
+
+    from mediatracker.hive.gossip_worker import gossip_schedule_iso, hive_gossip_tick
+
+    db = client.app.state.session_factory()
+    try:
+        now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+        started = hive_gossip_tick(db, client.app.state.settings, now=now, force=True)
+        assert started is True
+        db.commit()
+        next_iso, last_iso = gossip_schedule_iso(db)
+    finally:
+        db.close()
+
+    assert last_iso == "2026-01-15T12:00:00Z"
+    assert next_iso is not None
+    assert next_iso > last_iso
 
 
 def test_catalogue_sanitized(client):

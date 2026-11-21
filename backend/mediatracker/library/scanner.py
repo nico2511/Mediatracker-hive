@@ -325,6 +325,7 @@ def attach_known_files(db: Session, settings: Settings, media: Media) -> int:
             now,
             bound=Path(folder.path).resolve(),
             skip=library_skip(storage_layout(db, settings)),
+            settings=settings,
         )
     return attached
 
@@ -388,6 +389,7 @@ def bind_library_folder(
         datetime.now(timezone.utc),
         bound=renamed.resolve(),
         skip=library_skip(storage_layout(db, settings)),
+        settings=settings,
     )
     return renamed, media, attached
 
@@ -401,10 +403,12 @@ def _attach_tree(
     *,
     bound: Path | None = None,
     skip: tuple[Path, ...] = (),
+    settings: Settings | None = None,
 ) -> int:
     """Attach videos that belong to this fiche. A parent folder does not pull in other shows."""
     from mediatracker.library.identity import file_belongs_to_media
 
+    hive_touch: set[int] = set()
     attached = 0
     if not folder.is_dir() or is_under(folder, skip):
         return 0
@@ -421,9 +425,13 @@ def _attach_tree(
         parsed = replace(parsed, media_type=media.type)
         if media.tmdb_id is not None and parsed.tmdb_id in {None, media.tmdb_id}:
             parsed = replace(parsed, tmdb_id=media.tmdb_id)
-        item = _ensure_item(db, media, parsed, now, path)
+        item = _ensure_item(db, media, parsed, now, path, hive_touch=hive_touch)
         _cancel_pending(db, item, now)
         attached += 1
+    if settings is not None and hive_touch:
+        from mediatracker.hive.catalog import maybe_sync_hive_catalog_items_after_local_file_change
+
+        maybe_sync_hive_catalog_items_after_local_file_change(db, settings, hive_touch, now=now)
     return attached
 
 
@@ -765,7 +773,15 @@ def _ambiguous_local(db: Session, parsed: ParsedName) -> bool:
     return len({row.year for row in rows}) > 1 or parsed.year is None
 
 
-def _ensure_item(db: Session, media: Media, parsed: ParsedName, now: datetime, path: Path) -> MediaItem:
+def _ensure_item(
+    db: Session,
+    media: Media,
+    parsed: ParsedName,
+    now: datetime,
+    path: Path,
+    *,
+    hive_touch: set[int] | None = None,
+) -> MediaItem:
     db.flush()
     season = parsed.season if media.type == "series" else None
     episode = parsed.episode if media.type == "series" else None
@@ -781,10 +797,13 @@ def _ensure_item(db: Session, media: Media, parsed: ParsedName, now: datetime, p
         )
         db.add(item)
         db.flush()
+    previous_path = item.file_path
     reappear = not item.downloaded or not item.file_path
     item.downloaded = True
     item.downloaded_at = now if reappear else (item.downloaded_at or now)
     item.file_path = _preferred_file(item.file_path, path)
+    if hive_touch is not None and item.id is not None and (reappear or previous_path != item.file_path):
+        hive_touch.add(int(item.id))
     if item.state in {"missing", "available"}:
         item.state = "downloaded"
     from mediatracker.core.fiche_check import touch_fiche_checked

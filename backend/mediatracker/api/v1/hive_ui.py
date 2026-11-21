@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,10 +39,11 @@ from mediatracker.hive.catalog import (
 )
 from mediatracker.hive.catalogue_card import (
     aggregate_catalogue_works,
+    catalogue_work_is_fully_owned,
     compute_card_fields,
     pick_episode_work,
 )
-from mediatracker.hive.download_aria2 import hive_download_active_for_item
+from mediatracker.hive.gossip_worker import gossip_schedule_iso
 from mediatracker.hive.hive_catalogue import load_hive_catalogue_rows, refresh_hive_catalogue_store
 from mediatracker.hive.identity import hive_enabled_in_db
 from mediatracker.hive.share_exclusions import RUCHE_EXCLUDE_ALL, list_excluded_ruche_ids, replace_share_exclusions
@@ -51,12 +53,25 @@ from mediatracker.hive.share_policy import (
     hive_catalog_auto_share_enabled,
     revoke_share_intent,
 )
+from mediatracker.hive.share_ui_state import (
+    ShareUiBatchFields,
+    batch_share_ui_fields,
+    inbound_transfer_progress,
+    item_received_via_hive,
+    outbound_transfer_progress,
+)
+from mediatracker.hive.signal import item_file_present
+from mediatracker.hive.signal_requests import _film_item_with_present_file
+from mediatracker.hive.signal_wanted import media_type_from_cle
 from mediatracker.hive.source_catalog import (
     _expected_size_for_sha,
     _parse_version_parts,
     rank_catalog_version_for_profile_attempt,
 )
 from mediatracker.hive.source_download import try_enqueue_hive_for_item
+from mediatracker.hive.transfer_parallel import TransferParallelGate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["hive"])
 
@@ -285,12 +300,12 @@ def _local_media_item(db: Session, cle: dict[str, Any]) -> MediaItem | None:
     tmdb_id = cle.get("tmdb_id")
     if tmdb_id is None:
         return None
-    media_type = cle.get("type")
+    media_type = media_type_from_cle(cle)
     media = db.scalar(select(Media).where(Media.tmdb_id == tmdb_id, Media.type == media_type).limit(1))
     if media is None:
         return None
     if media_type == "film":
-        return db.scalar(select(MediaItem).where(MediaItem.media_id == media.id).limit(1))
+        return _film_item_with_present_file(db, media_id=media.id)
     season, episode = cle.get("saison"), cle.get("episode")
     return db.scalar(
         select(MediaItem).where(
@@ -311,7 +326,7 @@ def _works_index(db: Session) -> dict[str, dict[str, Any]]:
             item = _local_media_item(db, cle)
             works[wk] = {
                 "work_key": wk,
-                "type": cle.get("type"),
+                "type": media_type_from_cle(cle),
                 "tmdb_id": cle.get("tmdb_id"),
                 "season": cle.get("saison"),
                 "episode": cle.get("episode"),
@@ -321,7 +336,7 @@ def _works_index(db: Session) -> dict[str, dict[str, Any]]:
                 "overview": meta.get("overview"),
                 "disponible": False,
                 "versions": [],
-                "in_library": item is not None and bool(item.downloaded),
+                "in_library": item is not None and item_file_present(db, item),
                 "media_id": item.media_id if item else None,
                 "media_item_id": item.id if item else None,
             }
@@ -372,6 +387,8 @@ def _enrich_work(db: Session, settings: Settings, work: dict[str, Any]) -> dict[
 
 class HiveOverviewOut(BaseModel):
     enabled: bool
+    next_gossip_at: str | None = None
+    last_gossip_at: str | None = None
 
 
 @router.get("/overview", response_model=HiveOverviewOut)
@@ -380,7 +397,16 @@ def get_hive_overview(
     _principal=Depends(require_scope("read")),
 ) -> HiveOverviewOut:
     del _principal
-    return HiveOverviewOut(enabled=hive_enabled_in_db(db))
+    enabled = hive_enabled_in_db(db)
+    next_gossip_at: str | None = None
+    last_gossip_at: str | None = None
+    if enabled:
+        next_gossip_at, last_gossip_at = gossip_schedule_iso(db)
+    return HiveOverviewOut(
+        enabled=enabled,
+        next_gossip_at=next_gossip_at,
+        last_gossip_at=last_gossip_at,
+    )
 
 
 class CatalogueSourceOut(BaseModel):
@@ -479,7 +505,8 @@ def get_hive_catalogue(
     if resolved_media_type:
         works = [w for w in works if w.get("type") == resolved_media_type]
     if hide_owned:
-        works = [w for w in works if not w.get("in_library")]
+
+        works = [w for w in works if not catalogue_work_is_fully_owned(w)]
     if version:
         vk = version.strip()
         works = [w for w in works if any(v["version_key"] == vk for v in w.get("versions") or [])]
@@ -521,6 +548,9 @@ class ShareStateOut(BaseModel):
     shared: bool
     transfer_active: bool
     transfer_progress_pct: float | None = None
+    transfer_outbound_active: bool = False
+    transfer_outbound_progress_pct: float | None = None
+    received_via_hive: bool = False
     fingerprint_partial_size: int | None = None
     fingerprint_total_size: int | None = None
     fingerprint_error: str | None = None
@@ -531,30 +561,15 @@ class ShareStateOut(BaseModel):
     catalog_entry_local: bool = False
 
 
-def _transfer_progress(db: Session, *, sha: str, item: MediaItem) -> tuple[bool, float | None]:
-    if not sha or item.id is None:
-        return False, None
-    if not hive_download_active_for_item(db, item, sha):
-        return False, None
-    row = db.scalar(
-        select(Download)
-        .join(DownloadHiveFetch, DownloadHiveFetch.download_id == Download.id)
-        .where(
-            Download.media_item_id == item.id,
-            DownloadHiveFetch.sha256_hex == str(sha).lower(),
-            Download.state.in_(("pending", "resolving", "queued", "downloading", "post_processing")),
-        )
-        .order_by(Download.id.desc())
-        .limit(1)
-    )
-    if row is None:
-        return True, None
-    expected = max(int(row.size or 0), 1)
-    done = max(0, int(row.progress or 0))
-    return True, min(100.0, round(100.0 * done / expected, 1))
-
-
-def _share_state_for_item(db: Session, item: MediaItem, *, settings: Settings) -> ShareStateOut:
+def _share_state_for_item(
+    db: Session,
+    item: MediaItem,
+    *,
+    settings: Settings,
+    parallel_gate: TransferParallelGate | None = None,
+    now: datetime | None = None,
+    fields: ShareUiBatchFields | None = None,
+) -> ShareStateOut:
     assert item.id is not None
     exclude_all, excluded = list_excluded_ruche_ids(db, item.id)
     exclude_all_ui = effective_exclude_all_for_ui(db, item.id)
@@ -562,11 +577,22 @@ def _share_state_for_item(db: Session, item: MediaItem, *, settings: Settings) -
     fp = db.get(HiveFileFingerprint, item.id)
     preparing = fp is not None and not (fp.sha256_hex or "").strip() and bool(item.file_path)
     sha = (fp.sha256_hex or "") if fp else ""
-    transfer_active, transfer_pct = _transfer_progress(db, sha=sha, item=item)
     shared = shareable and not exclude_all_ui
     pull_only = hive_enabled_in_db(db) and not _public_address_configured(db)
-    has_file = bool(item.file_path or item.downloaded)
     catalog_local = catalog_entry_local_for_item(db, settings, item)
+    moment = now if now is not None else _now()
+    if fields is not None:
+        has_file = fields.has_file
+        transfer_active, transfer_pct = fields.inbound_active, fields.inbound_pct
+        outbound_active, outbound_pct = fields.outbound_active, fields.outbound_pct
+        received_hive = fields.received_via_hive
+    else:
+        transfer_active, transfer_pct = inbound_transfer_progress(db, sha=sha, item=item)
+        has_file = item_file_present(db, item)
+        outbound_active, outbound_pct = outbound_transfer_progress(
+            db, item, now=moment, parallel_gate=parallel_gate
+        )
+        received_hive = item_received_via_hive(db, item)
     fp_partial = int(fp.partial_size or 0) if fp is not None else None
     fp_total = int(fp.size or 0) if fp is not None and int(fp.size or 0) > 0 else None
     if preparing and fp is not None and not (fp.sha256_hex or "").strip() and fp_total and fp_partial is not None:
@@ -582,6 +608,9 @@ def _share_state_for_item(db: Session, item: MediaItem, *, settings: Settings) -
         shared=shared,
         transfer_active=transfer_active,
         transfer_progress_pct=transfer_pct,
+        transfer_outbound_active=outbound_active,
+        transfer_outbound_progress_pct=outbound_pct,
+        received_via_hive=received_hive,
         fingerprint_partial_size=fp_partial if preparing else None,
         fingerprint_total_size=fp_total if preparing else None,
         fingerprint_error=fp_error or None,
@@ -764,6 +793,11 @@ def media_sharing_summary(
     return _media_share_summary_for_id(db, settings, media_id)
 
 
+def _parallel_gate(request: Request) -> TransferParallelGate | None:
+    gate = getattr(request.app.state, "hive_transfer_parallel", None)
+    return gate if isinstance(gate, TransferParallelGate) else None
+
+
 @router.get("/items/sharing", response_model=list[ShareStateOut])
 def batch_item_sharing(
     request: Request,
@@ -774,8 +808,10 @@ def batch_item_sharing(
     del _principal
     _require_hive(db)
     settings = _settings(request)
+    gate = _parallel_gate(request)
+    moment = _now()
     raw = [part.strip() for part in ids.split(",") if part.strip()]
-    out: list[ShareStateOut] = []
+    items: list[MediaItem] = []
     for part in raw:
         try:
             item_id = int(part)
@@ -784,8 +820,33 @@ def batch_item_sharing(
         item = db.get(MediaItem, item_id)
         if item is None:
             continue
-        out.append(_share_state_for_item(db, item, settings=settings))
-    return out
+        items.append(item)
+    sha_by_item: dict[int, str] = {}
+    item_ids = [item.id for item in items if item.id is not None]
+    if item_ids:
+        fingerprints = list(
+            db.scalars(
+                select(HiveFileFingerprint).where(HiveFileFingerprint.media_item_id.in_(item_ids))
+            ).all()
+        )
+        for fp in fingerprints:
+            sha = (fp.sha256_hex or "").strip().lower()
+            if sha:
+                sha_by_item[int(fp.media_item_id)] = sha
+    batched = batch_share_ui_fields(
+        db, items, sha_by_item=sha_by_item, now=moment, parallel_gate=gate
+    )
+    return [
+        _share_state_for_item(
+            db,
+            item,
+            settings=settings,
+            parallel_gate=gate,
+            now=moment,
+            fields=batched.get(item.id) if item.id is not None else None,
+        )
+        for item in items
+    ]
 
 
 @router.get("/items/{media_item_id}/sharing", response_model=ShareStateOut)
@@ -801,7 +862,9 @@ def get_item_sharing(
     item = db.get(MediaItem, media_item_id)
     if item is None:
         raise Problem(404, "Introuvable", "Épisode introuvable.")
-    return _share_state_for_item(db, item, settings=settings)
+    return _share_state_for_item(
+        db, item, settings=settings, parallel_gate=_parallel_gate(request), now=_now()
+    )
 
 
 class SharePatchIn(BaseModel):
@@ -1006,6 +1069,127 @@ def patch_media_sharing_scope(
     if not touched:
         raise Problem(422, "Requête invalide", "Aucun fichier local dans ce périmètre.")
     db.commit()
+
+
+class BulkMediaSharingIn(BaseModel):
+    media_ids: list[int] = Field(min_length=1, max_length=200)
+    exclude_all: bool = False
+    excluded_ruche_ids: list[str] = Field(default_factory=list)
+
+
+class BulkMediaSharingRowOut(BaseModel):
+    media_id: int
+    status: str
+    message: str | None = None
+
+
+class BulkMediaSharingOut(BaseModel):
+    exclude_all: bool
+    results: list[BulkMediaSharingRowOut]
+    acted_count: int
+    ignored_no_file_count: int
+    ignored_pull_only_count: int
+    failed_count: int
+
+
+@router.patch("/media/bulk-sharing", response_model=BulkMediaSharingOut)
+def patch_bulk_media_sharing(
+    body: BulkMediaSharingIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    _principal=Depends(require_scope("write")),
+) -> BulkMediaSharingOut:
+    del _principal
+    _require_hive(db)
+    from mediatracker.hive.catalog import _public_address_configured
+    from mediatracker.hive.share_scope import (
+        apply_sharing_to_scope,
+        ensure_media_exists,
+        finalize_sharing_changes,
+        scope_media_items,
+    )
+
+    settings = _settings(request)
+    moment = _now()
+    ruche_ids = _parse_ruche_ids(body.excluded_ruche_ids)
+    media_ids = list(dict.fromkeys(body.media_ids))
+    results: list[BulkMediaSharingRowOut] = []
+    acted = 0
+    ignored = 0
+    ignored_pull_only = 0
+    failed = 0
+    success_status = "unshared" if body.exclude_all else "shared"
+    # Instance-level: Hive is already required, so missing public address means pull-only.
+    pull_only = not _public_address_configured(db)
+
+    for media_id in media_ids:
+        try:
+            with db.begin_nested():
+                ensure_media_exists(db, media_id)
+                local_items = scope_media_items(db, media_id, season=None)
+                if not local_items:
+                    results.append(
+                        BulkMediaSharingRowOut(
+                            media_id=media_id,
+                            status="ignored_no_file",
+                            message="Aucun fichier local dans ce périmètre.",
+                        )
+                    )
+                    ignored += 1
+                    continue
+                if pull_only:
+                    results.append(
+                        BulkMediaSharingRowOut(
+                            media_id=media_id,
+                            status="ignored_pull_only",
+                            message="Mode tirage : cette instance ne publie pas vers Hive.",
+                        )
+                    )
+                    ignored_pull_only += 1
+                    continue
+                touched = apply_sharing_to_scope(
+                    db,
+                    settings,
+                    media_id,
+                    season=None,
+                    exclude_all=body.exclude_all,
+                    ruche_ids=ruche_ids,
+                    moment=moment,
+                    finalize=False,
+                )
+                if not touched:
+                    results.append(
+                        BulkMediaSharingRowOut(
+                            media_id=media_id,
+                            status="ignored_no_file",
+                            message="Aucun fichier local dans ce périmètre.",
+                        )
+                    )
+                    ignored += 1
+                    continue
+                results.append(BulkMediaSharingRowOut(media_id=media_id, status=success_status))
+                acted += 1
+        except Problem as exc:
+            results.append(BulkMediaSharingRowOut(media_id=media_id, status="failed", message=exc.detail))
+            failed += 1
+        except Exception:
+            results.append(BulkMediaSharingRowOut(media_id=media_id, status="failed", message="Action impossible."))
+            failed += 1
+
+    if acted > 0:
+        finalize_sharing_changes(db, settings, moment, exclude_all=body.exclude_all)
+        db.commit()
+    else:
+        db.rollback()
+
+    return BulkMediaSharingOut(
+        exclude_all=body.exclude_all,
+        results=results,
+        acted_count=acted,
+        ignored_no_file_count=ignored,
+        ignored_pull_only_count=ignored_pull_only,
+        failed_count=failed,
+    )
 
 
 @router.get("/media/{media_id}/seasons/{season}/sharing-scope", response_model=SharingScopeOut)
@@ -1386,9 +1570,20 @@ def get_received_hive_requests(
 ) -> dict:
     del _principal
     _require_hive(db)
+    settings = _settings(request)
+    moment = _now()
+    try:
+        from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
+
+        with db.begin_nested():
+            accepted = maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
+        if accepted > 0:
+            db.commit()
+    except Exception:
+        logger.exception("Rattrapage auto-acceptation demandes Hive (GET reçues) échoué.")
     from mediatracker.hive.signal_requests import list_received_requests
 
-    rows = list_received_requests(db, _settings(request))
+    rows = list_received_requests(db, settings)
     return {"items": rows}
 
 
@@ -1467,9 +1662,20 @@ def get_wanted_hive_requests(
 ) -> dict:
     del _principal
     _require_hive(db)
+    settings = _settings(request)
+    moment = _now()
+    try:
+        from mediatracker.hive.signal_wanted import maybe_try_auto_take_wanted
+
+        taken = maybe_try_auto_take_wanted(db, settings, now=moment)
+        if taken > 0:
+            db.commit()
+    except Exception:
+        logger.exception("Rattrapage auto-prise recherché Hive (GET recherché) échoué.")
+        db.rollback()
     from mediatracker.hive.signal_wanted import list_wanted_requests
 
-    rows = list_wanted_requests(db, _settings(request), now=_now())
+    rows = list_wanted_requests(db, settings, now=moment)
     return {"items": rows}
 
 

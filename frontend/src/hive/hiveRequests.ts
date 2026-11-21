@@ -43,6 +43,12 @@ export interface HiveMyRequestGroup {
   sortAt: string;
 }
 
+export type HiveReceivedRequestStatus =
+  | "pending"
+  | "preparing"
+  | "sharing"
+  | "blocked";
+
 export interface HiveReceivedRequestItem {
   request_id: string;
   work_key: string;
@@ -52,9 +58,62 @@ export interface HiveReceivedRequestItem {
   episode: number | null;
   media_item_id?: number;
   already_shared?: boolean;
-  status: string;
+  status: HiveReceivedRequestStatus | string;
   requester_count?: number;
   requested_versions?: string[];
+}
+
+export function hiveReceivedRequestPending(row: Pick<HiveReceivedRequestItem, "status">): boolean {
+  return row.status === "pending";
+}
+
+export function hiveReceivedFollowUpLine(
+  row: Pick<HiveReceivedRequestItem, "status">,
+  options: { compact?: boolean } = {},
+): string | null {
+  const compact = Boolean(options.compact);
+  switch (row.status) {
+    case "preparing":
+      return "Empreinte du fichier en cours.";
+    case "sharing":
+      return compact ? "Partage en cours." : "Partage en cours : synchronisation du catalogue local.";
+    case "blocked":
+      return compact
+        ? "Adresse publique Hive manquante."
+        : "Adresse publique Hive manquante : l’offre ne peut pas encore être publiée.";
+    default:
+      return null;
+  }
+}
+
+export function hiveReceivedAcceptNote(
+  row: Pick<HiveReceivedRequestItem, "status"> | null | undefined,
+  options: { compact?: boolean } = {},
+): string {
+  const followUp = row ? hiveReceivedFollowUpLine(row, options) : null;
+  if (followUp) {
+    return followUp;
+  }
+  return "Demande acceptée.";
+}
+
+export function hiveReceivedAcceptNoteAfterReload(
+  requestId: string,
+  items: readonly Pick<HiveReceivedRequestItem, "request_id" | "status">[],
+  options: { compact?: boolean } = {},
+): string {
+  const updated = items.find((item) => item.request_id === requestId);
+  return hiveReceivedAcceptNote(updated, options);
+}
+
+export function hiveReceivedAcceptNotePair(
+  requestId: string,
+  items: readonly Pick<HiveReceivedRequestItem, "request_id" | "status">[],
+): { text: string; compact: string } {
+  return {
+    text: hiveReceivedAcceptNoteAfterReload(requestId, items),
+    compact: hiveReceivedAcceptNoteAfterReload(requestId, items, { compact: true }),
+  };
 }
 
 export interface HiveWantedRequestItem {

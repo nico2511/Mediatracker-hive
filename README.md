@@ -1,4 +1,4 @@
-> Instantané public de MediaTracker, commit source 7d9afa7. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
+> Instantané public de MediaTracker, commit source 5655ff1. Le développement se fait ailleurs ; issues bienvenues, PR désactivées pour l'instant.
 
 # MediaTracker
 
@@ -20,7 +20,7 @@ Accès habituel sur le réseau local : `http://<ip-du-nas>:8080`. Derrière un p
 
 ## Hive (partage entre instances)
 
-Hive relie plusieurs installations MediaTracker de confiance au sein d’une **ruche** pour partager un catalogue et se transmettre des fichiers. Le partage se fait manuellement, titre par titre (un repartage automatique existe, désactivé par défaut). Les **demandes intra-ruche** sont anonymes : si personne ne possède encore le fichier, le titre peut apparaître dans **Recherché** pour que d’autres membres se le procurent et le partagent. Les pairs échangent des **instantanés de charge** (transferts sortants, plafond, débit disponible, occupé) : un téléchargement Hive privilégie en général le pair le moins chargé et peut basculer vers un autre si le pair est occupé. Avant d’être visible des pairs, chaque fichier reçoit une **empreinte** ; le transfert passe par un accès temporaire au fichier, puis par **aria2** et la file **Téléchargements** habituelle. L’écran **Santé → Performance** affiche un encart **Ruche** avec la charge locale et celle des pairs connus.
+Hive relie plusieurs installations MediaTracker de confiance au sein d’une **ruche** pour partager un catalogue et se transmettre des fichiers. Le partage se fait manuellement, titre par titre (un repartage automatique existe, désactivé par défaut). Les **demandes intra-ruche** sont anonymes : si personne ne possède encore le fichier, le titre peut apparaître dans **Demandes des autres** (section **Personne ne l’a encore**) pour que d’autres membres se le procurent et le partagent. Les pairs échangent des **instantanés de charge** (transferts sortants, plafond, débit disponible, occupé) : un téléchargement Hive privilégie en général le pair le moins chargé et peut basculer vers un autre si le pair est occupé. Avant d’être visible des pairs, chaque fichier reçoit une **empreinte** ; le transfert passe par un accès temporaire au fichier, puis par **aria2** et la file **Téléchargements** habituelle. L’écran **Santé → Performance** affiche un encart **Ruche** avec la charge locale et celle des pairs connus.
 
 Guide : [Hive](docs/hive.md).
 

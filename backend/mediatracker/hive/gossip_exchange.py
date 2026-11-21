@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from mediatracker.config import Settings
 from mediatracker.db.models import HiveRuche
 from mediatracker.db.session import release_sqlite_before_network
-from mediatracker.hive.crypto_id import public_key_from_pem
+from mediatracker.hive.crypto_id import hive_public_id_from_public_key, public_key_from_pem
 from mediatracker.hive.identity import load_private_key
 from mediatracker.hive.member_list import (
     MemberListError,
@@ -31,6 +31,7 @@ from mediatracker.hive.peer_gossip import (
     signals_page_for_peer,
     version_vector_for_ruche,
 )
+from mediatracker.hive.peer_gossip_vectors import load_peer_gossip_vectors, record_peer_gossip_vectors
 from mediatracker.hive.peer_info import build_local_instance_snapshot, ingest_peer_info
 from mediatracker.hive.signal import ingest_signed_signals, signal_version_vector_for_ruche
 from mediatracker.hive.transfer_load import build_local_load_snapshot, ingest_peer_load
@@ -123,6 +124,24 @@ def _signals_outbound(db: Session, *, ruche_id: bytes, peer_vector: dict[str, in
     return page.entries
 
 
+def _record_peer_vectors_from_body(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    peer_instance_id: str,
+    body: dict[str, Any],
+    now: datetime,
+) -> tuple[dict[str, int], dict[str, int]]:
+    return record_peer_gossip_vectors(
+        db,
+        ruche_id=ruche_id,
+        peer_instance_id=peer_instance_id,
+        vector=body.get("vector"),
+        signal_vector=body.get("signal_vector"),
+        now=now,
+    )
+
+
 def send_gossip_hint_to_peer(
     db: Session,
     settings: Settings,
@@ -132,16 +151,26 @@ def send_gossip_hint_to_peer(
     now: datetime,
     peer_instance_id: str | None = None,
 ) -> bool:
-    """Signal « j'ai du nouveau » : vecteur + entrées locales récentes, sans tirage complet."""
+    """Signal « j'ai du nouveau » : vecteur + lot local contigu, sans tirage complet."""
     pk = load_private_key(settings)
     if pk is None:
         return False
     vector = version_vector_for_ruche(db, ruche_id)
     signal_vector = signal_version_vector_for_ruche(db, ruche_id)
-    from mediatracker.hive.peer_gossip import entries_page_for_peer
+    from mediatracker.hive.peer_gossip import entries_for_gossip_hint, signals_for_gossip_hint
 
-    outbound = entries_page_for_peer(db, ruche_id=ruche_id, peer_vector={}, limit=50).entries
-    sig_out = signals_page_for_peer(db, ruche_id=ruche_id, peer_vector={}, limit=50).entries
+    local_origin = hive_public_id_from_public_key(pk.public_key())
+    known_vector, known_signals = (
+        load_peer_gossip_vectors(db, ruche_id=ruche_id, peer_instance_id=peer_instance_id)
+        if peer_instance_id
+        else ({}, {})
+    )
+    outbound = entries_for_gossip_hint(
+        db, ruche_id=ruche_id, local_origin_id=local_origin, peer_vector=known_vector
+    )
+    sig_out = signals_for_gossip_hint(
+        db, ruche_id=ruche_id, local_origin_id=local_origin, peer_vector=known_signals
+    )
     load = build_local_load_snapshot(db, now)
     instance = build_local_instance_snapshot(now)
     release_sqlite_before_network(db)
@@ -157,28 +186,75 @@ def send_gossip_hint_to_peer(
         load=load,
         instance=instance,
     )
-    if resp.status_code == 200 and peer_instance_id:
-        try:
-            body = resp.json()
-            peer_load = body.get("load")
-            ingest_peer_load(
+    if resp.status_code != 200:
+        return False
+    if not peer_instance_id:
+        return True
+    try:
+        body = resp.json()
+        ingest_peer_load(
+            db,
+            ruche_id=ruche_id,
+            origin_instance_id=peer_instance_id,
+            load=body.get("load"),
+            now=now,
+        )
+        if body.get("instance") is not None:
+            ingest_peer_info(
                 db,
                 ruche_id=ruche_id,
                 origin_instance_id=peer_instance_id,
-                load=peer_load,
+                instance=body.get("instance"),
                 now=now,
             )
-            if body.get("instance") is not None:
-                ingest_peer_info(
+        recorded_vector, recorded_signals = _record_peer_vectors_from_body(
+            db,
+            ruche_id=ruche_id,
+            peer_instance_id=peer_instance_id,
+            body=body if isinstance(body, dict) else {},
+            now=now,
+        )
+    except Exception:
+        return True
+    if outbound or sig_out:
+        return True
+    # Premier lot vide (vecteur inconnu ou retard > 50) : si la réponse montre
+    # un pair assez proche, envoyer le suffixe contigu, jamais un saut.
+    follow_entries = entries_for_gossip_hint(
+        db, ruche_id=ruche_id, local_origin_id=local_origin, peer_vector=recorded_vector
+    )
+    follow_signals = signals_for_gossip_hint(
+        db, ruche_id=ruche_id, local_origin_id=local_origin, peer_vector=recorded_signals
+    )
+    if not follow_entries and not follow_signals:
+        return True
+    release_sqlite_before_network(db)
+    try:
+        follow = gossip_sync_once(
+            base_url=peer_base_url,
+            ruche_id=ruche_id,
+            private_key=pk,
+            vector=vector,
+            entries=follow_entries,
+            hint=True,
+            signal_vector=signal_vector,
+            signals=follow_signals,
+            load=load,
+            instance=instance,
+        )
+        if follow.status_code == 200:
+            follow_body = follow.json()
+            if isinstance(follow_body, dict):
+                _record_peer_vectors_from_body(
                     db,
                     ruche_id=ruche_id,
-                    origin_instance_id=peer_instance_id,
-                    instance=body.get("instance"),
+                    peer_instance_id=peer_instance_id,
+                    body=follow_body,
                     now=now,
                 )
-        except Exception:
-            pass
-    return resp.status_code == 200
+    except Exception:
+        logger.exception("Second lot hint Hive échoué (ruche %s).", ruche_id.hex())
+    return True
 
 
 def pull_gossip_from_peer(
@@ -269,6 +345,15 @@ def pull_gossip_from_peer(
                 if isinstance(k, str) and isinstance(v, int):
                     merged[k] = max(merged.get(k, 0), v)
             vector = merged
+            if peer_instance_id:
+                record_peer_gossip_vectors(
+                    db,
+                    ruche_id=ruche_id,
+                    peer_instance_id=peer_instance_id,
+                    vector=peer_vector,
+                    signal_vector=body.get("signal_vector"),
+                    now=now,
+                )
         peer_sig_vector = body.get("signal_vector")
         if isinstance(peer_sig_vector, dict):
             merged_sig = dict(signal_vector)

@@ -2,6 +2,7 @@
 import { ref } from "vue";
 
 import { api, userFacingApiError } from "../../api";
+import { notifyHiveTabBadges, useHiveShellContext } from "../../hive/hiveShellContext";
 import type { HiveWantedRequestItem } from "../../hive/hiveRequests";
 import { hiveWantedStatusLine, hiveWantedTakeLabel } from "../../hive/hiveRequests";
 import { mediaKind } from "../../labels";
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   note: [message: string];
 }>();
 
+const hiveShell = useHiveShellContext();
 const busyKey = ref<string | null>(null);
 
 function metaLine(row: HiveWantedRequestItem): string {
@@ -43,6 +45,7 @@ async function toggleVolunteer(row: HiveWantedRequestItem) {
     });
     emit("note", release ? "Vous ne vous en occupez plus." : "Suivi lancé : téléchargement habituel en cours.");
     emit("changed");
+    notifyHiveTabBadges(hiveShell);
   } catch (err) {
     emit("error", userFacingApiError(err, release ? "Impossible de se désinscrire." : "Prise en charge impossible."));
   } finally {

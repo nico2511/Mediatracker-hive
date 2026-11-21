@@ -96,7 +96,7 @@ def repair_media(db: Session, settings: Settings, media: Media, *, fetched: Tmdb
 
     own = own_series_folder(root, media)
     if own is not None:
-        report.attached = _attach_tree(db, media, own, root, now, bound=own)
+        report.attached = _attach_tree(db, media, own, root, now, bound=own, settings=settings)
     return report
 
 

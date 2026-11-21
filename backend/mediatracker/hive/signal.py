@@ -458,7 +458,14 @@ def _latest_local_signal_seq(db: Session, *, ruche_id: bytes, origin_id: str) ->
     )
 
 
-def ingest_signed_signals(db: Session, *, ruche_id: bytes, items: list[dict], now: datetime) -> int:
+def ingest_signed_signals(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    items: list[dict],
+    now: datetime,
+    allow_seq_gap: bool = True,
+) -> int:
     accepted = 0
     for item in items:
         payload = item.get("payload")
@@ -486,6 +493,8 @@ def ingest_signed_signals(db: Session, *, ruche_id: bytes, items: list[dict], no
             )
             if existing is not None or seq < latest:
                 continue
+        elif seq > latest + 1 and not allow_seq_gap:
+            continue
         cle = payload.get("cle")
         if not isinstance(cle, dict):
             continue

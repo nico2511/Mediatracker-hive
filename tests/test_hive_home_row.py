@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from tests.conftest import login
+from tests.conftest import login, write_sparse_video_file
 from tests.test_hive_t6 import _enable, _ruche, _seed_catalogue_row
 
 from mediatracker.db.models import HiveEntry, Media, MediaItem, Setting
@@ -21,7 +21,7 @@ def test_dashboard_hive_disabled_returns_empty_hive_dispos(client):
     assert board.get("hive_dispos") == []
 
 
-def test_dashboard_hive_dispos_hide_owned(client, app):
+def test_dashboard_hive_dispos_hide_owned(client, app, tmp_path):
     login(client)
     _enable(client)
     db = app.state.session_factory()
@@ -60,7 +60,9 @@ def test_dashboard_hive_dispos_hide_owned(client, app):
         media = Media(type="film", title="Possédé", year=2099, tmdb_id=88001, followed=True)
         db.add(media)
         db.flush()
-        item = MediaItem(media_id=media.id, downloaded=True, state="downloaded")
+        fpath = tmp_path / "owned-88001.mkv"
+        write_sparse_video_file(fpath, 128_000)
+        item = MediaItem(media_id=media.id, downloaded=True, file_path=str(fpath), state="downloaded")
         db.add(item)
         db.commit()
     finally:

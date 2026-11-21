@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 from mediatracker.config import Settings
 from mediatracker.core.tracking import tmdb_page_url
 from mediatracker.db.models import HiveCatalogue, HiveEntry, Media
-from mediatracker.hive.catalogue_card import aggregate_catalogue_works
+from mediatracker.hive.catalogue_card import aggregate_catalogue_works, catalogue_work_is_fully_owned
 from mediatracker.hive.hive_catalogue import _stable_work_key
 from mediatracker.hive.identity import hive_enabled_in_db
+from mediatracker.hive.signal import item_file_present
+from mediatracker.hive.signal_wanted import media_type_from_cle
 
 _SHARE_POOL_FACTOR = 15
 _SHARE_POOL_MIN = 120
@@ -73,7 +75,7 @@ def _works_for_catalogue_keys(
             item = _local_media_item(db, cle)
             works[wk] = {
                 "work_key": wk,
-                "type": cle.get("type"),
+                "type": media_type_from_cle(cle),
                 "tmdb_id": cle.get("tmdb_id"),
                 "season": cle.get("saison"),
                 "episode": cle.get("episode"),
@@ -83,7 +85,7 @@ def _works_for_catalogue_keys(
                 "overview": meta.get("overview"),
                 "disponible": False,
                 "versions": [],
-                "in_library": item is not None and bool(item.downloaded),
+                "in_library": item is not None and item_file_present(db, item),
                 "media_id": item.media_id if item else None,
                 "media_item_id": item.id if item else None,
             }
@@ -125,7 +127,7 @@ def list_hive_dispos_for_home(db: Session, settings: Settings, *, limit: int = 2
         work = works_by_key.get(wk)
         if work is None:
             continue
-        if not work.get("disponible") or work.get("in_library"):
+        if not work.get("disponible") or catalogue_work_is_fully_owned(work):
             continue
         if work.get("type") not in ("film", "series"):
             continue

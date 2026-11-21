@@ -21,6 +21,7 @@ from mediatracker.hive.source_offer_mask import clear_mask_for_offer, maybe_lift
 
 GOSSIP_PAGE_DEFAULT = 500
 _GOSSIP_PAGE = GOSSIP_PAGE_DEFAULT
+GOSSIP_HINT_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,87 @@ def entries_missing_for_peer(
     ).entries
 
 
+def _gossip_items_from_entry_rows(rows: list[HiveEntry]) -> list[dict[str, str | dict]]:
+    out: list[dict[str, str | dict]] = []
+    for row in rows:
+        if not row.payload_json or not row.signature_b64:
+            continue
+        try:
+            payload = json.loads(row.payload_json)
+        except json.JSONDecodeError:
+            continue
+        out.append({"payload": payload, "signature_b64": row.signature_b64})
+    return out
+
+
+def _gossip_items_from_signal_rows(rows: list[HiveSignal]) -> list[dict[str, str | dict]]:
+    out: list[dict[str, str | dict]] = []
+    for row in rows:
+        if not row.payload_json or not row.signature_b64:
+            continue
+        try:
+            payload = json.loads(row.payload_json)
+        except json.JSONDecodeError:
+            continue
+        out.append({"payload": payload, "signature_b64": row.signature_b64})
+    return out
+
+
+def entries_for_gossip_hint(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    local_origin_id: str,
+    peer_vector: dict[str, int] | None = None,
+    limit: int = GOSSIP_HINT_LIMIT,
+) -> list[dict[str, str | dict]]:
+    """Entrées locales contiguës juste après le seq connu du pair (croissant, max `limit`).
+
+    Si le vecteur du pair est inconnu, on le traite comme 0. Un retard strictement
+    supérieur à `limit` renvoie un lot vide : le pull complet rattrape, sans saut.
+    """
+    peer_seq = int((peer_vector or {}).get(local_origin_id, 0))
+    local_max = _latest_local_seq(db, ruche_id=ruche_id, origin_id=local_origin_id)
+    if local_max <= peer_seq or local_max - peer_seq > limit:
+        return []
+    # Même règle que entries_page_for_peer (seq > vecteur, croissant), limitée à l'origine locale.
+    page_vector = dict(version_vector_for_ruche(db, ruche_id))
+    page_vector[local_origin_id] = peer_seq
+    return entries_page_for_peer(
+        db, ruche_id=ruche_id, peer_vector=page_vector, limit=limit
+    ).entries
+
+
+def signals_for_gossip_hint(
+    db: Session,
+    *,
+    ruche_id: bytes,
+    local_origin_id: str,
+    peer_vector: dict[str, int] | None = None,
+    limit: int = GOSSIP_HINT_LIMIT,
+) -> list[dict[str, str | dict]]:
+    """Signaux locaux contigus juste après le seq connu du pair (croissant, max `limit`)."""
+    peer_seq = int((peer_vector or {}).get(local_origin_id, 0))
+    local_max = int(
+        db.scalar(
+            select(HiveSignal.seq)
+            .where(HiveSignal.ruche_id == ruche_id, HiveSignal.origin_instance_id == local_origin_id)
+            .order_by(HiveSignal.seq.desc())
+            .limit(1)
+        )
+        or 0
+    )
+    if local_max <= peer_seq or local_max - peer_seq > limit:
+        return []
+    from mediatracker.hive.signal import signal_version_vector_for_ruche
+
+    page_vector = dict(signal_version_vector_for_ruche(db, ruche_id))
+    page_vector[local_origin_id] = peer_seq
+    return signals_page_for_peer(
+        db, ruche_id=ruche_id, peer_vector=page_vector, limit=limit
+    ).entries
+
+
 def _is_tirage_address(address: str) -> bool:
     text = address.strip()
     return not text or text == "tirage"
@@ -178,6 +260,7 @@ def ingest_signed_entries(
     now: datetime,
     settings: Settings | None = None,
     collected_disponible_cles: list[dict] | None = None,
+    allow_seq_gap: bool = True,
 ) -> int:
     accepted = 0
     ingested_disponible_cles: list[dict] = []
@@ -221,6 +304,9 @@ def ingest_signed_entries(
             )
             if existing is not None or seq < latest:
                 continue
+        elif seq > latest + 1 and not allow_seq_gap:
+            # Hint : refuser un saut, sinon le vecteur avancerait et le pull raterait le préfixe.
+            continue
         fiche = payload.get("fiche")
         file_id_raw = payload.get("file_id")
         file_id = bytes.fromhex(file_id_raw) if isinstance(file_id_raw, str) else None

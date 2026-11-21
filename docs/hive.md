@@ -48,17 +48,19 @@ Lors du `POST /hive/ruche/{id}/gossip/sync`, chaque instance émet toujours un o
 
 Avant qu’un fichier soit visible des pairs, l’instance calcule une **empreinte** (empreinte SHA par blocs du fichier) via un processus dédié dans le conteneur.
 
-## Demandes et liste Recherché
+## Demandes des autres
 
-Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Reçues**, **Recherché**.
+Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Demandes des autres**.
 
 **Mes demandes** regroupe vos suivis par fiche (une carte par série ou par film). Les séries se déplient pour lister chaque épisode demandé avec son état ; les fiches avec un transfert en cours remontent en tête.
 
+**Demandes des autres** affiche deux sections : **Vous l’avez** (partage à valider ou refus) et **Personne ne l’a encore** (recherches sans possesseur). La pastille de l’onglet est la somme des deux listes. Les URL `/hive/recues` et `/hive/recherche` redirigent vers cet onglet. Deux interrupteurs en tête de page correspondent à `hive_auto_accept_requests` et `hive_auto_take_wanted`. Quand ce dernier est activé, l’instance prend en charge automatiquement jusqu’à trois recherches de la section **Personne ne l’a encore** par passage (à l’activation du réglage, à l’échéance gossip et à l’ouverture de l’onglet), en réutilisant la même logique que la prise en charge manuelle.
+
 - Rien n’est partagé tant que vous ne l’avez pas décidé ; une **demande** prévient les membres qui possèdent déjà le fichier (demandes **anonymes** côté ruche).
-- **Reçues** affiche une seule ligne par épisode ou film demandé, même si plusieurs membres ou plusieurs versions sont demandés ; **Accepter** ou **Refuser** s’applique à toutes les demandes regroupées sur cette ligne.
+- **Vous l’avez** affiche une seule ligne par épisode ou film demandé, même si plusieurs membres ou plusieurs versions sont demandés ; **Accepter** ou **Refuser** s’applique à toutes les demandes regroupées sur cette ligne.
 - Quand la version demandée change (qualité ou langue), l’ancienne demande est retirée de la ruche avant la publication de la nouvelle.
-- Si aucun pair ne l’a, le titre peut figurer dans **Recherché** pour qu’un autre membre se le procure puis le partage.
-- **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid).
+- Si aucun pair ne l’a, le titre peut figurer dans **Personne ne l’a encore** pour qu’un autre membre se le procure puis le partage.
+- **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid), plus les interrupteurs d’acceptation automatique et de prise en charge automatique des recherches.
 - **Réglages → Hive → Source de téléchargement → Ruche seule** (`hive_only`) : le téléchargement automatique et les sondages n’utilisent que Hive ; les sources distantes restent testables à la main dans Réglages → Sources.
 
 ## Téléchargements
@@ -82,13 +84,13 @@ Lorsque vous demandez **explicitement** une version dans le catalogue Hive (y co
 
 Les téléchargements **automatiques** et le **remplacement proposé** après un repli de profil conservent le comportement habituel (un seul fichier retenu).
 
-### Bon samaritain (Recherché)
+### Bon samaritain (recherches sans fichier)
 
-Si vous prenez en charge une demande **Recherché** pour un autre membre, la recherche locale (sources et Hive) n’utilise que le **profil de qualité par défaut** de l’instance, **sans** enchaîner les profils de repli.
+Si vous prenez en charge une entrée **Personne ne l’a encore** pour un autre membre, la recherche locale (sources et Hive) n’utilise que le **profil de qualité par défaut** de l’instance, **sans** enchaîner les profils de repli.
 
-### Visibilité Recherché
+### Visibilité des recherches sans fichier
 
-Une entrée **Recherché** est masquée dès qu’un fichier est présent sur le créneau concerné, **quelle que soit la version** (y compris une copie secondaire en multi-versions).
+Une entrée **Personne ne l’a encore** est masquée dès qu’un fichier est présent sur le créneau concerné, **quelle que soit la version** (y compris une copie secondaire en multi-versions).
 
 Si le pair est injoignable ou **occupé** (limite de transferts, fenêtre horaire, débit saturé), MediaTracker peut **classer** les sources disponibles d’après les instantanés de charge reçus des pairs, choisir un pair moins chargé, puis **basculer** vers un autre pair ou une autre source de l’ordre **Réglages → Sources**.
 

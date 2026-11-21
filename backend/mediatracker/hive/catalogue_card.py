@@ -114,6 +114,14 @@ def _merge_versions(version_lists: list[list[dict[str, Any]]]) -> list[dict[str,
     return list(merged.values())
 
 
+def catalogue_work_is_fully_owned(work: dict[str, Any]) -> bool:
+    """True si l’œuvre (série : tous les épisodes catalogue) a déjà un fichier local présent."""
+    episodes = work.get("episodes")
+    if work.get("type") == "series" and isinstance(episodes, list) and episodes:
+        return all(bool(ep.get("in_library")) for ep in episodes if isinstance(ep, dict))
+    return bool(work.get("in_library"))
+
+
 def aggregate_catalogue_works(
     db: Session,
     settings: Settings,

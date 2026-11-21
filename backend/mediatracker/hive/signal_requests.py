@@ -37,6 +37,7 @@ from mediatracker.hive.signal_policy import (
     cherche_slot_eligible_for_publish,
     hive_auto_accept_requests_enabled,
 )
+from mediatracker.hive.signal_wanted import media_type_from_cle
 
 
 def opaque_request_id(*, ruche_id: bytes, requester_origin: str, cle: dict) -> str:
@@ -76,9 +77,23 @@ def _resolution_row(
     )
 
 
+def _film_item_with_present_file(db: Session, *, media_id: int) -> MediaItem | None:
+    for item in db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all():
+        if item_file_present(db, item):
+            return item
+    return None
+
+
+def _film_item_for_requester(db: Session, *, media_id: int) -> MediaItem | None:
+    for item in db.scalars(select(MediaItem).where(MediaItem.media_id == media_id)).all():
+        if not item_file_present(db, item) and not item.watched:
+            return item
+    return None
+
+
 def _find_local_item_for_cle(db: Session, cle: dict) -> tuple[Media, MediaItem] | None:
     tmdb_id = cle.get("tmdb_id")
-    media_type = str(cle.get("type") or "film")
+    media_type = media_type_from_cle(cle)
     if tmdb_id is None:
         return None
     media = db.scalar(select(Media).where(Media.tmdb_id == tmdb_id, Media.type == media_type).limit(1))
@@ -96,7 +111,7 @@ def _find_local_item_for_cle(db: Session, cle: dict) -> tuple[Media, MediaItem] 
             ).limit(1)
         )
     else:
-        item = db.scalar(select(MediaItem).where(MediaItem.media_id == media.id).limit(1))
+        item = _film_item_with_present_file(db, media_id=media.id)
     if item is None or not item_file_present(db, item):
         return None
     return media, item
@@ -146,6 +161,32 @@ def local_cherche_active_for_work(db: Session, *, ruche_id: bytes, origin: str, 
     return False
 
 
+def _received_accept_follow_up_status(db: Session, settings: Settings, item: MediaItem) -> str | None:
+    """Statut affichable après acceptation ; None si la ligne peut disparaître de la liste."""
+    from mediatracker.db.models import HiveFileFingerprint
+    from mediatracker.hive.catalog import _public_address_configured, catalog_entry_local_for_item
+
+    if item.id is None:
+        return "sharing"
+    fp = db.get(HiveFileFingerprint, item.id)
+    preparing = fp is not None and not (fp.sha256_hex or "").strip() and bool(item.file_path)
+    if preparing:
+        return "preparing"
+    if not _public_address_configured(db):
+        return "blocked"
+    if catalog_entry_local_for_item(db, settings, item):
+        return None
+    return "sharing"
+
+
+def _merge_received_status(existing: str, incoming: str) -> str:
+    order = ("pending", "preparing", "blocked", "sharing")
+    try:
+        return existing if order.index(existing) <= order.index(incoming) else incoming
+    except ValueError:
+        return incoming
+
+
 def list_received_requests(db: Session, settings: Settings) -> list[dict[str, Any]]:
     self_origin = _self_origin(settings)
     buckets: dict[tuple[bytes, str], dict[str, Any]] = {}
@@ -153,9 +194,15 @@ def list_received_requests(db: Session, settings: Settings) -> list[dict[str, An
         rid = ruche.ruche_id
         for origin, cle in _active_remote_cherche(db, ruche_id=rid, self_origin=self_origin):
             resolution = _resolution_row(db, ruche_id=rid, requester_origin=origin, cle=cle)
-            if resolution is not None:
+            if resolution is not None and resolution.status == "refused":
                 continue
             matched = _find_local_item_for_cle(db, cle)
+            if matched is None and resolution is not None and resolution.media_item_id:
+                media_item = db.get(MediaItem, resolution.media_item_id)
+                if media_item is not None:
+                    media = db.get(Media, media_item.media_id)
+                    if media is not None:
+                        matched = (media, media_item)
             if matched is None:
                 continue
             media, item = matched
@@ -163,6 +210,13 @@ def list_received_requests(db: Session, settings: Settings) -> list[dict[str, An
 
             assert item.id is not None
             work_key = _stable_work_key(cle)
+            if resolution is not None and resolution.status == "accepted":
+                follow_up = _received_accept_follow_up_status(db, settings, item)
+                if follow_up is None:
+                    continue
+                row_status = follow_up
+            else:
+                row_status = "pending"
             key = (rid, work_key)
             already_shared = has_share_intent(db, item.id) and not effective_exclude_all_for_ui(db, item.id)
             bucket = buckets.get(key)
@@ -177,12 +231,14 @@ def list_received_requests(db: Session, settings: Settings) -> list[dict[str, An
                     "episode": item.episode,
                     "media_item_id": item.id,
                     "already_shared": already_shared,
-                    "status": "pending",
+                    "status": row_status,
                     "requester_count": 0,
                     "requested_versions": set(),
                     "_origins": set(),
                 }
                 buckets[key] = bucket
+            else:
+                bucket["status"] = _merge_received_status(str(bucket["status"]), row_status)
             bucket["_origins"].add(origin)
             version = str(cle.get("version") or "").strip()
             if version:

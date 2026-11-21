@@ -58,7 +58,7 @@ import HiveBulkShareMenuItems from "../components/HiveBulkShareMenuItems.vue";
 import HiveSeriesShareSummary from "../components/HiveSeriesShareSummary.vue";
 import { useHiveSharePolling } from "../composables/useHiveSharePolling";
 import type { HiveShareUiState } from "../hive/hiveBadges";
-import { hiveEpisodeShareChip } from "../hive/hiveEpisodeShareLabel";
+import { hiveEpisodeShareChips, type HiveEpisodeShareChip } from "../hive/hiveEpisodeShareLabel";
 
 interface MediaRow {
   id: number;
@@ -223,8 +223,22 @@ const hiveSeriesRequests = ref<HiveMyRequestItem[]>([]);
 const hiveEpisodeShares = ref<Record<number, HiveShareUiState>>({});
 const hiveEmpreintesSignal = ref(0);
 
-function hiveChipForEpisode(itemId: number) {
-  return hiveEpisodeShareChip(hiveEpisodeShares.value[itemId]);
+function hiveChipsForEpisode(itemId: number): HiveEpisodeShareChip[] {
+  const state =
+    hiveEpisodeShares.value[itemId] ??
+    (primaryItemId.value === itemId ? hiveShare.value : null);
+  return hiveEpisodeShareChips(state);
+}
+
+function episodeFileOnDisk(episodeRow: Episode): boolean {
+  return episodeRow.file_status === "present";
+}
+
+function forceRedownloadLabel(compact: boolean, onDisk: boolean): string {
+  if (!onDisk) {
+    return "Forcer le téléchargement";
+  }
+  return compact ? "Retélécharger" : "Retélécharger (remplace le fichier)";
 }
 
 function seasonShareLabel(group: Season): string | null {
@@ -260,15 +274,6 @@ async function refreshHiveEpisodeShares() {
   } catch {
     hiveEpisodeShares.value = {};
   }
-}
-
-async function shareEpisodeHive(itemId: number) {
-  await api(`/api/v1/hive/items/${itemId}/sharing`, {
-    method: "PATCH",
-    body: JSON.stringify({ exclude_all: false, excluded_ruche_ids: [] }),
-  });
-  await refreshHiveEpisodeShares();
-  await onHiveShareMenuChanged();
 }
 
 const primaryItemId = computed((): number | null => {
@@ -1352,6 +1357,12 @@ const ficheHasFiles = computed(() => {
   return false;
 });
 
+const filmFilePresent = computed(
+  () =>
+    filmItem.value?.file_status === "present" ||
+    Boolean(media.value?.on_disk && media.value?.file_status === "present"),
+);
+
 const showHiveFicheBlock = computed(() => {
   if (!hiveEnabled.value || !media.value) {
     return false;
@@ -1360,7 +1371,7 @@ const showHiveFicheBlock = computed(() => {
     return false;
   }
   if (media.value.type === "film") {
-    return Boolean(primaryItemId.value && filmItem.value?.downloaded);
+    return Boolean(primaryItemId.value && filmFilePresent.value);
   }
   return true;
 });
@@ -1644,8 +1655,14 @@ function episodeStatusIconName(episodeRow: Episode): string {
             <span v-if="media.film_not_yet_available" class="pill warn">
               <StatusIcon name="waiting" label="Pas encore disponible" /> Pas encore disponible
             </span>
-            <span v-else-if="media.file_status === 'present'" class="pill info">
+            <span v-else-if="media.type === 'film' && media.file_status === 'present'" class="pill info">
               <StatusIcon :name="fileStatusIcon(media.file_status)" label="Fichier" /> Fichier présent
+            </span>
+            <span
+              v-if="hiveEnabled && media.type === 'film' && hiveShare && hiveShare.shared && !hiveShare.exclude_all && filmFilePresent"
+              class="pill honey hive-hero-share-pill"
+            >
+              Partage actif
             </span>
           </p>
           <p
@@ -2065,7 +2082,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
     </div>
 
     <HiveMediaShareRow
-      v-if="showHiveFicheBlock && media.type === 'film' && primaryItemId && filmItem?.downloaded"
+      v-if="showHiveFicheBlock && media.type === 'film' && primaryItemId && filmFilePresent"
       :state="hiveShare"
       :hive-enabled="hiveEnabled"
       :media-item-id="primaryItemId"
@@ -2093,6 +2110,7 @@ function episodeStatusIconName(episodeRow: Episode): string {
       <FilmFileBlock
         :hive-enabled="hiveEnabled"
         :item="filmItem"
+        :hive-share-chips="primaryItemId ? hiveChipsForEpisode(primaryItemId) : []"
         :keep="keepMedia"
         :media-id="media.id"
         @mark-watched="(undo) => markWatched({ item_id: filmItem!.id, undo })"
@@ -2262,13 +2280,20 @@ function episodeStatusIconName(episodeRow: Episode): string {
                   <span v-if="formatDate(episodeRow.air_date)" class="hint">
                     Diffusion {{ formatDate(episodeRow.air_date) }}
                   </span>
-                  <span
-                    v-if="hiveEnabled && hiveChipForEpisode(episodeRow.id)"
-                    class="hive-ep-chip"
-                    :class="`tone-${hiveChipForEpisode(episodeRow.id)?.tone}`"
-                  >
-                    {{ hiveChipForEpisode(episodeRow.id)?.label }}
-                  </span>
+                  <template v-if="hiveEnabled">
+                    <span
+                      v-for="chip in hiveChipsForEpisode(episodeRow.id)"
+                      :key="chip.key"
+                      class="hive-ep-chip"
+                      :class="[`tone-${chip.tone}`, { 'has-bar': chip.showBar }]"
+                    >
+                      <span class="chip-label-short">{{ chip.labelShort }}</span>
+                      <span class="chip-label-long">{{ chip.labelLong }}</span>
+                      <span v-if="chip.showBar && chip.barPct != null" class="hive-ep-chip-bar" aria-hidden="true">
+                        <i :style="{ width: `${chip.barPct}%` }" />
+                      </span>
+                    </span>
+                  </template>
                 </div>
               </div>
               <div class="ctrl ep-ctrl fiche-ctrl" @click.stop>
@@ -2351,14 +2376,6 @@ function episodeStatusIconName(episodeRow: Episode): string {
                   >
                     Télécharger
                   </button>
-                  <button
-                    v-if="hiveEnabled && episodeRow.downloaded"
-                    type="button"
-                    role="menuitem"
-                    @click="shareEpisodeHive(episodeRow.id)"
-                  >
-                    Partager cet épisode
-                  </button>
                   <HiveContextMenuItems
                     :media-item-id="episodeRow.id"
                     :media-id="media.id"
@@ -2367,13 +2384,15 @@ function episodeStatusIconName(episodeRow: Episode): string {
                     @changed="reload"
                   />
                   <button
+                    v-if="episodeRow.source_available || episodeFileOnDisk(episodeRow) || episodeRow.downloaded"
                     type="button"
                     class="force-download"
                     data-force-download
                     role="menuitem"
                     @click="forceDownload({ item_id: episodeRow.id })"
                   >
-                    Forcer le téléchargement
+                    <span class="force-dl-short">{{ forceRedownloadLabel(true, episodeFileOnDisk(episodeRow)) }}</span>
+                    <span class="force-dl-long">{{ forceRedownloadLabel(false, episodeFileOnDisk(episodeRow)) }}</span>
                   </button>
                   <button
                     v-if="episodeRow.downloaded"
@@ -2826,11 +2845,63 @@ function episodeStatusIconName(episodeRow: Episode): string {
   font-size: 0.74rem;
   font-weight: 700;
   color: var(--honey, #d9b46a);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  line-height: 1.2;
 }
 .hive-ep-chip.tone-muted {
   color: var(--muted);
 }
 .hive-ep-chip.tone-danger {
   color: var(--danger);
+}
+.hive-ep-chip.tone-info {
+  color: var(--accent, #6eb5ff);
+}
+.hive-ep-chip.tone-ok {
+  color: var(--ok, #79c9a4);
+}
+.hive-ep-chip .chip-label-long {
+  display: none;
+}
+.hive-ep-chip-bar {
+  display: inline-block;
+  width: 2.5rem;
+  height: 0.25rem;
+  background: rgb(255 255 255 / 12%);
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.hive-ep-chip-bar > i {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.85;
+}
+.force-dl-long {
+  display: none;
+}
+.pill.honey.hive-hero-share-pill {
+  color: var(--honey, #d9b46a);
+  border-color: color-mix(in srgb, var(--honey, #d9b46a) 45%, transparent);
+}
+@media (min-width: 721px) {
+  .hive-ep-chip .chip-label-short {
+    display: none;
+  }
+  .hive-ep-chip .chip-label-long {
+    display: inline;
+  }
+  .force-dl-short {
+    display: none;
+  }
+  .force-dl-long {
+    display: inline;
+  }
 }
 </style>

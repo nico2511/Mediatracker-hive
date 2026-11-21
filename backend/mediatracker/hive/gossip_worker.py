@@ -25,9 +25,18 @@ from mediatracker.hive.membership import ruches_for_instance
 
 logger = logging.getLogger(__name__)
 
+_hive_worker_startup_catchup_done = False
+
 HIVE_GOSSIP_NEXT_AT_KEY = "hive_gossip_next_at"
+HIVE_GOSSIP_LAST_AT_KEY = "hive_gossip_last_at"
 _GOSSIP_BASE_SECONDS = 600.0
 _GOSSIP_JITTER_SECONDS = 120.0
+
+
+def _dt_to_iso_z(when: datetime) -> str:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _read_next_at(db: Session) -> datetime | None:
@@ -40,13 +49,41 @@ def _read_next_at(db: Session) -> datetime | None:
         return None
 
 
+def _read_last_at(db: Session) -> datetime | None:
+    row = db.get(Setting, HIVE_GOSSIP_LAST_AT_KEY)
+    if row is None or not (row.value or "").strip():
+        return None
+    try:
+        return datetime.fromisoformat(row.value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _write_next_at(db: Session, when: datetime) -> None:
-    iso = when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    iso = _dt_to_iso_z(when)
     row = db.get(Setting, HIVE_GOSSIP_NEXT_AT_KEY)
     if row is None:
         db.add(Setting(key=HIVE_GOSSIP_NEXT_AT_KEY, value=iso))
     else:
         row.value = iso
+
+
+def _write_last_at(db: Session, when: datetime) -> None:
+    iso = _dt_to_iso_z(when)
+    row = db.get(Setting, HIVE_GOSSIP_LAST_AT_KEY)
+    if row is None:
+        db.add(Setting(key=HIVE_GOSSIP_LAST_AT_KEY, value=iso))
+    else:
+        row.value = iso
+
+
+def gossip_schedule_iso(db: Session) -> tuple[str | None, str | None]:
+    """Prochain et dernier passage gossip (UTC ISO), pour l’interface."""
+    nxt = _read_next_at(db)
+    last = _read_last_at(db)
+    next_iso = _dt_to_iso_z(nxt) if nxt is not None else None
+    last_iso = _dt_to_iso_z(last) if last is not None else None
+    return next_iso, last_iso
 
 
 def schedule_next_gossip(db: Session, now: datetime, *, interval_seconds: float | None = None) -> datetime:
@@ -107,6 +144,45 @@ class PeerExchangeTarget:
     peer_instance_id: str | None = None
 
 
+def _maybe_auto_accept_stored_incoming_tick(db: Session, settings: Settings, *, moment: datetime) -> None:
+    from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
+
+    try:
+        with db.begin_nested():
+            maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
+    except Exception:
+        logger.exception("Rattrapage auto-acceptation demandes Hive (gossip) échoué.")
+
+
+def _maybe_auto_take_wanted_tick(db: Session, settings: Settings, *, moment: datetime) -> None:
+    from mediatracker.hive.signal_wanted import maybe_try_auto_take_wanted
+
+    try:
+        maybe_try_auto_take_wanted(db, settings, now=moment)
+    except Exception:
+        logger.exception("Rattrapage auto-prise recherché Hive (gossip) échoué.")
+
+
+def _isolated_auto_accept_stored_incoming_at_startup(
+    factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    moment: datetime,
+) -> None:
+    db = factory()
+    try:
+        if not hive_enabled_in_db(db):
+            return
+        from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
+
+        if maybe_try_auto_accept_stored_incoming(db, settings, now=moment) > 0:
+            commit_retry(db)
+    except Exception:
+        logger.exception("Rattrapage auto-acceptation demandes Hive au démarrage échoué.")
+    finally:
+        db.close()
+
+
 def run_peer_exchange(db: Session, settings: Settings, target: PeerExchangeTarget, *, now: datetime) -> None:
     pull_member_list_from_peer(
         db,
@@ -152,7 +228,10 @@ def hive_gossip_tick(
             except Exception:
                 logger.exception("Échange gossip Hive échoué (ruche %s).", target.ruche_id.hex())
         refresh_hive_catalogue_store(db, now=moment, settings=settings)
+        _maybe_auto_accept_stored_incoming_tick(db, settings, moment=moment)
+        _maybe_auto_take_wanted_tick(db, settings, moment=moment)
         if not force:
+            _write_last_at(db, moment)
             schedule_next_gossip(db, moment)
         return True
 
@@ -173,6 +252,9 @@ def hive_gossip_tick(
                 logger.exception("Gossip Hive vers pair échoué (ruche %s).", rid.hex())
 
     refresh_hive_catalogue_store(db, now=moment, settings=settings)
+    _maybe_auto_accept_stored_incoming_tick(db, settings, moment=moment)
+    _maybe_auto_take_wanted_tick(db, settings, moment=moment)
+    _write_last_at(db, moment)
     schedule_next_gossip(db, moment)
     return True
 
@@ -238,7 +320,11 @@ def run_worker_hive_gossip_isolated(
     now: datetime | None = None,
 ) -> None:
     """Entrée worker : gossip et burst isolés ; le burst continue même si le tick échoue."""
+    global _hive_worker_startup_catchup_done
     moment = now or datetime.now(timezone.utc)
+    if not _hive_worker_startup_catchup_done:
+        _hive_worker_startup_catchup_done = True
+        _isolated_auto_accept_stored_incoming_at_startup(factory, settings, moment=moment)
     try:
         _isolated_gossip_tick(factory, settings, moment=moment)
     except OperationalError as exc:

@@ -313,7 +313,7 @@ def test_received_api_never_leaks_origin(client, settings, tmp_path):
                 signature_b64=sign_payload(pk, payload),
             )
         )
-        media_match = Media(type="movie", title="Fichier local B", year=2098, tmdb_id=880011, followed=False)
+        media_match = Media(type="film", title="Fichier local B", year=2098, tmdb_id=880011, followed=False)
         db.add(media_match)
         db.flush()
         lib = tmp_path / "lib"

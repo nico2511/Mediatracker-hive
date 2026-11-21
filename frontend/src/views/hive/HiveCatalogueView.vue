@@ -126,6 +126,8 @@ async function load() {
 
 onMounted(load);
 
+defineExpose({ reload: load });
+
 const empty = computed(() => !loading.value && !items.value.length);
 
 function openWork(row: WorkRow) {

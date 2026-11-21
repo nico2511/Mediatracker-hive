@@ -1240,9 +1240,65 @@ form.inline label {
 
 .fiche-hero-badges {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 0.5rem;
   margin: 0;
+}
+
+.fiche-hero-badges .pill {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  box-sizing: border-box;
+  line-height: 1.2;
+  min-height: 1.45rem;
+}
+
+/* Téléphone : si le groupe ne tient pas à côté de l'affiche, il passe à la ligne entier. */
+@media (max-width: 720px) {
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: var(--space-3);
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-hero-id {
+    display: contents;
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-poster,
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-poster-placeholder {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill):has(.fiche-hero-links) .fiche-poster,
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill):has(.fiche-hero-links) .fiche-poster-placeholder {
+    grid-row: 1 / span 3;
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-hero-title {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-hero-meta {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-hero-links {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-hero-badges,
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-series-hero-progress,
+  .fiche-hero--a .fiche-hero-top:has(.fiche-hero-badges .pill + .pill) .fiche-series-overview {
+    grid-column: 1 / -1;
+  }
 }
 
 .pill {
@@ -3895,6 +3951,25 @@ label.check input,
 
 .media-library-bulk-bar--mobile {
   display: none;
+}
+
+.media-library-bulk-count-short,
+.media-library-bulk-share-label-short {
+  display: none;
+}
+
+.media-library-bulk-bar--mobile .media-library-bulk-count-full,
+.media-library-bulk-bar--mobile .media-library-bulk-share-label-full {
+  display: none;
+}
+
+.media-library-bulk-bar--mobile .media-library-bulk-count-short,
+.media-library-bulk-bar--mobile .media-library-bulk-share-label-short {
+  display: inline;
+}
+
+.media-library-bulk-bar--mobile .media-library-bulk-share.primary {
+  margin-left: auto;
 }
 
 .media-library-select-check {

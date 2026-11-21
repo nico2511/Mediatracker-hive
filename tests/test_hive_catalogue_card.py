@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from starlette.testclient import TestClient
-from tests.conftest import catalog_min_logical_video_bytes, csrf, login
+from tests.conftest import catalog_min_logical_video_bytes, csrf, login, write_sparse_video_file
 from tests.test_hive_t3_peer_http import _enable as peer_enable
 from tests.test_hive_t5 import NOW, URL_A, URL_B, _join_ruche, _seed_file_on_a
 from tests.test_hive_t6 import _enable, _seed_catalogue_row
@@ -54,7 +54,7 @@ def test_catalogue_episode_work_key_still_resolvable(client):
     assert one.get("card_state") in {"unavailable", "waiting", "available", "library"}
 
 
-def test_catalogue_card_state_labels_library(client):
+def test_catalogue_card_state_labels_library(client, tmp_path):
     login(client)
     _enable(client)
     db = client.app.state.session_factory()
@@ -64,7 +64,9 @@ def test_catalogue_card_state_labels_library(client):
         media = Media(type="film", title="Carte", year=2099, tmdb_id=77003, followed=True)
         db.add(media)
         db.flush()
-        item = MediaItem(media_id=media.id, downloaded=True, state="downloaded")
+        fpath = tmp_path / "card-lib.mkv"
+        write_sparse_video_file(fpath, 128_000)
+        item = MediaItem(media_id=media.id, downloaded=True, file_path=str(fpath), state="downloaded")
         db.add(item)
         db.commit()
         wk = _stable_work_key(cle)

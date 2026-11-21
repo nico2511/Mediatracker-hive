@@ -60,7 +60,9 @@ def purge_ruche_catalog_and_signals(
     db.execute(delete(HiveVersions).where(HiveVersions.ruche_id == ruche_id))
     db.execute(delete(HiveSignalVersions).where(HiveSignalVersions.ruche_id == ruche_id))
     from mediatracker.hive.hive_catalogue import refresh_hive_catalogue_store
+    from mediatracker.hive.peer_gossip_vectors import clear_peer_gossip_vectors_for_ruche
 
+    clear_peer_gossip_vectors_for_ruche(db, ruche_id=ruche_id)
     refresh_hive_catalogue_store(db, now=now, settings=settings)
 
 

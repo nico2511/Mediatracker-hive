@@ -19,7 +19,8 @@ from mediatracker.hive.download_aria2 import (
 from mediatracker.hive.enqueue_types import HiveEnqueueResult
 from mediatracker.hive.identity import hive_enabled_in_db, load_private_key
 from mediatracker.hive.signal import cle_hash, item_file_present
-from mediatracker.hive.signal_requests import local_cherche_active_for_work
+from mediatracker.hive.signal_requests import _film_item_for_requester, local_cherche_active_for_work
+from mediatracker.hive.signal_wanted import media_type_from_cle
 from mediatracker.hive.source_catalog import HiveCatalogMatch
 
 
@@ -182,7 +183,7 @@ def _find_requester_item_for_cle(db: Session, cle: dict) -> tuple[Media, MediaIt
     tmdb_id = cle.get("tmdb_id")
     if tmdb_id is None:
         return None
-    media_type = str(cle.get("type") or "film")
+    media_type = media_type_from_cle(cle)
     media = db.scalar(select(Media).where(Media.tmdb_id == tmdb_id, Media.type == media_type).limit(1))
     if media is None or not media.followed:
         return None
@@ -198,7 +199,7 @@ def _find_requester_item_for_cle(db: Session, cle: dict) -> tuple[Media, MediaIt
             ).limit(1)
         )
     else:
-        item = db.scalar(select(MediaItem).where(MediaItem.media_id == media.id).limit(1))
+        item = _film_item_for_requester(db, media_id=media.id)
     if item is None or item_file_present(db, item) or item.watched:
         return None
     return media, item

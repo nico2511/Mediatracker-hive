@@ -86,6 +86,9 @@ const lineDetail = computed(() => {
   if (props.state?.transfer_active && props.state.transfer_progress_pct != null) {
     return `Transfert ${Math.round(props.state.transfer_progress_pct)} %`;
   }
+  if (shareActive.value || status.value.phase === "local_ready") {
+    return "";
+  }
   if (status.value.hint && status.value.phase !== "preparing") {
     return status.value.hint;
   }

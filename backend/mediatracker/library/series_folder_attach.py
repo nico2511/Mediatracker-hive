@@ -103,7 +103,7 @@ def attach_series_folder_if_needed(
         own = _unique_series_folder(series_root, media)
         if own is None:
             return 0
-        return _attach_tree(db, media, own, series_root, now, bound=own)
+        return _attach_tree(db, media, own, series_root, now, bound=own, settings=settings)
     except OSError:
         logger.exception("Rattachement du dossier série échoué (fiche %s).", media.id)
         return 0

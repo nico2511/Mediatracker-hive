@@ -79,6 +79,18 @@ def sharing_scope_summary(
     )
 
 
+def finalize_sharing_changes(db: Session, settings: Settings, moment, *, exclude_all: bool) -> None:
+    """Rafraîchit le catalogue, tente l'auto-accept et réveille le worker (sans commit)."""
+    from mediatracker.core.worker_wake import REASON_API_HIVE, wake_worker
+    from mediatracker.hive.hive_catalogue import refresh_hive_catalogue_store
+    from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
+
+    refresh_hive_catalogue_store(db, now=moment, settings=settings)
+    if not exclude_all:
+        maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
+    wake_worker(db, settings, REASON_API_HIVE, commit=False)
+
+
 def apply_sharing_to_scope(
     db: Session,
     settings: Settings,
@@ -88,6 +100,7 @@ def apply_sharing_to_scope(
     exclude_all: bool,
     ruche_ids: list[bytes],
     moment,
+    finalize: bool = True,
 ) -> list[int]:
     """Applique intent + exclusions + sync catalogue sur chaque fichier local du périmètre."""
     from mediatracker.hive.share_scope_registry import clear_share_scope, persist_share_scope
@@ -107,16 +120,8 @@ def apply_sharing_to_scope(
             grant_share_intent(db, item_id)
         sync_hive_catalog_item(db, settings, item_id, now=moment)
         touched.append(item_id)
-    if touched:
-        from mediatracker.hive.hive_catalogue import refresh_hive_catalogue_store
-        from mediatracker.hive.signal_requests import maybe_try_auto_accept_stored_incoming
-
-        refresh_hive_catalogue_store(db, now=moment, settings=settings)
-        if not exclude_all:
-            maybe_try_auto_accept_stored_incoming(db, settings, now=moment)
-        from mediatracker.core.worker_wake import REASON_API_HIVE, wake_worker
-
-        wake_worker(db, settings, REASON_API_HIVE, commit=False)
+    if touched and finalize:
+        finalize_sharing_changes(db, settings, moment, exclude_all=exclude_all)
     return touched
 
 

@@ -137,7 +137,7 @@ Fiche **série** : mise en page dédiée (carte Suivi mobile, barre d’actions 
 
 ### Fiche film — fichier
 
-Hors « pas encore disponible », le panneau **Film** détaille le fichier unique : statut, nom, actions **Garder**, marquer vu, retélécharger, forcer le téléchargement, suppression vers corbeille, partage Hive si applicable.
+Hors « pas encore disponible », le panneau **Film** détaille le fichier unique : statut, nom, actions **Garder**, marquer vu, **Retélécharger** (remplace le fichier sur ordinateur), suppression vers corbeille. Le bloc **Hive** et les pastilles de partage sur la fiche film s’affichent lorsque le fichier est **présent** sur le disque, pas seulement marqué téléchargé.
 
 ### Fiche série — saisons et épisodes
 
@@ -145,9 +145,9 @@ Section **Saisons et épisodes** (série suivie ou fiches avec fichiers restants
 
 - chaque saison se **déplie** ; compteurs vus, fichiers sur disque, épisodes au catalogue ;
 - par saison : **Garder**, menu (marquer saison vue/non vue, supprimer la saison, forcer la saison, partage Hive en masse) ;
-- par épisode : code SxxExx, statut (téléchargé, en cours, absent…), nom de fichier, date de diffusion, puce Hive ;
+- par épisode : code SxxExx, statut (téléchargé, en cours, absent…), nom de fichier, date de diffusion, pastilles Hive (**Partagé**, **Non partagé**, **Empreinte**, **Reçu via Hive**, **Entrant** / **Transfert entrant**, **Envoi** / **Transfert sortant**) selon l’état réel du fichier et du partage ; **Partagé** et **Envoi** peuvent coexister pendant un envoi ; un fichier reçu puis reparatagé n’affiche que **Partagé** ; compteur de saison `x/y partagés` basé sur les fichiers présents (corbeille et réception en cours exclus) ;
 - **Garder** par épisode (désactivé si la série ou la saison est déjà en « Garder ») ;
-- menu épisode : vu/non vu, vu jusqu’à cet épisode, restaurer, retélécharger, télécharger, forcer, supprimer, partage Hive, etc.
+- menu épisode (appui long / clic droit, sans ⋯) : vu/non vu, vu jusqu’à cet épisode, une seule entrée **Partager** ou **Ne plus partager**, choisir les ruches, restaurer, **Retélécharger** (téléphone) / **Retélécharger (remplace le fichier)** (ordinateur) si le fichier est déjà sur disque, télécharger, supprimer, etc.
 
 ### Réglages de la fiche
 
@@ -170,6 +170,10 @@ Repli **Suppression et fin du suivi** :
 Sur **Médias** (`/medias`), le bouton **Sélectionner** permet de cocher plusieurs fiches **parmi celles affichées** (filtres et recherche respectés), puis **Supprimer les fiches**.
 
 - Barre d’outils : compteur, **Tout sélectionner** (visible uniquement), **Annuler**, **Supprimer les fiches** ;
+- lorsque **Hive** est activé : **Partager sur Hive** et **Ne plus partager** s’ajoutent à la barre (**ordinateur**). Sur **téléphone**, **Partager** et **Annuler** restent visibles ; **Ne plus partager**, **Tout sélectionner** et **Supprimer les fiches** passent dans le menu **Plus** ;
+- **Partager sur Hive** ouvre une confirmation listant les fiches sélectionnées et rappelle qu’une série ne partage que les épisodes présents sur disque (les titres sans fichier sont ignorés). **Ne plus partager** agit sans confirmation ;
+- le résultat est affiché en nombre de **fiches** (une série compte pour 1), avec le décompte des titres sans fichier ignorés ; une fiche en **mode tirage** (instance qui ne publie pas) est **ignorée avec sa raison**, pas comptée en échec ; pour un partage réussi, un rappel précise que seuls les épisodes sur disque ont été pris en compte sur les séries ; la bannière de résultat peut être fermée ;
+- l’action groupée appelle `PATCH /api/v1/hive/media/bulk-sharing` (`exclude_all: false` pour partager, `true` pour arrêter) ;
 - **Échap** quitte le mode sélection ou ferme le dialogue de confirmation ;
 - la confirmation appelle `DELETE /api/v1/media/bulk` avec `trash: false` : les fiches, épisodes, liens et historique associés sont retirés ; les téléchargements en cours sont **annulés** ; le journal des renommages est **conservé** ;
 - en sélection multiple, l’interface précise que **les fichiers sur le disque ne sont pas touchés** (aucun envoi à la corbeille). Les dossiers restent dans la bibliothèque physique ;

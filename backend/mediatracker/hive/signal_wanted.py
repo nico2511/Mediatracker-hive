@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -35,6 +36,9 @@ from mediatracker.hive.signal_mini_fiche import mini_fiche_display_meta, parse_s
 from mediatracker.hive.wanted_tmdb import fetch_wanted_tmdb_meta
 
 WANTED_POSSEDE_GRACE_HOURS = 72
+AUTO_TAKE_WANTED_MAX_PER_PASS = 3
+
+logger = logging.getLogger(__name__)
 
 
 def _aware_utc(moment: datetime) -> datetime:
@@ -50,9 +54,13 @@ def _self_origin(settings: Settings) -> str | None:
     return hive_public_id_from_public_key(pk.public_key())
 
 
-def _media_type_from_cle(cle: dict) -> str:
+def media_type_from_cle(cle: dict) -> str:
     raw = str(cle.get("type") or "film")
     return "film" if raw in {"film", "movie"} else "series"
+
+
+def _media_type_from_cle(cle: dict) -> str:
+    return media_type_from_cle(cle)
 
 
 def _work_key_for_cle(cle: dict) -> str:
@@ -429,6 +437,94 @@ def hive_volunteer_active_for_item(db: Session, media_item_id: int) -> bool:
         select(HiveWantedVolunteer.id).where(HiveWantedVolunteer.media_item_id == media_item_id).limit(1)
     )
     return row is not None
+
+
+def _coarse_work_identity(media_type: str, tmdb_id: Any) -> tuple[str, int] | None:
+    if not isinstance(tmdb_id, int):
+        return None
+    return (media_type, tmdb_id)
+
+
+def _auto_take_skip_local_busy(db: Session, row: dict[str, Any]) -> bool:
+    """Ignore déjà volontaire, fiche suivie localement ou téléchargement en cours."""
+    if row.get("volunteering"):
+        return True
+    tmdb_id = row.get("tmdb_id")
+    media_type = str(row.get("type") or "film")
+    if not isinstance(tmdb_id, int):
+        return False
+    media = db.scalar(select(Media).where(Media.tmdb_id == tmdb_id, Media.type == media_type).limit(1))
+    if media is None:
+        return False
+    if media.followed:
+        return True
+    from mediatracker.core.pipeline.download_guard import active_download_for_item
+
+    items_q = select(MediaItem).where(MediaItem.media_id == media.id)
+    if media_type == "series":
+        season, episode = row.get("season"), row.get("episode")
+        if season is not None and episode is not None:
+            items_q = items_q.where(MediaItem.season == season, MediaItem.episode == episode)
+    for item in db.scalars(items_q).all():
+        if item.id is None:
+            continue
+        if item_file_present(db, item):
+            return True
+        if active_download_for_item(db, item.id) is not None:
+            return True
+    if bool(getattr(media, "download_backlog", False)) or bool(media.catch_up_pending):
+        return True
+    return False
+
+
+def try_auto_take_wanted_for_instance(
+    db: Session,
+    settings: Settings,
+    *,
+    now: datetime,
+    limit: int = AUTO_TAKE_WANTED_MAX_PER_PASS,
+) -> int:
+    from mediatracker.hive.identity import hive_enabled_in_db
+    from mediatracker.hive.signal_policy import hive_auto_take_wanted_enabled
+
+    if not hive_enabled_in_db(db) or not hive_auto_take_wanted_enabled(db):
+        return 0
+    rows = list_wanted_requests(db, settings, now=now)
+    taken = 0
+    seen_coarse: set[tuple[str, int]] = set()
+    for row in rows:
+        if taken >= limit:
+            break
+        if _auto_take_skip_local_busy(db, row):
+            continue
+        coarse = _coarse_work_identity(str(row.get("type") or "film"), row.get("tmdb_id"))
+        if coarse is not None and coarse in seen_coarse:
+            continue
+        try:
+            take_wanted_request(
+                db,
+                settings,
+                work_key=str(row["work_key"]),
+                release=False,
+                now=now,
+            )
+        except Problem:
+            logger.debug("Auto-prise recherché ignorée (%s).", row.get("work_key", "")[:8])
+            continue
+        except Exception:
+            logger.exception(
+                "Auto-prise recherché échouée (work_key=%s).", row.get("work_key", "")[:8]
+            )
+            continue
+        taken += 1
+        if coarse is not None:
+            seen_coarse.add(coarse)
+    return taken
+
+
+def maybe_try_auto_take_wanted(db: Session, settings: Settings, *, now: datetime) -> int:
+    """Prise en charge automatique des recherches « Personne ne l’a encore »."""
+    return try_auto_take_wanted_for_instance(db, settings, now=now)
 
 
 def complete_wanted_volunteer_share(

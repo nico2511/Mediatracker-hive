@@ -24,6 +24,7 @@ from mediatracker.integrations.alldebrid_key import effective_alldebrid_key
 
 HIVE_REQUEST_ON_MISS_KEY = "hive_request_on_miss"
 HIVE_AUTO_ACCEPT_REQUESTS_KEY = "hive_auto_accept_requests"
+HIVE_AUTO_TAKE_WANTED_KEY = "hive_auto_take_wanted"
 CHERCHE_CATCHUP_AT_KEY = "hive.cherche_follow_catchup_at"
 CHERCHE_CATCHUP_INTERVAL = timedelta(minutes=5)
 
@@ -40,6 +41,12 @@ def hive_auto_accept_requests_enabled(db: Session) -> bool:
     from mediatracker.hive.transfer_settings import _read_bool
 
     return _read_bool(db, HIVE_AUTO_ACCEPT_REQUESTS_KEY, default=False)
+
+
+def hive_auto_take_wanted_enabled(db: Session) -> bool:
+    from mediatracker.hive.transfer_settings import _read_bool
+
+    return _read_bool(db, HIVE_AUTO_TAKE_WANTED_KEY, default=False)
 
 
 def alldebrid_configured(settings: Settings, db: Session) -> bool:

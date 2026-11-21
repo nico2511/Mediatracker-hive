@@ -6,6 +6,7 @@ import HiveContextMenuItems from "./HiveContextMenuItems.vue";
 import ProfileReplacementBanner, { type ProfileReplacementProposal } from "./ProfileReplacementBanner.vue";
 import StatusIcon from "./StatusIcon.vue";
 import { useProgressStream, type ProgressJob, type ProgressPayload } from "../composables/useProgressStream";
+import type { HiveEpisodeShareChip } from "../hive/hiveEpisodeShareLabel";
 
 interface ServedProfile {
   profile_id: number;
@@ -34,6 +35,7 @@ const props = defineProps<{
   mediaId: number;
   filmNotYetAvailable?: boolean;
   hiveEnabled?: boolean;
+  hiveShareChips?: HiveEpisodeShareChip[];
 }>();
 
 const emit = defineEmits<{
@@ -161,10 +163,30 @@ function toggleKeep() {
     />
     <div class="fb-head">
       <span v-if="item.filename" class="fname">{{ item.filename }}</span>
-      <span v-if="!filmNotYetAvailable" class="file-pill" :class="pillClass" role="status">
+      <span v-if="!filmNotYetAvailable && status === 'present'" class="file-pill ok" role="status">présent</span>
+      <span
+        v-else-if="!filmNotYetAvailable"
+        class="file-pill"
+        :class="pillClass"
+        role="status"
+      >
         <span class="dot" aria-hidden="true"></span>
         {{ pillLabel }}
       </span>
+      <template v-if="hiveEnabled && status === 'present'">
+        <span
+          v-for="chip in hiveShareChips ?? []"
+          :key="chip.key"
+          class="hive-ep-chip film-hive-chip"
+          :class="[`tone-${chip.tone}`, { 'has-bar': chip.showBar }]"
+        >
+          <span class="chip-label-short">{{ chip.labelShort }}</span>
+          <span class="chip-label-long">{{ chip.labelLong }}</span>
+          <span v-if="chip.showBar && chip.barPct != null" class="hive-ep-chip-bar" aria-hidden="true">
+            <i :style="{ width: `${chip.barPct}%` }" />
+          </span>
+        </span>
+      </template>
       <button v-if="showRestore" type="button" class="file-ctx-action" @click="emit('restore')">Restaurer</button>
       <button v-else-if="showRedownload" type="button" class="file-ctx-action" @click="emit('redownload')">
         Retélécharger
@@ -231,8 +253,12 @@ function toggleKeep() {
           data-force-download
           @click="emit('forceDownload')"
         >
-          <StatusIcon name="downloaded" label="Forcer" />
-          Forcer le téléchargement
+          <StatusIcon name="downloaded" :label="status === 'present' ? 'Retélécharger' : 'Forcer'" />
+          <template v-if="status === 'present'">
+            <span class="force-dl-short">Retélécharger</span>
+            <span class="force-dl-long">Retélécharger (remplace le fichier)</span>
+          </template>
+          <span v-else>Forcer le téléchargement</span>
         </button>
         <hr v-if="item.downloaded" class="action-menu-separator" />
         <button
@@ -249,3 +275,60 @@ function toggleKeep() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.hive-ep-chip.film-hive-chip {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--honey, #d9b46a);
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+.hive-ep-chip.tone-muted {
+  color: var(--muted);
+}
+.hive-ep-chip.tone-info {
+  color: var(--accent, #6eb5ff);
+}
+.hive-ep-chip.tone-ok {
+  color: var(--ok, #79c9a4);
+}
+.hive-ep-chip .chip-label-long {
+  display: none;
+}
+.hive-ep-chip-bar {
+  display: inline-block;
+  width: 2.5rem;
+  height: 0.25rem;
+  background: rgb(255 255 255 / 12%);
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.hive-ep-chip-bar > i {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  border-radius: 2px;
+  opacity: 0.85;
+}
+.force-dl-long {
+  display: none;
+}
+@media (min-width: 721px) {
+  .hive-ep-chip .chip-label-short {
+    display: none;
+  }
+  .hive-ep-chip .chip-label-long {
+    display: inline;
+  }
+  .force-dl-short {
+    display: none;
+  }
+  .force-dl-long {
+    display: inline;
+  }
+}
+</style>

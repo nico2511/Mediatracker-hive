@@ -178,6 +178,7 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "hive_catalog_auto_share": SettingSpec(False, "bool", "hive_catalog_auto_share", optional=True),
     "hive_request_on_miss": SettingSpec(False, "str", "hive_request_on_miss", optional=True),
     "hive_auto_accept_requests": SettingSpec(False, "bool", "hive_auto_accept_requests", optional=True),
+    "hive_auto_take_wanted": SettingSpec(False, "bool", "hive_auto_take_wanted", optional=True),
     "hive_only": SettingSpec(False, "bool", "hive_only", optional=True),
 }
 

@@ -32,6 +32,7 @@ from mediatracker.hive.peer_gossip import (
     signals_page_for_peer,
     version_vector_for_ruche,
 )
+from mediatracker.hive.peer_gossip_vectors import record_peer_gossip_vectors
 from mediatracker.hive.peer_inbound import authenticate_join_peer, authenticate_member_peer
 from mediatracker.hive.peer_info import build_local_instance_snapshot, ingest_peer_info
 from mediatracker.hive.peer_join import process_peer_join_preview, process_peer_join_request
@@ -335,6 +336,14 @@ def mount_hive_router(app) -> None:
             )
             _enforce_peer_rate(request, ctx.hive_id)
             record_reachability(session, ruche_id=ruche_id, origin_id=ctx.hive_id, now=now)
+            record_peer_gossip_vectors(
+                session,
+                ruche_id=ruche_id,
+                peer_instance_id=ctx.hive_id,
+                vector=vector,
+                signal_vector=signal_vector_in,
+                now=now,
+            )
             if doc.get("load") is not None:
                 ingest_peer_load(
                     session,
@@ -351,8 +360,17 @@ def mount_hive_router(app) -> None:
                     instance=doc.get("instance"),
                     now=now,
                 )
-            ingest_signed_entries(session, ruche_id=ruche_id, items=entries_in, now=now, settings=settings)
-            ingest_signed_signals(session, ruche_id=ruche_id, items=signals_in, now=now)
+            ingest_signed_entries(
+                session,
+                ruche_id=ruche_id,
+                items=entries_in,
+                now=now,
+                settings=settings,
+                allow_seq_gap=not is_hint,
+            )
+            ingest_signed_signals(
+                session, ruche_id=ruche_id, items=signals_in, now=now, allow_seq_gap=not is_hint
+            )
             try_auto_accept_incoming(session, settings, ruche_id=ruche_id, now=now)
             our_vector = version_vector_for_ruche(session, ruche_id)
             our_signal_vector = signal_version_vector_for_ruche(session, ruche_id)
@@ -621,7 +639,9 @@ def mount_hive_router(app) -> None:
 
             def _stream_body():
                 try:
-                    yield from iter_file_byte_range(plan.binding.path, plan.byte_range)
+                    for chunk in iter_file_byte_range(plan.binding.path, plan.byte_range):
+                        parallel_gate.record_grant_bytes(grant_id, len(chunk))
+                        yield chunk
                 finally:
                     parallel_gate.release(grant_id)
 

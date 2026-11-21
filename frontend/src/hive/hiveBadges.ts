@@ -6,6 +6,9 @@ export interface HiveShareUiState {
   preparing: boolean;
   transfer_active: boolean;
   transfer_progress_pct: number | null;
+  transfer_outbound_active?: boolean;
+  transfer_outbound_progress_pct?: number | null;
+  received_via_hive?: boolean;
   fingerprint_partial_size?: number | null;
   fingerprint_total_size?: number | null;
   hive_keep: boolean;

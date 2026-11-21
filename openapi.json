@@ -661,6 +661,106 @@
         "title": "BulkDeleteOut",
         "type": "object"
       },
+      "BulkMediaSharingIn": {
+        "properties": {
+          "exclude_all": {
+            "default": false,
+            "title": "Exclude All",
+            "type": "boolean"
+          },
+          "excluded_ruche_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Ruche Ids",
+            "type": "array"
+          },
+          "media_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Media Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "media_ids"
+        ],
+        "title": "BulkMediaSharingIn",
+        "type": "object"
+      },
+      "BulkMediaSharingOut": {
+        "properties": {
+          "acted_count": {
+            "title": "Acted Count",
+            "type": "integer"
+          },
+          "exclude_all": {
+            "title": "Exclude All",
+            "type": "boolean"
+          },
+          "failed_count": {
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "ignored_no_file_count": {
+            "title": "Ignored No File Count",
+            "type": "integer"
+          },
+          "ignored_pull_only_count": {
+            "title": "Ignored Pull Only Count",
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/BulkMediaSharingRowOut"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exclude_all",
+          "results",
+          "acted_count",
+          "ignored_no_file_count",
+          "ignored_pull_only_count",
+          "failed_count"
+        ],
+        "title": "BulkMediaSharingOut",
+        "type": "object"
+      },
+      "BulkMediaSharingRowOut": {
+        "properties": {
+          "media_id": {
+            "title": "Media Id",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_id",
+          "status"
+        ],
+        "title": "BulkMediaSharingRowOut",
+        "type": "object"
+      },
       "CandidateOut": {
         "properties": {
           "episode_count": {
@@ -5128,6 +5228,28 @@
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
+          },
+          "last_gossip_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Gossip At"
+          },
+          "next_gossip_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Gossip At"
           }
         },
         "required": [
@@ -12441,6 +12563,11 @@
             "title": "Pull Only",
             "type": "boolean"
           },
+          "received_via_hive": {
+            "default": false,
+            "title": "Received Via Hive",
+            "type": "boolean"
+          },
           "shareable": {
             "title": "Shareable",
             "type": "boolean"
@@ -12452,6 +12579,22 @@
           "transfer_active": {
             "title": "Transfer Active",
             "type": "boolean"
+          },
+          "transfer_outbound_active": {
+            "default": false,
+            "title": "Transfer Outbound Active",
+            "type": "boolean"
+          },
+          "transfer_outbound_progress_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transfer Outbound Progress Pct"
           },
           "transfer_progress_pct": {
             "anyOf": [
@@ -17866,6 +18009,48 @@
           }
         },
         "summary": "Post Join Reject",
+        "tags": [
+          "hive",
+          "hive"
+        ]
+      }
+    },
+    "/api/v1/hive/media/bulk-sharing": {
+      "patch": {
+        "operationId": "patch_bulk_media_sharing_api_v1_hive_media_bulk_sharing_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkMediaSharingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkMediaSharingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Bulk Media Sharing",
         "tags": [
           "hive",
           "hive"

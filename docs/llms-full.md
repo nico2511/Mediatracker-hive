@@ -792,7 +792,7 @@ URL : `/reglages/hive`
 
 Page composant dédié (pas dans `SettingsSectionView`).
 
-Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_only`, `hive_request_on_miss`, `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
+Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_only`, `hive_request_on_miss`, `hive_auto_accept_requests`, `hive_auto_take_wanted` (défaut faux ; si vrai, auto-prise des recherches « Personne ne l’a encore », au plus 3 par passage), `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
 
 **Ruche seule** (`hive_only`, défaut désactivé) : lorsque c’est activé, seule la source Hive est utilisable pour le téléchargement automatique, la recherche planifiée et le fil d’actualité des sources — même si une clé AllDebrid est configurée. Les tests manuels dans Réglages → Sources restent possibles. L’API refuse d’activer ce réglage si Hive est coupé (erreur 422) ; si Hive est désactivé ensuite, le réglage est sans effet. Le signal **cherche** après un miss suit toujours `hive_request_on_miss`.
 
@@ -1036,7 +1036,7 @@ Fiche **série** : mise en page dédiée (carte Suivi mobile, barre d’actions 
 
 #### Fiche film — fichier
 
-Hors « pas encore disponible », le panneau **Film** détaille le fichier unique : statut, nom, actions **Garder**, marquer vu, retélécharger, forcer le téléchargement, suppression vers corbeille, partage Hive si applicable.
+Hors « pas encore disponible », le panneau **Film** détaille le fichier unique : statut, nom, actions **Garder**, marquer vu, **Retélécharger** (remplace le fichier sur ordinateur), suppression vers corbeille. Le bloc **Hive** et les pastilles de partage sur la fiche film s’affichent lorsque le fichier est **présent** sur le disque, pas seulement marqué téléchargé.
 
 #### Fiche série — saisons et épisodes
 
@@ -1044,9 +1044,9 @@ Section **Saisons et épisodes** (série suivie ou fiches avec fichiers restants
 
 - chaque saison se **déplie** ; compteurs vus, fichiers sur disque, épisodes au catalogue ;
 - par saison : **Garder**, menu (marquer saison vue/non vue, supprimer la saison, forcer la saison, partage Hive en masse) ;
-- par épisode : code SxxExx, statut (téléchargé, en cours, absent…), nom de fichier, date de diffusion, puce Hive ;
+- par épisode : code SxxExx, statut (téléchargé, en cours, absent…), nom de fichier, date de diffusion, pastilles Hive (**Partagé**, **Non partagé**, **Empreinte**, **Reçu via Hive**, **Entrant** / **Transfert entrant**, **Envoi** / **Transfert sortant**) selon l’état réel du fichier et du partage ; **Partagé** et **Envoi** peuvent coexister pendant un envoi ; un fichier reçu puis reparatagé n’affiche que **Partagé** ; compteur de saison `x/y partagés` basé sur les fichiers présents (corbeille et réception en cours exclus) ;
 - **Garder** par épisode (désactivé si la série ou la saison est déjà en « Garder ») ;
-- menu épisode : vu/non vu, vu jusqu’à cet épisode, restaurer, retélécharger, télécharger, forcer, supprimer, partage Hive, etc.
+- menu épisode (appui long / clic droit, sans ⋯) : vu/non vu, vu jusqu’à cet épisode, une seule entrée **Partager** ou **Ne plus partager**, choisir les ruches, restaurer, **Retélécharger** (téléphone) / **Retélécharger (remplace le fichier)** (ordinateur) si le fichier est déjà sur disque, télécharger, supprimer, etc.
 
 #### Réglages de la fiche
 
@@ -1069,6 +1069,10 @@ Repli **Suppression et fin du suivi** :
 Sur **Médias** (`/medias`), le bouton **Sélectionner** permet de cocher plusieurs fiches **parmi celles affichées** (filtres et recherche respectés), puis **Supprimer les fiches**.
 
 - Barre d’outils : compteur, **Tout sélectionner** (visible uniquement), **Annuler**, **Supprimer les fiches** ;
+- lorsque **Hive** est activé : **Partager sur Hive** et **Ne plus partager** s’ajoutent à la barre (**ordinateur**). Sur **téléphone**, **Partager** et **Annuler** restent visibles ; **Ne plus partager**, **Tout sélectionner** et **Supprimer les fiches** passent dans le menu **Plus** ;
+- **Partager sur Hive** ouvre une confirmation listant les fiches sélectionnées et rappelle qu’une série ne partage que les épisodes présents sur disque (les titres sans fichier sont ignorés). **Ne plus partager** agit sans confirmation ;
+- le résultat est affiché en nombre de **fiches** (une série compte pour 1), avec le décompte des titres sans fichier ignorés ; une fiche en **mode tirage** (instance qui ne publie pas) est **ignorée avec sa raison**, pas comptée en échec ; pour un partage réussi, un rappel précise que seuls les épisodes sur disque ont été pris en compte sur les séries ; la bannière de résultat peut être fermée ;
+- l’action groupée appelle `PATCH /api/v1/hive/media/bulk-sharing` (`exclude_all: false` pour partager, `true` pour arrêter) ;
 - **Échap** quitte le mode sélection ou ferme le dialogue de confirmation ;
 - la confirmation appelle `DELETE /api/v1/media/bulk` avec `trash: false` : les fiches, épisodes, liens et historique associés sont retirés ; les téléchargements en cours sont **annulés** ; le journal des renommages est **conservé** ;
 - en sélection multiple, l’interface précise que **les fichiers sur le disque ne sont pas touchés** (aucun envoi à la corbeille). Les dossiers restent dans la bibliothèque physique ;
@@ -1302,17 +1306,19 @@ Lors du `POST /hive/ruche/{id}/gossip/sync`, chaque instance émet toujours un o
 
 Avant qu’un fichier soit visible des pairs, l’instance calcule une **empreinte** (empreinte SHA par blocs du fichier) via un processus dédié dans le conteneur.
 
-### Demandes et liste Recherché
+### Demandes des autres
 
-Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Reçues**, **Recherché**.
+Navigation **Hive** : onglets **Catalogue**, **Mes demandes**, **Demandes des autres**.
 
 **Mes demandes** regroupe vos suivis par fiche (une carte par série ou par film). Les séries se déplient pour lister chaque épisode demandé avec son état ; les fiches avec un transfert en cours remontent en tête.
 
+**Demandes des autres** affiche deux sections : **Vous l’avez** (partage à valider ou refus) et **Personne ne l’a encore** (recherches sans possesseur). La pastille de l’onglet est la somme des deux listes. Les URL `/hive/recues` et `/hive/recherche` redirigent vers cet onglet. Deux interrupteurs en tête de page correspondent à `hive_auto_accept_requests` et `hive_auto_take_wanted`. Quand ce dernier est activé, l’instance prend en charge automatiquement jusqu’à trois recherches de la section **Personne ne l’a encore** par passage (à l’activation du réglage, à l’échéance gossip et à l’ouverture de l’onglet), en réutilisant la même logique que la prise en charge manuelle.
+
 - Rien n’est partagé tant que vous ne l’avez pas décidé ; une **demande** prévient les membres qui possèdent déjà le fichier (demandes **anonymes** côté ruche).
-- **Reçues** affiche une seule ligne par épisode ou film demandé, même si plusieurs membres ou plusieurs versions sont demandés ; **Accepter** ou **Refuser** s’applique à toutes les demandes regroupées sur cette ligne.
+- **Vous l’avez** affiche une seule ligne par épisode ou film demandé, même si plusieurs membres ou plusieurs versions sont demandés ; **Accepter** ou **Refuser** s’applique à toutes les demandes regroupées sur cette ligne.
 - Quand la version demandée change (qualité ou langue), l’ancienne demande est retirée de la ruche avant la publication de la nouvelle.
-- Si aucun pair ne l’a, le titre peut figurer dans **Recherché** pour qu’un autre membre se le procure puis le partage.
-- **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid).
+- Si aucun pair ne l’a, le titre peut figurer dans **Personne ne l’a encore** pour qu’un autre membre se le procure puis le partage.
+- **Réglages → Hive → Demandes à la ruche** : comportement quand la recherche locale ne trouve rien (`hive_request_on_miss` : automatique, me demander, jamais — avec nuances selon la présence d’une clé AllDebrid), plus les interrupteurs d’acceptation automatique et de prise en charge automatique des recherches.
 - **Réglages → Hive → Source de téléchargement → Ruche seule** (`hive_only`) : le téléchargement automatique et les sondages n’utilisent que Hive ; les sources distantes restent testables à la main dans Réglages → Sources.
 
 ### Téléchargements
@@ -1336,13 +1342,13 @@ Lorsque vous demandez **explicitement** une version dans le catalogue Hive (y co
 
 Les téléchargements **automatiques** et le **remplacement proposé** après un repli de profil conservent le comportement habituel (un seul fichier retenu).
 
-#### Bon samaritain (Recherché)
+#### Bon samaritain (recherches sans fichier)
 
-Si vous prenez en charge une demande **Recherché** pour un autre membre, la recherche locale (sources et Hive) n’utilise que le **profil de qualité par défaut** de l’instance, **sans** enchaîner les profils de repli.
+Si vous prenez en charge une entrée **Personne ne l’a encore** pour un autre membre, la recherche locale (sources et Hive) n’utilise que le **profil de qualité par défaut** de l’instance, **sans** enchaîner les profils de repli.
 
-#### Visibilité Recherché
+#### Visibilité des recherches sans fichier
 
-Une entrée **Recherché** est masquée dès qu’un fichier est présent sur le créneau concerné, **quelle que soit la version** (y compris une copie secondaire en multi-versions).
+Une entrée **Personne ne l’a encore** est masquée dès qu’un fichier est présent sur le créneau concerné, **quelle que soit la version** (y compris une copie secondaire en multi-versions).
 
 Si le pair est injoignable ou **occupé** (limite de transferts, fenêtre horaire, débit saturé), MediaTracker peut **classer** les sources disponibles d’après les instantanés de charge reçus des pairs, choisir un pair moins chargé, puis **basculer** vers un autre pair ou une autre source de l’ordre **Réglages → Sources**.
 

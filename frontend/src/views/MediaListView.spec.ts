@@ -19,8 +19,13 @@ vi.mock("../pwa/connectivity", () => ({
   }),
 }));
 
+const hiveEnabledRef = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ref } = require("vue") as typeof import("vue");
+  return ref(false);
+});
 vi.mock("../composables/useHive", () => ({
-  useHiveEnabled: () => ({ hiveEnabled: ref(false) }),
+  useHiveEnabled: () => ({ hiveEnabled: hiveEnabledRef }),
 }));
 
 const routeQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }));
@@ -97,7 +102,11 @@ vi.mock("../components/StatusIcon.vue", () => ({
 import DeleteFicheDialog from "../components/DeleteFicheDialog.vue";
 import MediaListView from "./MediaListView.vue";
 
+import MediaLibraryBulkSelectionBar from "../components/MediaLibraryBulkSelectionBar.vue";
+import HiveBulkFicheShareDialog from "../components/HiveBulkFicheShareDialog.vue";
+
 beforeEach(() => {
+  hiveEnabledRef.value = false;
   apiMock.mockReset();
   saveSnapshot.mockReset();
   snapshotRows.length = 0;
@@ -227,7 +236,7 @@ describe("MediaListView bulk selection", () => {
     await selectBtn!.trigger("click");
 
     expect(wrapper.text()).toContain("0 sélectionnée");
-    const topBar = wrapper.find(".media-library-bulk-bar--top");
+    const topBar = wrapper.findComponent(MediaLibraryBulkSelectionBar);
     await topBar.findAll("button").find((b) => b.text() === "Tout sélectionner")!.trigger("click");
     expect(wrapper.text()).toContain("2 sélectionnées");
 
@@ -250,13 +259,107 @@ describe("MediaListView bulk selection", () => {
     expect(wrapper.findAll("button").some((b) => b.text() === "Sélectionner")).toBe(true);
   });
 
+  it("partage Hive en masse après confirmation", async () => {
+    hiveEnabledRef.value = true;
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/hive/media/bulk-sharing") {
+        return {
+          exclude_all: false,
+          acted_count: 1,
+          ignored_no_file_count: 1,
+          ignored_pull_only_count: 0,
+          failed_count: 0,
+          results: [],
+        };
+      }
+      return {};
+    });
+    const wrapper = mount(MediaListView);
+    await flushPromises();
+    await wrapper.findAll("button").find((b) => b.text() === "Sélectionner")!.trigger("click");
+    const topBars = wrapper.findAllComponents(MediaLibraryBulkSelectionBar);
+    const topBar = topBars.find((bar) => bar.props("variant") === "top");
+    expect(topBar).toBeTruthy();
+    await topBar!.findAll("button").find((b) => b.text() === "Tout sélectionner")!.trigger("click");
+    await topBar!.find(".media-library-bulk-share").trigger("click");
+    const shareDialog = wrapper.findComponent(HiveBulkFicheShareDialog);
+    expect(shareDialog.props("open")).toBe(true);
+    await shareDialog.find("form.dialog").trigger("submit.prevent");
+    await flushPromises();
+    expect(apiMock).toHaveBeenCalledWith(
+      "/api/v1/hive/media/bulk-sharing",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ media_ids: [1, 2], exclude_all: false, excluded_ruche_ids: [] }),
+      }),
+    );
+    expect(wrapper.text()).toContain("1 élément partagé");
+    expect(wrapper.text()).toContain("1 sans fichier ignoré");
+  });
+
   it("quitte le mode sélection avec Échap", async () => {
     const wrapper = mount(MediaListView);
     await flushPromises();
     await wrapper.findAll("button").find((b) => b.text() === "Sélectionner")!.trigger("click");
-    expect(wrapper.find(".media-library-bulk-bar--top").exists()).toBe(true);
+    expect(wrapper.findComponent(MediaLibraryBulkSelectionBar).exists()).toBe(true);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await flushPromises();
-    expect(wrapper.find(".media-library-bulk-bar--top").exists()).toBe(false);
+    expect(wrapper.findComponent(MediaLibraryBulkSelectionBar).exists()).toBe(false);
+  });
+
+  it("permet de fermer la bannière de résultat", async () => {
+    hiveEnabledRef.value = true;
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/hive/media/bulk-sharing") {
+        return {
+          exclude_all: false,
+          acted_count: 1,
+          ignored_no_file_count: 1,
+          ignored_pull_only_count: 0,
+          failed_count: 0,
+          results: [],
+        };
+      }
+      return {};
+    });
+    const wrapper = mount(MediaListView);
+    await flushPromises();
+    await wrapper.findAll("button").find((b) => b.text() === "Sélectionner")!.trigger("click");
+    const topBar = wrapper.findAllComponents(MediaLibraryBulkSelectionBar).find((bar) => bar.props("variant") === "top");
+    await topBar!.findAll("button").find((b) => b.text() === "Tout sélectionner")!.trigger("click");
+    await topBar!.find(".media-library-bulk-share").trigger("click");
+    await wrapper.findComponent(HiveBulkFicheShareDialog).find("form.dialog").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.find(".media-library-share-result").exists()).toBe(true);
+    await wrapper.find(".media-library-share-result-close").trigger("click");
+    expect(wrapper.find(".media-library-share-result").exists()).toBe(false);
+  });
+
+  it("annonce les fiches ignorées en mode tirage plutôt qu'en échec", async () => {
+    hiveEnabledRef.value = true;
+    apiMock.mockImplementation(async (url: string) => {
+      if (url === "/api/v1/hive/media/bulk-sharing") {
+        return {
+          exclude_all: false,
+          acted_count: 0,
+          ignored_no_file_count: 0,
+          ignored_pull_only_count: 2,
+          failed_count: 0,
+          results: [],
+        };
+      }
+      return {};
+    });
+    const wrapper = mount(MediaListView);
+    await flushPromises();
+    await wrapper.findAll("button").find((b) => b.text() === "Sélectionner")!.trigger("click");
+    const topBar = wrapper.findAllComponents(MediaLibraryBulkSelectionBar).find((bar) => bar.props("variant") === "top");
+    await topBar!.findAll("button").find((b) => b.text() === "Tout sélectionner")!.trigger("click");
+    await topBar!.find(".media-library-bulk-share").trigger("click");
+    await wrapper.findComponent(HiveBulkFicheShareDialog).find("form.dialog").trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.text()).toContain("2 ignorées en mode tirage");
+    expect(wrapper.text()).toContain("cette instance ne publie pas vers Hive");
+    expect(wrapper.text()).not.toContain("en échec");
   });
 });

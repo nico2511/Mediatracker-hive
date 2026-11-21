@@ -250,6 +250,10 @@ def restore(db: Session, settings: Settings, entry_id: int, *, now: datetime | N
         clear_forget_traces(item)
     _library_status(db, str(dest), "matched", item.id if item is not None else None)
     request_classify(db, settings)
+    if item is not None and item.id is not None:
+        from mediatracker.hive.catalog import maybe_sync_hive_catalog_item_isolated
+
+        maybe_sync_hive_catalog_item_isolated(db, settings, int(item.id), now=moment)
     db.commit()
     return entry
 
@@ -1121,8 +1125,11 @@ def _move_all(
                 except OSError:
                     pass
         raise CleanupError(_move_message(exc)) from exc
+    touched: set[int] = set()
     for planned in missing:
         forget_local_file(db, media, planned.item, now, voluntary=True, update_library=False)
+        if planned.item.id is not None:
+            touched.add(int(planned.item.id))
     retention = _int_setting(db, "trash_retention_days", settings.trash_retention_days)
     entries: list[TrashEntry] = []
     seen: set[str] = set()
@@ -1149,6 +1156,17 @@ def _move_all(
         forget_local_file(db, media, planned.item, now, voluntary=True, update_library=False)
         _library_status(db, key, "trashed", planned.item.id)
         _cancel_downloads(db, planned.item.id, now)
+    touched.update(entry.media_item_id for entry in entries if entry.media_item_id is not None)
+    if touched:
+        from mediatracker.hive.catalog import maybe_sync_hive_catalog_items_after_local_file_change
+
+        maybe_sync_hive_catalog_items_after_local_file_change(
+            db,
+            settings,
+            touched,
+            now=now,
+            revoke_outbound_grants=True,
+        )
     return entries
 
 

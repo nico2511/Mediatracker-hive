@@ -62,6 +62,7 @@ const catalogAutoShare = ref(false);
 const hiveOnly = ref(false);
 const hiveRequestOnMiss = ref<"auto" | "ask" | "never">("auto");
 const hiveAutoAcceptRequests = ref(false);
+const hiveAutoTakeWanted = ref(false);
 
 const transferWinAllDay = computed({
   get: () =>
@@ -168,6 +169,8 @@ async function load() {
     hiveRequestOnMiss.value = onMiss === "ask" || onMiss === "never" ? onMiss : "auto";
     hiveAutoAcceptRequests.value =
       map.get("hive_auto_accept_requests") === true || map.get("hive_auto_accept_requests") === "true";
+    hiveAutoTakeWanted.value =
+      map.get("hive_auto_take_wanted") === true || map.get("hive_auto_take_wanted") === "true";
     if (hiveOn.value) {
       identity.value = await api<Identity>("/api/v1/hive/identity");
       ruches.value = await api<RucheRow[]>("/api/v1/hive/ruches");
@@ -206,6 +209,7 @@ async function saveCore() {
         hive_only: hiveOnly.value,
         hive_request_on_miss: hiveRequestOnMiss.value,
         hive_auto_accept_requests: hiveAutoAcceptRequests.value,
+        hive_auto_take_wanted: hiveAutoTakeWanted.value,
       },
     });
     await load();
@@ -519,8 +523,13 @@ async function confirmReset() {
         </fieldset>
         <label class="hive-field switch-line sp">
           <span>
-            <span class="label">Accepter automatiquement les demandes reçues · {{ hiveAutoAcceptRequests ? "Activé" : "Désactivé" }}</span>
-            <span class="hint block">Désactivé par défaut : chaque demande reste à valider dans Reçues.</span>
+            <span class="label"
+              >Accepter automatiquement les demandes de partage · {{ hiveAutoAcceptRequests ? "Activé" : "Désactivé" }}</span
+            >
+            <span class="hint block"
+              >Désactivé par défaut : chaque demande de partage reste à valider dans « Vous l’avez ». Activé, le partage
+              d’un fichier que vous possédez se fait sans validation.</span
+            >
           </span>
           <span class="switch">
             <input
@@ -528,6 +537,21 @@ async function confirmReset() {
               type="checkbox"
               data-testid="hive-auto-accept-requests-toggle"
             />
+            <span class="switch-ui" aria-hidden="true"></span>
+          </span>
+        </label>
+        <label class="hive-field switch-line sp">
+          <span>
+            <span class="label"
+              >Prendre en charge automatiquement les recherches · {{ hiveAutoTakeWanted ? "Activé" : "Désactivé" }}</span
+            >
+            <span class="hint block"
+              >Désactivé par défaut. Activé, les recherches encore sans fichier sont prises en charge comme « Je m’en
+              occupe » : suivi, vrais téléchargements par la chaîne habituelle, puis partage à l’arrivée.</span
+            >
+          </span>
+          <span class="switch">
+            <input v-model="hiveAutoTakeWanted" type="checkbox" data-testid="hive-auto-take-wanted-toggle" />
             <span class="switch-ui" aria-hidden="true"></span>
           </span>
         </label>

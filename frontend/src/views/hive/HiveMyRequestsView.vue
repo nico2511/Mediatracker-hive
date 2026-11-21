@@ -4,11 +4,13 @@ import { onMounted, ref } from "vue";
 import HiveMyRequestList, { type DownloadProgressRow } from "../../components/hive/HiveMyRequestList.vue";
 import { api, userFacingApiError } from "../../api";
 import type { HiveMyRequestItem } from "../../hive/hiveRequests";
+import { notifyHiveTabBadges, useHiveShellContext } from "../../hive/hiveShellContext";
 
 const items = ref<HiveMyRequestItem[]>([]);
 const downloads = ref<DownloadProgressRow[]>([]);
 const error = ref("");
 const loading = ref(false);
+const hiveShell = useHiveShellContext();
 
 async function load() {
   loading.value = true;
@@ -30,6 +32,11 @@ async function load() {
   }
 }
 
+async function onMineChanged() {
+  await load();
+  notifyHiveTabBadges(hiveShell);
+}
+
 onMounted(load);
 
 defineExpose({ reload: load, itemCount: () => items.value.length });
@@ -43,7 +50,7 @@ defineExpose({ reload: load, itemCount: () => items.value.length });
     </p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-else-if="loading" class="hint">Chargement…</p>
-    <HiveMyRequestList v-else :items="items" :downloads="downloads" @changed="load" />
+    <HiveMyRequestList v-else :items="items" :downloads="downloads" @changed="onMineChanged" />
   </section>
 </template>
 

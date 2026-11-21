@@ -4,7 +4,7 @@ URL : `/reglages/hive`
 
 Page composant dédié (pas dans `SettingsSectionView`).
 
-Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_only`, `hive_request_on_miss`, `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
+Réglages persistés : `hive_enabled`, `hive_public_address`, `hive_instance_name` (via activation), `hive_catalog_auto_share`, `hive_only`, `hive_request_on_miss`, `hive_auto_accept_requests`, `hive_auto_take_wanted` (défaut faux ; si vrai, auto-prise des recherches « Personne ne l’a encore », au plus 3 par passage), `hive_transfer_parallel`, `hive_transfer_send_bps`, `hive_transfer_recv_bps`, `hive_transfer_window_start`, `hive_transfer_window_end`.
 
 **Ruche seule** (`hive_only`, défaut désactivé) : lorsque c’est activé, seule la source Hive est utilisable pour le téléchargement automatique, la recherche planifiée et le fil d’actualité des sources — même si une clé AllDebrid est configurée. Les tests manuels dans Réglages → Sources restent possibles. L’API refuse d’activer ce réglage si Hive est coupé (erreur 422) ; si Hive est désactivé ensuite, le réglage est sans effet. Le signal **cherche** après un miss suit toujours `hive_request_on_miss`.
 

@@ -183,6 +183,24 @@ def mint_fetch_grant(
     return MintedFetchGrant(grant_secret=secret, expires_at=expires_at)
 
 
+def revoke_active_fetch_grants_for_item(db: Session, *, media_item_id: int, now: datetime) -> int:
+    """Marque révoqués les grants encore actifs liés à cet épisode (fichier retiré ou déplacé)."""
+    moment = _aware_utc(now)
+    rows = list(
+        db.scalars(
+            select(HiveFetchGrant).where(
+                HiveFetchGrant.media_item_id == media_item_id,
+                HiveFetchGrant.revoked_at.is_(None),
+            )
+        ).all()
+    )
+    for row in rows:
+        row.revoked_at = moment
+    if rows:
+        db.flush()
+    return len(rows)
+
+
 def verify_fetch_grant(
     db: Session,
     settings,
