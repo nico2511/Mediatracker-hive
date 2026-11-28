@@ -57,6 +57,8 @@ _INT_BOUNDS: dict[str, tuple[int, int]] = {
     "source_request_delay_seconds": (2, 60),
     "source_error_backoff_min": (30, 1440),
     "remote_search_cooldown_hours": (1, 72),
+    "alldebrid_magnet_wait_max_seconds": (30, 86400),
+    "alldebrid_magnet_poll_seconds": (5, 600),
     "scan_air_window_days": (0, 30),
     "film_theatrical_fallback_months": (0, 24),
     "source_cache_seconds": (0, 3600),
@@ -76,6 +78,7 @@ _INT_BOUNDS: dict[str, tuple[int, int]] = {
     "hive_transfer_recv_bps": (0, 2_000_000_000),
     "hive_transfer_window_start": (0, 24 * 60 - 1),
     "hive_transfer_window_end": (1, 24 * 60),
+    "hive_catalog_full_sync_interval_sec": (60, 7 * 24 * 60 * 60),
 }
 
 _CLOCK = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -101,6 +104,8 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "source_request_delay_seconds": SettingSpec(False, "int", "source_request_delay_seconds"),
     "source_error_backoff_min": SettingSpec(False, "int", "source_error_backoff_min"),
     "remote_search_cooldown_hours": SettingSpec(False, "int", "remote_search_cooldown_hours"),
+    "alldebrid_magnet_wait_max_seconds": SettingSpec(False, "int", "alldebrid_magnet_wait_max_seconds"),
+    "alldebrid_magnet_poll_seconds": SettingSpec(False, "int", "alldebrid_magnet_poll_seconds"),
     "scan_episode_sources_fallback": SettingSpec(False, "bool", "scan_episode_sources_fallback"),
     "scan_ongoing_only": SettingSpec(False, "bool", "scan_ongoing_only"),
     "scan_air_window_days": SettingSpec(False, "int", "scan_air_window_days"),
@@ -177,6 +182,9 @@ SETTING_SPECS: dict[str, SettingSpec] = {
     "hive_transfer_window_start": SettingSpec(False, "int", "hive_transfer_window_start"),
     "hive_transfer_window_end": SettingSpec(False, "int", "hive_transfer_window_end"),
     "hive_catalog_auto_share": SettingSpec(False, "bool", "hive_catalog_auto_share", optional=True),
+    "hive_catalog_full_sync_interval_sec": SettingSpec(
+        False, "int", "hive_catalog_full_sync_interval_sec", optional=True
+    ),
     "hive_request_on_miss": SettingSpec(False, "str", "hive_request_on_miss", optional=True),
     "hive_auto_accept_requests": SettingSpec(False, "bool", "hive_auto_accept_requests", optional=True),
     "hive_auto_take_wanted": SettingSpec(False, "bool", "hive_auto_take_wanted", optional=True),
@@ -208,12 +216,17 @@ def migrate_download_source_order_setting(db: Session) -> None:
     except ValueError:
         return
     rewritten = items
+    stripped = (row.value or "").strip()
     from mediatracker.providers.sources.stremio_addons_config import replace_uwuplus_in_source_order
 
     if "uwuplus" in rewritten:
         rewritten = replace_uwuplus_in_source_order(rewritten)
     normalized = ",".join(rewritten)
-    if normalized in {LEGACY_DOWNLOAD_SOURCE_ORDER, DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS}:
+    # Do not rewrite factory default still equal to
+    # wawacity,free_telecharger,hive,comet,torrentio,stremio_addons — existing instances keep FT active until manual opt-out.
+    if stripped == DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS:
+        normalized = DEFAULT_DOWNLOAD_SOURCE_ORDER
+    elif normalized in {LEGACY_DOWNLOAD_SOURCE_ORDER, DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS}:
         normalized = DEFAULT_DOWNLOAD_SOURCE_ORDER
     if normalized == (row.value or "").strip():
         return
@@ -403,6 +416,21 @@ def update_settings(db: Session, settings: Settings, values: dict[str, Any]) -> 
         tombstone_all_local_entries(db, settings, now=datetime.now(timezone.utc))
         strip_hive_keep_flags(db)
 
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    if enabled_now and not enabled_was:
+        mark_hive_catalog_sync_needed(db)
+    if "hive_public_address" in work and work["hive_public_address"] is not None:
+        old_addr = (existing.get("hive_public_address") or "").strip().rstrip("/")
+        new_addr = _setting_row_text(db, "hive_public_address").strip().rstrip("/")
+        if new_addr != old_addr:
+            mark_hive_catalog_sync_needed(db)
+    if "hive_catalog_auto_share" in work and work["hive_catalog_auto_share"] is not None:
+        old_auto = (existing.get("hive_catalog_auto_share") or "").lower() == "true"
+        new_auto = _setting_row_text(db, "hive_catalog_auto_share").lower() == "true"
+        if old_auto != new_auto:
+            mark_hive_catalog_sync_needed(db)
+
     from mediatracker.providers.sources.comet_urls import sync_comet_provider_config
     from mediatracker.providers.sources.loading import apply_source_base_urls
 
@@ -456,7 +484,7 @@ def _env_value(settings: Settings, key: str, spec: SettingSpec):
         return settings.movies_dir or settings.library_movies_path
     if key == "library_series_path":
         return settings.series_dir or settings.library_series_path
-    return getattr(settings, spec.attr)
+    return getattr(settings, spec.attr, None)
 
 
 _DIR_KEYS = frozenset({"media_dir", "library_movies_path", "library_series_path", "downloads_dir", "trash_dir"})

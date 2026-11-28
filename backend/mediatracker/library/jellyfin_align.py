@@ -338,6 +338,17 @@ def arm_restore(db: Session, now: datetime) -> None:
     _put(db, RESTORE_AT, now.isoformat(), now)
 
 
+def _align_work_due(db: Session, now: datetime) -> bool:
+    """True when align may need Jellyfin HTTP (same idea as push's due job, sync's poll)."""
+    from mediatracker.library.identity_sync import IDENTITY_DUE
+
+    if _flag(db, RESTORE_PENDING) or _flag(db, ALIGN_PENDING):
+        return True
+    if _flag(db, IDENTITY_DUE):
+        return True
+    return _cache_due(db, now)
+
+
 def maybe_align_jellyfin(
     db: Session,
     settings: Settings,
@@ -351,10 +362,13 @@ def maybe_align_jellyfin(
     Merges stay on the Bibliothèque screen. A newer Jellyfin TMDB id is adopted here.
     A newer MediaTracker edit stays, and its push job is left to the push worker.
     """
+    moment = now or datetime.now(timezone.utc)
+    if not _align_work_due(db, moment):
+        db.commit()
+        return
     opened = open_client(db, settings)
     if opened is None and client is None:
         return
-    moment = now or datetime.now(timezone.utc)
     owns = client is None
     prefix = ""
     path_map = ""
@@ -365,10 +379,16 @@ def maybe_align_jellyfin(
     assert client is not None
     try:
         status = read_scan_status(client)
+        from mediatracker.metro.instrument import instrument_jellyfin_wait_scan
+        from mediatracker.metro.record import safe_instrument
+
+        if not status.scanning:
+            safe_instrument(instrument_jellyfin_wait_scan, scanning=False)
         if status.scanning:
             if _flag(db, ALIGN_PENDING) or _flag(db, RESTORE_PENDING):
                 _put(db, ALIGN_SAW, "1", moment)
                 _put(db, RESTORE_SAW, "1", moment)
+            safe_instrument(instrument_jellyfin_wait_scan, scanning=True)
             # A return inside try skips the commit below. The worker closes the session
             # afterwards, so the "we saw the scan" flags have to be stored here.
             db.commit()

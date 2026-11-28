@@ -747,8 +747,21 @@ def tombstone_all_local_entries(db: Session, settings: Settings, *, now: datetim
             publish_tombstone(db, settings, ruche_id=rid, media=media, item=item, now=now)
 
 
-def sync_hive_catalog(db: Session, settings: Settings, *, now: datetime | None = None) -> None:
+def sync_hive_catalog(
+    db: Session,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    force: bool = False,
+) -> None:
     """Met à jour empreintes, entrées disponibles ou pierres tombales, et « Garder » Hive."""
+    from mediatracker.hive.catalog_sync_gate import (
+        ack_worker_startup_full_catalog_sync,
+        generation_for_full_sync_start,
+        record_hive_catalog_full_sync,
+        should_run_full_hive_catalog_sync,
+        worker_startup_full_catalog_sync_pending,
+    )
     from mediatracker.hive.identity import hive_enabled_in_db
 
     moment = now or datetime.now(timezone.utc)
@@ -761,6 +774,16 @@ def sync_hive_catalog(db: Session, settings: Settings, *, now: datetime | None =
 
     purge_old_tombstones(db, now=moment)
     abandon_orphan_fingerprint_work(db)
+
+    run_full = (
+        force
+        or worker_startup_full_catalog_sync_pending()
+        or should_run_full_hive_catalog_sync(db, now=moment)
+    )
+    if not run_full:
+        return
+
+    applied_generation = generation_for_full_sync_start(db)
 
     from mediatracker.hive.share_scope_registry import inherit_share_intent_from_scopes
 
@@ -813,6 +836,9 @@ def sync_hive_catalog(db: Session, settings: Settings, *, now: datetime | None =
             continue
         sync_possede_for_item(db, settings, media=media, item=item, now=moment)
 
+    record_hive_catalog_full_sync(db, now=moment, applied_generation=applied_generation)
+    ack_worker_startup_full_catalog_sync()
+
 
 def maybe_sync_hive_catalog_item_isolated(
     db: Session,
@@ -858,6 +884,10 @@ def maybe_sync_hive_catalog_items_after_local_file_change(
     revoke_outbound_grants: bool = False,
 ) -> None:
     """Après corbeille, restauration ou rattachement : sync immédiat par épisode touché."""
+    if media_item_ids:
+        from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+        mark_hive_catalog_sync_needed(db)
     for item_id in media_item_ids:
         maybe_sync_hive_catalog_item_isolated(
             db,

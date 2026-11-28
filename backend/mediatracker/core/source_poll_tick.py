@@ -48,7 +48,22 @@ def worker_poll_if_due(
         return None
     if sources is not None:
         return _poll_injected_sources(factory, settings, media_id, sources, moment, draw)
-    return poll_follow_for_media_id(factory, settings, media_id, now=moment, rng=draw)
+    import time
+
+    from mediatracker.metro.record import safe_instrument
+
+    t0 = time.perf_counter()
+    result = poll_follow_for_media_id(factory, settings, media_id, now=moment, rng=draw)
+    duration_ms = int((time.perf_counter() - t0) * 1000) if result is not None else None
+    from mediatracker.metro.instrument import instrument_source_poll
+
+    safe_instrument(
+        instrument_source_poll,
+        did_work=result is not None,
+        media_id=media_id,
+        duration_ms=duration_ms,
+    )
+    return result
 
 
 def _poll_injected_sources(

@@ -18,9 +18,11 @@ from mediatracker.db.models import (
     MediaItem,
     Setting,
 )
+from mediatracker.integrations import jellyfin_library as jellyfin_library_mod
 from mediatracker.integrations.jellyfin import JellyfinClient
 from mediatracker.library.identity_sync import note_manual_tmdb
 from mediatracker.library.jellyfin_align import (
+    LIBRARY_SYNCED,
     AlignError,
     _adopt_newer,
     _restore_watched,
@@ -795,6 +797,28 @@ def test_push_waits_out_a_library_scan(client, app, caplog):
     assert job.attempts == 0
     fresh.close()
     assert "jellyfin push en attente" in caplog.text
+
+
+CALM_PASSES = 5
+
+
+def test_maybe_align_calm_passes_skip_jellyfin_http(client, app, monkeypatch):
+    login(client)
+    _configure(client)
+    db = _db(app)
+    db.add(Setting(key=LIBRARY_SYNCED, value=NOW.isoformat(), is_secret=False, updated_at=NOW))
+    db.commit()
+    scan_calls = 0
+
+    def counting_read_scan_status(_client):
+        nonlocal scan_calls
+        scan_calls += 1
+        return jellyfin_library_mod.read_scan_status(_client)
+
+    monkeypatch.setattr(jellyfin_library_mod, "read_scan_status", counting_read_scan_status)
+    for step in range(CALM_PASSES):
+        maybe_align_jellyfin(db, app.state.settings, now=NOW + timedelta(seconds=6 * step))
+    assert scan_calls == 0, f"attendu 0 appel read_scan_status sur {CALM_PASSES} passes calmes, vu {scan_calls}"
 
 
 def test_worker_remembers_a_scan_it_saw(client, app):

@@ -1006,6 +1006,10 @@ def _mark_absent(
         item.file_path = None
         if item.state == "downloaded":
             item.state = "missing"
+    if count > 0:
+        from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+        mark_hive_catalog_sync_needed(db)
     return count
 
 

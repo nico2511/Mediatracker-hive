@@ -6,6 +6,8 @@ import DownloadsView from "./views/DownloadsView.vue";
 import LibraryImportHistoryView from "./views/LibraryImportHistoryView.vue";
 import LibraryView from "./views/LibraryView.vue";
 import FollowView from "./views/FollowView.vue";
+import HealthMetroCorrespondenceView from "./views/HealthMetroCorrespondenceView.vue";
+import HealthMetroStationView from "./views/HealthMetroStationView.vue";
 import HealthView from "./views/HealthView.vue";
 import LoginView from "./views/LoginView.vue";
 import SetupView from "./views/SetupView.vue";
@@ -83,6 +85,16 @@ const router = createRouter({
         },
         { path: "performance", redirect: "/sante" },
         { path: "sante", component: HealthView },
+        {
+          path: "sante/correspondance/:edgeId",
+          name: "health-metro-correspondence",
+          component: HealthMetroCorrespondenceView,
+        },
+        {
+          path: "sante/station/:stationId",
+          name: "health-metro-station",
+          component: HealthMetroStationView,
+        },
       ],
     },
   ],

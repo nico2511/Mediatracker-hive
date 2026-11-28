@@ -543,11 +543,15 @@ def _series_folder(path: Path, root: Path) -> Path | None:
 
 
 def _same_show(file_title: str, file_year: int | None, folder_title: str, folder_year: int | None) -> bool:
-    if not file_title or not folder_title or not titles_match(file_title, folder_title):
+    if not file_title or not folder_title:
         return False
-    if file_year is not None and folder_year is not None and file_year != folder_year:
-        return False
-    return True
+    if titles_match(file_title, folder_title):
+        if file_year is not None and folder_year is not None and file_year != folder_year:
+            return False
+        return True
+    if file_year is not None and titles_match(f"{file_title} {file_year}".strip(), folder_title):
+        return True
+    return False
 
 
 def _jellyfin_path(

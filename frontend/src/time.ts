@@ -64,6 +64,31 @@ export function formatParisClock(value: string | number | Date | null | undefine
   return parsed.toLocaleString("fr-FR", PARIS_CLOCK);
 }
 
+/** Fin de collecte : heure seule aujourd'hui, « demain HH:MM », sinon « 23 nov., 10:52 ». */
+export function formatParisCollectionEnd(value: string | number | Date | null | undefined): string {
+  const parsed = parseInstant(value);
+  if (!parsed) {
+    return "";
+  }
+  const clock = formatParisClock(parsed);
+  const todayKey = parisDayKey(new Date().toISOString());
+  const targetKey = parisDayKey(parsed.toISOString());
+  if (targetKey === todayKey) {
+    return clock;
+  }
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (targetKey === parisDayKey(tomorrow.toISOString())) {
+    return `demain ${clock}`;
+  }
+  const dateLabel = parsed.toLocaleDateString("fr-FR", {
+    timeZone: "Europe/Paris",
+    day: "numeric",
+    month: "short",
+  });
+  return `${dateLabel.replace(/\.$/, "")}, ${clock}`;
+}
+
 export function parisDayKey(value: string | null | undefined): string {
   const parsed = parseInstant(value);
   if (!parsed) {

@@ -251,9 +251,11 @@ def restore(db: Session, settings: Settings, entry_id: int, *, now: datetime | N
     _library_status(db, str(dest), "matched", item.id if item is not None else None)
     request_classify(db, settings)
     if item is not None and item.id is not None:
-        from mediatracker.hive.catalog import maybe_sync_hive_catalog_item_isolated
+        from mediatracker.hive.catalog import maybe_sync_hive_catalog_items_after_local_file_change
 
-        maybe_sync_hive_catalog_item_isolated(db, settings, int(item.id), now=moment)
+        maybe_sync_hive_catalog_items_after_local_file_change(
+            db, settings, {int(item.id)}, now=moment
+        )
     db.commit()
     return entry
 

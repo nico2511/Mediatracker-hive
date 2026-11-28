@@ -112,6 +112,9 @@ def create_ruche(db: Session, settings: Settings, *, now: datetime) -> HiveRuche
         now=now,
         settings=settings,
     )
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     return ruche
 
 
@@ -274,6 +277,9 @@ def accept_join_pending(
         dup = db.get(HiveJoinPending, dup_id)
         if dup is not None and dup.consumed_at is None and dup.rejected_at is None:
             dup.rejected_at = now
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
 
 
 def reject_join_pending(
@@ -401,6 +407,9 @@ def exclude_member(
     if existing is None:
         db.add(HiveRucheExcluded(ruche_id=ruche_id, instance_id=target_instance_id, excluded_at=now))
     purge_origin_entries_in_ruche(db, ruche_id=ruche_id, origin_id=target_instance_id, now=now)
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
 
 
 def leave_ruche(db: Session, settings: Settings, *, ruche_id: bytes, now: datetime) -> None:
@@ -424,7 +433,9 @@ def leave_ruche(db: Session, settings: Settings, *, ruche_id: bytes, now: dateti
         delete(HiveMember).where(HiveMember.ruche_id == ruche_id, HiveMember.member_instance_id == instance_id)
     )
     db.add(HiveRucheExcluded(ruche_id=ruche_id, instance_id=instance_id, excluded_at=now))
-    # Le créateur devra publier une nouvelle liste ; en local on signale le départ au créateur (T4 gossip).
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
 
 
 def ruches_for_instance(db: Session, instance_id: str) -> list[HiveRuche]:

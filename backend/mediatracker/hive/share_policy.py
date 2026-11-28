@@ -23,11 +23,18 @@ def has_share_intent(db: Session, media_item_id: int) -> bool:
 def grant_share_intent(db: Session, media_item_id: int) -> None:
     if db.get(HiveShareIntent, media_item_id) is None:
         db.add(HiveShareIntent(media_item_id=media_item_id))
+        from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+        mark_hive_catalog_sync_needed(db)
     db.flush()
 
 
 def revoke_share_intent(db: Session, media_item_id: int) -> None:
-    db.execute(delete(HiveShareIntent).where(HiveShareIntent.media_item_id == media_item_id))
+    removed = db.execute(delete(HiveShareIntent).where(HiveShareIntent.media_item_id == media_item_id))
+    if int(removed.rowcount or 0) > 0:
+        from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+        mark_hive_catalog_sync_needed(db)
     db.flush()
 
 

@@ -19,7 +19,7 @@ LEGACY_DOWNLOAD_SOURCE_ORDER = "wawacity,comet"
 DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS = (
     "wawacity,free_telecharger,hive,comet,torrentio,uwuplus,stremio_addons"
 )
-DEFAULT_DOWNLOAD_SOURCE_ORDER = "wawacity,free_telecharger,hive,comet,torrentio,stremio_addons"
+DEFAULT_DOWNLOAD_SOURCE_ORDER = "wawacity,hive,comet,torrentio,stremio_addons"
 DEFAULT_HOSTER_PREFERENCE: tuple[str, ...] = (
     "rapidgator",
     "turbobit",

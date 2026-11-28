@@ -57,6 +57,9 @@ def _public_address_configured(db: Session) -> bool:
 
 def mark_local_catalog_change(db: Session, *, ruche_id: bytes, now: datetime) -> None:
     """Arme un signal gossip après changement catalogue local (une fenêtre 60 s par ruche)."""
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     if not hive_enabled_in_db(db):
         return
     if not _public_address_configured(db):

@@ -328,14 +328,19 @@ def pull_gossip_from_peer(
             )
             total += added
             if added > 0:
+                from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+                mark_hive_catalog_sync_needed(db)
                 release_sqlite_before_network(db)
         sig_items = body.get("signals")
         if isinstance(sig_items, list):
             sig_added = ingest_signed_signals(db, ruche_id=ruche_id, items=sig_items, now=now)
             total += sig_added
             if sig_added > 0:
+                from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
                 from mediatracker.hive.signal_requests import try_auto_accept_incoming
 
+                mark_hive_catalog_sync_needed(db)
                 try_auto_accept_incoming(db, settings, ruche_id=ruche_id, now=now)
                 release_sqlite_before_network(db)
         peer_vector = body.get("vector")

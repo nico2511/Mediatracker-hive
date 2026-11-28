@@ -14,7 +14,7 @@ Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la
 
 ## Ordre et activation
 
-- Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré.
+- Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré. L’ordre par défaut n’inclut pas `free_telecharger`.
 - État en ligne / panne : affiché sur chaque carte ; API `GET /api/v1/settings/sources/status`.
 - Une source **désactivée** n’est utilisée ni par le téléchargement automatique, ni par **Réparer** et **Vérifier tout** ; sa carte n’affiche ni bouton **Tester** ni état de panne. L’interrupteur enregistre aussitôt `download_source_order` ; en cas d’échec, il revient à sa position et un message s’affiche.
 - Une valeur inconnue dans l’ordre enregistré est ignorée : les autres sources restent telles quelles, sans retour à l’ordre par défaut.

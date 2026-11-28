@@ -202,6 +202,9 @@ def apply_member_list(
     )
     db.add(row)
     sync_ruche_catalog_fields_from_payload(db, ruche_id=ruche_id, payload=payload)
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     return row
 
 
@@ -278,6 +281,9 @@ def apply_member_list_as_peer(
     db.add(row)
     db.flush()
     sync_ruche_catalog_fields_from_payload(db, ruche_id=ruche_id, payload=payload)
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     return row
 
 

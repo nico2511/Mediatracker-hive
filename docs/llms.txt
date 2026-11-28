@@ -3,6 +3,7 @@
 
 ## Sections
 - docs/installation.md — Installation — Ce guide décrit l’installation de MediaTracker avec Docker et Docker Compose sur un NAS ou un serveur Linux.
+- docs/architecture.md — Carte d'architecture MediaTracker — Document de repérage rapide pour le dépôt (instance d'exemple : https://mediatracker.example.com). Détail opérationnel : interne/REFERENCE-DEV.md.
 - docs/premier-demarrage.md — Premier démarrage — Route : /configuration (accessible sans session tant qu’aucun compte n’existe, ou pour terminer l’assistant).
 - docs/telechargements.md — Chaîne de téléchargement — 1. Un scan ou une action manuelle interroge les sources dans l’ordre défini (downloadsourceorder), d’abord celles qui publient des pages de liens (Wawacity, Free-Télécharger, etc.).
 - docs/reglages/README.md — Réglages — Dans l’application : Réglages (/reglages), puis une section du menu. Chaque section a une URL directe du type /reglages/<slug>.

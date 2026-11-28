@@ -245,3 +245,81 @@ def test_orchestrate_uses_worker_remote_poll_not_run_poll(monkeypatch, client, a
     report = orchestrate_profile_first_poll(factory, app.state.settings, media_id, force=True)
     assert report is not None
     assert calls == ["worker_remote_poll"]
+
+
+def test_orchestrate_advances_schedule_when_no_usable_source(client, app, monkeypatch):
+    from datetime import date, datetime, timedelta, timezone
+
+    from mediatracker.core.cleanup_classify import mark_classify_pass
+    from mediatracker.core.profile_attempt_orchestration import orchestrate_profile_first_poll
+    from mediatracker.core.quality_profile import ensure_default_profile
+    from mediatracker.core.source_availability import filter_usable_source_order
+    from mediatracker.core.source_poll import next_due
+    from mediatracker.core.worker_schedule import compute_sleep_seconds, next_deadline
+
+    NOW = datetime(2026, 11, 7, 14, 0, tzinfo=timezone.utc)
+    factory = app.state.session_factory
+    settings = app.state.settings
+    cherche_calls: list[str] = []
+
+    def _no_cherche(*_a, **_k):
+        cherche_calls.append("miss")
+        return None
+
+    monkeypatch.setattr(
+        "mediatracker.hive.signal_policy.maybe_publish_cherche_on_source_miss",
+        _no_cherche,
+    )
+    db = factory()
+    try:
+        ensure_default_profile(db)
+        usable = filter_usable_source_order(db, settings, ["wawacity", "comet", "hive"])
+        assert usable == []
+        media = Media(
+            type="series",
+            title="Serie sans source",
+            year=2099,
+            tmdb_id=88002,
+            followed=True,
+            new_episode_policy="auto",
+            next_source_poll_at=NOW,
+        )
+        db.add(media)
+        db.flush()
+        db.add(
+            MediaItem(
+                media_id=media.id,
+                season=1,
+                episode=1,
+                watched=False,
+                state="missing",
+                air_date=date(2026, 11, 7),
+            )
+        )
+        db.commit()
+        media_id = media.id
+    finally:
+        db.close()
+
+    report = orchestrate_profile_first_poll(factory, settings, media_id, force=True, now=NOW)
+    assert report is not None
+    assert report.result == "nothing"
+    assert report.message == "Aucune source configurée."
+    assert cherche_calls == []
+
+    db = factory()
+    try:
+        row = db.get(Media, media_id)
+        nxt = row.next_source_poll_at
+        assert nxt is not None
+        if nxt.tzinfo is None:
+            nxt = nxt.replace(tzinfo=timezone.utc)
+        assert nxt > NOW
+        mark_classify_pass(NOW)
+        after = NOW + timedelta(seconds=1)
+        assert next_due(db, settings, after, commit=False) is None
+        deadline = next_deadline(db, settings, after)
+        assert deadline is not None and deadline > after
+        assert compute_sleep_seconds(db, settings, now=after) > 0.0
+    finally:
+        db.close()

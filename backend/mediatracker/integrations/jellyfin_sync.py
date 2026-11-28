@@ -77,8 +77,13 @@ def maybe_sync_jellyfin(
         client = JellyfinClient(url, api_key, user_id or None)
     try:
         with track_task(TASK_JELLYFIN_SYNC):
+            refresh_fired = False
+            refresh_ms: int | None = None
             if _refresh_due(db, moment):
                 release_sqlite_before_network(db)
+                import time
+
+                t0 = time.perf_counter()
                 try:
                     client.refresh_library()
                 except JellyfinError as exc:
@@ -86,7 +91,14 @@ def maybe_sync_jellyfin(
                 else:
                     _clear(db, REFRESH_AT, moment)
                     _touch(db, "jellyfin.refresh_fired_at", moment)
+                    refresh_fired = True
+                    refresh_ms = int((time.perf_counter() - t0) * 1000)
+            from mediatracker.metro.instrument import instrument_jellyfin_refresh, instrument_jellyfin_sync
+            from mediatracker.metro.record import safe_instrument
+
+            safe_instrument(instrument_jellyfin_refresh, fired=refresh_fired, duration_ms=refresh_ms)
             poll_min = _poll_minutes(db, settings)
+            polled = False
             if _poll_due(db, moment, poll_min):
                 release_sqlite_before_network(db)
                 try:
@@ -116,6 +128,8 @@ def maybe_sync_jellyfin(
                     _touch(db, LAST_POLL_AT, moment)
                     _remember(db, LAST_ERROR, "", moment)
                     _clear_poll_retry(db, moment)
+                    polled = True
+            safe_instrument(instrument_jellyfin_sync, polled=polled)
     finally:
         if owns:
             client.close()

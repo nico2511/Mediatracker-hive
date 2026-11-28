@@ -20,6 +20,7 @@ Ce fichier est généré automatiquement à partir de `docs/` (hors interne, arc
 ## Sommaire
 
 - [Installation](#docs-installation) — `docs/installation.md`
+- [Carte d'architecture MediaTracker](#docs-architecture) — `docs/architecture.md`
 - [Premier démarrage](#docs-premier-demarrage) — `docs/premier-demarrage.md`
 - [Chaîne de téléchargement](#docs-telechargements) — `docs/telechargements.md`
 - [Réglages](#docs-reglages-README) — `docs/reglages/README.md`
@@ -126,6 +127,82 @@ Ouvrez `http://<hôte>:8080`. Si aucun compte n’existe, l’assistant redirige
 
 Suite : [Premier démarrage](#docs-premier-demarrage).
 
+## Carte d'architecture MediaTracker
+
+Chemin source : `docs/architecture.md`
+
+<a id="docs-architecture"></a>
+
+Document de repérage rapide pour le dépôt (instance d'exemple : `https://mediatracker.example.com`). Détail opérationnel : [interne/REFERENCE-DEV.md](interne/REFERENCE-DEV.md).
+
+### Par domaine
+
+| Domaine | Fichiers / dossiers | Point d'entrée (une ligne) |
+| --- | --- | --- |
+| **Worker / planification** | `backend/mediatracker/worker.py`, `backend/mediatracker/core/worker_schedule.py`, `backend/mediatracker/core/worker_wake.py` | Boucle unique verrouillée par `config_dir/worker.lock` : passe `_worker_pass_body`, puis sommeil jusqu'à la prochaine échéance (`compute_sleep_seconds`, filet 60 s). |
+| **Hive (pairs, catalogue, empreintes)** | `backend/mediatracker/hive/`, `backend/mediatracker/api/hive_router.py`, `backend/mediatracker/api/v1/hive.py`, `backend/mediatracker/hive/fingerprint_daemon.py` | API UI sous `/api/v1/hive/*` ; protocole pair monté par `mount_hive_router` ; empreintes SHA hors worker principal (`fingerprint_daemon.py`, s6). |
+| **Jellyfin** | `backend/mediatracker/integrations/jellyfin_sync.py`, `backend/mediatracker/integrations/jellyfin.py`, `backend/mediatracker/library/jellyfin_align.py`, `backend/mediatracker/library/jellyfin_push.py` | Refresh bibliothèque différé (60 s) après dépôt ; synchro « vu » par webhook ou polling (`maybe_sync_jellyfin`). |
+| **AllDebrid / aria2** | `backend/mediatracker/providers/debrid/alldebrid.py`, `backend/mediatracker/providers/downloaders/aria2.py`, `backend/mediatracker/core/pipeline/`, `backend/mediatracker/core/aria2_events.py` | `tick()` démarre les jobs ; déblocage réseau hors SAVEPOINT ; suivi aria2 2–10 s si téléchargements actifs. |
+| **Sources de téléchargement** | `backend/mediatracker/providers/sources/`, `backend/mediatracker/core/source_poll.py`, `backend/mediatracker/core/source_poll_tick.py` | Un média suivi dû par passe worker ; registre plugins dans `backend/mediatracker/providers/sources/__init__.py`. |
+| **Bibliothèque / rangement / parse** | `backend/mediatracker/library/scanner.py`, `backend/mediatracker/library/parse.py`, `backend/mediatracker/library/regroup.py`, `backend/mediatracker/core/naming.py` | Scan disque périodique ou forcé ; parse des noms de release ; déplacement atomique vers `Films` / `Series` après job. |
+| **TMDB** | `backend/mediatracker/integrations/tmdb.py`, `backend/mediatracker/integrations/tmdb_enrichment.py`, `backend/mediatracker/integrations/tmdb_images.py` | Client lecture API ; enrichissement fiches worker ; cache affiches locale (`/config/cache/images`). |
+| **Home Assistant** | `backend/mediatracker/api/v1/ha.py`, `docs/home-assistant.md` | `GET /api/v1/ha/summary` (lecture seule) ; boutons réutilisent scan, catalogue et file de téléchargement. |
+| **Réglages** | `backend/mediatracker/settings_store.py`, `backend/mediatracker/api/v1/settings.py`, `frontend/src/views/settings/` | Clés validées en PATCH `/api/v1/settings` ; écrans `/reglages/<section>` (`frontend/src/router.ts`). |
+| **API v1 / processus HTTP** | `backend/mediatracker/api/app.py`, `backend/mediatracker/api/serve.py`, `backend/mediatracker/api/v1/router.py` | Uvicorn sur `mediatracker.api.app:app` ; routes REST sous `/api/v1`. |
+| **Sécurité** | `backend/mediatracker/security/`, CSRF et sessions dans `backend/mediatracker/api/app.py` | Jetons session, CSRF, rate-limit login, en-têtes, chiffrement secrets, garde SSRF sortant. |
+| **Métro / collecte de passages** | `backend/mediatracker/metro/record.py`, `backend/mediatracker/metro/instrument.py`, `backend/mediatracker/api/v1/task_runs.py` | Chaque étape worker instrumentée en « stations » ; consultation UI Santé et API `task_runs`. |
+| **Frontend Vue** | `frontend/src/main.ts`, `frontend/src/router.ts`, `frontend/src/views/`, `frontend/src/composables/` | SPA Vue 3 + Vite ; routes enfants sous `AppLayout` ; SSE progrès via `useProgressStream`. |
+
+### Tâches périodiques (worker) et appels externes
+
+Le worker enchaîne les lignes ci-dessous à **chaque passe** ; une ligne ne fait du travail réseau que si son échéance est atteinte (sinon no-op rapide). Fréquence « réglage » = clé SQLite ou variable d'environnement Pydantic ; défaut issu de `backend/mediatracker/config.py` sauf mention.
+
+| Tâche | Fichier | Déclencheur | Fréquence (réglage → défaut) | Service externe |
+| --- | --- | --- | --- | --- |
+| Boucle worker | `backend/mediatracker/worker.py` | Verrou + timer / réveil fichier | Actif : 2 s (aria2) ou 10 s (WS aria2) ; inactif : prochaine échéance, max 60 s | — |
+| Pipeline téléchargements | `backend/mediatracker/core/pipeline/` via `tick()` | Chaque passe | Continu si jobs `pending` / actifs | AllDebrid, aria2 RPC, pairs Hive |
+| Réconciliation aria2 | `backend/mediatracker/core/aria2_reconcile.py` | Chaque passe | Si écarts détectés | aria2 |
+| Scan bibliothèque | `backend/mediatracker/library/scanner.py` | `maybe_scan_library` | `library_scan_interval_hours` → **24 h** ; aussi inotify / post-dépôt | Disque local |
+| Synchro Jellyfin | `backend/mediatracker/integrations/jellyfin_sync.py` | `REFRESH_AT` / `LAST_POLL_AT` | Refresh **60 s** après dépôt ; poll `jellyfin_poll_interval_min` → **30 min** | Jellyfin HTTP |
+| Alignement / push Jellyfin | `backend/mediatracker/library/jellyfin_align.py`, `backend/mediatracker/library/jellyfin_push.py` | Drapeaux (`align_pending`, `restore_pending`, `identity_due`) ou cache bibliothèque échu (`jellyfin_poll_interval_min`) ; push : job en file | Après refresh ou action utilisateur ; no-op sans travail dû | Jellyfin |
+| Sondage sources | `backend/mediatracker/core/source_poll_tick.py` | `Media.next_source_poll_at` | `scan_interval_min` → **720 min** (par média, surcharge possible) | Wawacity, Comet, Torrentio, addons Stremio, etc. |
+| Catalogue nouveautés | `backend/mediatracker/core/catalog.py` | `catalog.next_refresh_at` | `catalog_interval_hours` → **12 h** | Sources catalogue + TMDB (matching) |
+| Sorties numériques | `backend/mediatracker/core/digital_releases.py` | Horodatage interne | **12 h** (fixe code) | TMDB |
+| Saisons / films / enrichissement | `backend/mediatracker/core/seasons.py` | Une fiche par passe | Série/film suivi : **1/j** ; non suivi : **1/semaine** | TMDB |
+| Liens morts AllDebrid | `backend/mediatracker/core/dead_links.py` | `RECHECK_KEY` | **7 j** (fixe code) | AllDebrid |
+| Maintenance corbeille / rétention | `backend/mediatracker/core/cleanup.py` | `should_run_classify` | Classification : **60 s** mini entre passes | Disque local |
+| Gossip Hive | `backend/mediatracker/hive/gossip_worker.py` | `hive_gossip_next_at` | ~**600 ± 120 s** (fixe code) | Pairs Hive HTTPS |
+| Sync catalogue Hive (RUC2) | `backend/mediatracker/hive/catalog.py` | Génération / intervalle | `hive_catalog_full_sync_interval_sec` → **6 h** | Disque local (+ pairs si partage) |
+| Signaux « cherche » Hive | `backend/mediatracker/hive/signal_policy.py` | Catch-up worker | Après activation / rattrapage | — |
+| Notifications webhooks | `backend/mediatracker/events/deliver.py` | Chaque passe + file `WebhookDelivery` | Retries **1 min → 6 h** (fixe code) | Home Assistant, ntfy, webhooks HTTP |
+| Sauvegarde SQLite | `backend/mediatracker/maintenance/backup.py` | Calendrier journalier | `backup_keep` → **7** fichiers | Disque `/config/backups` |
+| Purge cache images TMDB | `backend/mediatracker/integrations/tmdb_images.py` | `image_cache_purge_at` | **1/j** (fixe code) | — (fichiers locaux) |
+| Purge journal / états sources | `backend/mediatracker/events/retention.py`, `backend/mediatracker/core/source_state.py` | Tampon **1/j** | Rétention **30 j** (`backend/mediatracker/retention.py`) | — |
+| Téléchargements incomplets | `backend/mediatracker/core/incomplete.py` | Hors SAVEPOINT, **1/h** max | `incomplete_cleanup_enabled` → **désactivé** | Disque local |
+| Historique métriques | `backend/mediatracker/core/metrics/history.py` | `metrics.history_last_at` | **5 min** (fixe code) | — |
+| SQLite VACUUM/ANALYZE | `backend/mediatracker/maintenance/sqlite_tune.py` | Fenêtre locale | `sqlite_maintenance_hour` → **4 h** (TZ notifs) | Disque local |
+| Purge passages métro | `backend/mediatracker/metro/record.py` | Monotonique worker | Intervalle mini interne ; rétention **7 j** | — |
+| Empreintes Hive (daemon) | `backend/mediatracker/hive/fingerprint_daemon.py` | File SQLite + réveil | Continu (un fichier à la fois) | Disque local |
+
+#### Rafraîchissements périodiques frontend (appels backend)
+
+| Écran / composant | Fichier | Déclencheur | Période | Appels API |
+| --- | --- | --- | --- | --- |
+| Santé | `frontend/src/views/HealthView.vue` | `setInterval` | **20 s** | `/api/v1/health` (métriques) |
+| Coque Hive | `frontend/src/views/hive/HiveShell.vue` | Tick **1 s**, recharge si gossip dû | Aligné sur `next_gossip_at` ; retry **60 s** | `/api/v1/hive/overview`, compteurs demandes |
+| Empreintes Hive | `frontend/src/components/HiveEmpreintesPanel.vue` | Panneau ouvert | **5 s** (`PANEL_POLL_INTERVAL_MS`) | `/api/v1/hive/media/{id}/empreintes` |
+| Partage Hive (fiche) | `frontend/src/composables/useHiveSharePolling.ts` | Session partage active | **5 s**, max **120 s** / 24 essais | `/api/v1/hive/items/{id}/sharing` |
+| Compte AllDebrid | `frontend/src/components/AllDebridAccountBlock.vue` | Phase PIN | **5 s** + décompte **1 s** | `/api/v1/integrations/alldebrid/account/pin/poll` |
+| Vérification bibliothèque | `frontend/src/composables/useLibraryVerifyAll.ts` | Job en cours | **3 s** | `/api/v1/library/verify-all` |
+| Redémarrage (MAJ) | `frontend/src/views/settings/SettingsSectionView.vue` | Après « Mettre à jour » | **3 s** jusqu'à 180 s | `/api/v1/health` |
+| Progrès téléchargements | `frontend/src/composables/useProgressStream.ts` | SSE (pas intervalle) | Connexion longue | `/api/v1/progress-stream` |
+
+### Mettre à jour cette carte
+
+Toute modification qui ajoute, retire ou déplace un module métier, une tâche périodique worker ou un polling UI visible doit mettre à jour la ligne correspondante dans ce fichier (domaine **ou** tableau) dans la même pull request.
+
+Vérification des chemins cités : `python3 scripts/verify_architecture_paths.py` (sortie attendue : tous les fichiers existent).
+
 ## Premier démarrage
 
 Chemin source : `docs/premier-demarrage.md`
@@ -154,7 +231,7 @@ Champs **tous optionnels** ; une valeur vide laisse le réglage actuel ou le dé
 | Champ assistant | Stockage (même clé que Réglages → Sources) |
 | --- | --- |
 | Wawacity | `wawacity_base_url` |
-| Free-Télécharger | URL dans la fiche fournisseur `free_telecharger` (pas de clé SQLite dédiée) |
+| Free-Télécharger | URL dans la fiche fournisseur `free_telecharger` (pas de clé SQLite dédiée) ; renseigner l’URL dans l’assistant ne l’active pas — l’activation se fait dans **Réglages → Sources** |
 | Comet (une ligne par instance) | `comet_base_urls` |
 | Torrentio | `torrentio_base_url` |
 | Addons Stremio (optionnel) | `stremio_addons` |
@@ -246,7 +323,7 @@ Identifiants dans l’UI (**Réglages → Sources**) :
 | `torrentio` | Torrentio / aimants |
 | `stremio_addons` | Une ou plusieurs URLs d’addons Stremio (torrents et liens débridables selon la réponse de l’addon ; sans clé dans l’URL) |
 
-Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio,stremio_addons`. Au moins une source doit rester activée.
+Ordre par défaut (code) : `wawacity,hive,comet,torrentio,stremio_addons`. Au moins une source doit rester activée. Free-Télécharger reste disponible, désactivé par défaut ; on l’active dans **Réglages → Sources**.
 
 Une ancienne entrée dédiée aux flux DDL UwU+ est **migrée automatiquement** vers la liste **Addons Stremio** (même URL, une ligne d’addon).
 
@@ -443,7 +520,7 @@ Sans **AllDebrid connecté** ni source **Hive** utilisable, un bandeau bloque la
 
 ### Ordre et activation
 
-- Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré.
+- Clé **`download_source_order`** : liste ordonnée parmi `wawacity`, `free_telecharger`, `hive`, `comet`, `torrentio`, `stremio_addons`. Au moins une source doit rester activée dans l’ordre enregistré. L’ordre par défaut n’inclut pas `free_telecharger`.
 - État en ligne / panne : affiché sur chaque carte ; API `GET /api/v1/settings/sources/status`.
 - Une source **désactivée** n’est utilisée ni par le téléchargement automatique, ni par **Réparer** et **Vérifier tout** ; sa carte n’affiche ni bouton **Tester** ni état de panne. L’interrupteur enregistre aussitôt `download_source_order` ; en cas d’échec, il revient à sa position et un message s’affiche.
 - Une valeur inconnue dans l’ordre enregistré est ignorée : les autres sources restent telles quelles, sans retour à l’ordre par défaut.
@@ -733,10 +810,12 @@ Tant qu’AllDebrid n’est pas connecté, cette page n’affiche que le renvoi 
 ### Réglages (compte connecté)
 
 - **`alldebrid_auto_purge`** : après un rangement réussi, retire le lien enregistré, l’entrée d’historique correspondante et l’aimant du téléchargement sur le compte (activé par défaut).
+- **`alldebrid_magnet_wait_max_seconds`** (défaut **600**) : durée maximale pendant laquelle le worker laisse un aimant déjà uploadé sur le compte AllDebrid se préparer avant d’abandonner l’attente et de poursuivre la cascade source (repli hébergeur, autre source, etc.). L’aimant expiré n’est pas marqué mort : il est seulement ignoré pour le job en cours. **Pas de champ dans l’interface** : clé dans la table **`setting`**, modifiable par `PATCH /api/v1/settings` avec `{"values": {"alldebrid_magnet_wait_max_seconds": 900}}` (session admin + CSRF). Si la ligne absente, le worker utilise la variable d’environnement **`ALLDEBRID_MAGNET_WAIT_MAX_SECONDS`** (sinon **600**). Bornes validées : **30** à **86 400** secondes.
+- **`alldebrid_magnet_poll_seconds`** (défaut **30**) : intervalle minimal entre deux sondages `magnet_status` pour un job en attente (`ALLDEBRID_WAIT`). Règle `next_retry_at` du téléchargement ; ne bloque pas le passage worker. **Pas d’interface** ; même mécanisme `PATCH /api/v1/settings` ou table **`setting`**. Repli sur **`ALLDEBRID_MAGNET_POLL_SECONDS`** si la clé n’est pas en base (sinon **30**). Bornes : **5** à **600** secondes (le moteur impose au minimum 5 s).
 - **Purger AllDebrid** : ne retire que les liens des téléchargements terminés par MediaTracker.
 - **Tout purger** : confirmation requise — vide l’historique récent du compte, y compris les aimants que MediaTracker n’a pas créés.
 
-La clé peut être préfixée via env `ALLDEBRID_API_KEY` au premier démarrage.
+La clé API peut être préfixée via env `ALLDEBRID_API_KEY` au premier démarrage.
 
 Voir aussi le bloc **AllDebrid** dans [Corbeille](#docs-reglages-corbeille) (lien rapide vers cette page).
 
@@ -810,6 +889,10 @@ Chemin source : `docs/reglages/application.md`
 URL : `/reglages/application`
 
 Propose l’**installation PWA** (Progressive Web App) lorsque le navigateur expose l’événement `beforeinstallprompt`. Hors ligne partiel : file d’ids TMDB selon l’implémentation PWA du frontend.
+
+### Collecte des passages (diagnostic réseau)
+
+Interrupteur réservé aux administrateurs : active l’enregistrement des passages worker dans la table interne `task_run`, pour préparer la future carte réseau (Santé). Durées : 1 h, 6 h, 24 h ou sans limite. Hors période, **aucune** écriture (y compris les battements d’un blocage en cours). La purge automatique conserve 7 jours d’historique.
 
 ## Mise à jour et redémarrage
 
@@ -1086,6 +1169,15 @@ Sur **Médias** (`/medias`), le bouton **Sélectionner** permet de cocher plusie
 
 Le mode sélection est indisponible hors ligne lorsque les actions serveur sont désactivées.
 
+### Masquer une fiche
+
+Sur une fiche (`/medias/<id>`), le menu **Plus d'actions** (⋯) propose **Masquer la fiche** au-dessus des actions destructives. La fiche disparaît de **Médias**, de l'**Accueil** et du rapprochement des **suggestions catalogue** ; fichiers, historique « vu », partage Hive et liens Jellyfin restent en place.
+
+- Si la fiche est **suivie**, une confirmation rappelle que le **suivi sera arrêté** (sans mettre les fichiers à la corbeille). **Réafficher** ne relance pas le suivi.
+- Un bandeau **Fiche masquée · Annuler** permet d'annuler juste après l'action ; plus tard, **Réafficher** sur la fiche ou depuis la liste.
+
+Sur **Médias**, la puce **Masquées N** (œil barré) n'apparaît que s'il existe au moins une fiche masquée. Elle affiche les cartes estompées avec la date de masquage et **Réafficher**. L'API utilise `POST /api/v1/media/<id>/hide` et `/unhide` ; la liste accepte `include_hidden=true` pour les inclure.
+
 ## TMDB
 
 Chemin source : `docs/tmdb.md`
@@ -1108,7 +1200,7 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 
 | Écran | Rôle |
 | --- | --- |
-| **Accueil** (`/`) | Tableau de bord personnel et rangées de nouveautés TMDB (France, français) |
+| **Accueil** (`/`) | Tableau de bord personnel, rangées de nouveautés TMDB (France, français) et bloc **À trier** en bas de page |
 | **Derniers films** (`/nouveautes/films`) | Parcourir les films (cinéma, streaming, supports physiques) |
 | **Dernières séries** (`/nouveautes/series`) | Séries et diffusions à l’antenne |
 | **Suivre** | Rechercher un titre et l’ajouter à votre liste de suivi |
@@ -1116,6 +1208,18 @@ Le jeton est **chiffré** en base de données. Vous pouvez aussi le passer une f
 | Fiche média (`/medias/<id>`) | Métadonnées, suivi, saisons et épisodes — voir [medias.md](#docs-medias) |
 
 Les anciennes URL d’essai `/tmdb`, `/tmdb/films` et `/tmdb/series` redirigent vers les écrans ci-dessus.
+
+Lors de l’enrichissement d’une fiche, MediaTracker enregistre la **note moyenne TMDB** et le **nombre de votes** (`tmdb_vote_average`, `tmdb_vote_count`). L’API n’expose pas de note lorsque le compteur de votes vaut 0 ou la note vaut 0 (sans modifier la base). À l’écran : **★ TMDB X/10 · N votes** sur la fiche, et **★ X** sous l’année sur les cartes **Médias** / accueil (cartes liées à une fiche uniquement).
+
+### À trier (accueil)
+
+En bas de l’**Accueil**, le bloc **À trier** regroupe les signalements utiles sans rien décider à votre place :
+
+- **Renouvelées, non suivies** — une saison annoncée par TMDB sur une fiche que vous ne suivez plus (saisons synchronisées lors de l’enrichissement hebdomadaire TMDB des fiches non suivies, sans nouvel appel dédié) ;
+- **Saisons jamais regardées** — fichiers présents sur le disque pour une saison, aucun épisode marqué vu ;
+- **Arrêter le suivi ?** — série suivie sans vision depuis six mois et au moins trois épisodes en attente.
+
+Chaque ligne propose une action principale et **Ignorer** (ou **Garder** pour l’arrêt de suivi). Les ignorés sont mémorisés par fiche et par motif ; pour une saison renouvelée, l’ignoré porte le numéro de saison (le signalement peut revenir pour la suivante). **Aucun arrêt de suivi** n’est appliqué sans votre clic ; seules les séries terminées et complètes s’arrêtent encore automatiquement, comme ailleurs dans l’application.
 
 ### Fiche non suivie
 

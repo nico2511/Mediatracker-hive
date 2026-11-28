@@ -249,7 +249,15 @@ def test_uncached_magnet_is_deleted_and_never_uploaded_when_instant_says_no():
     assert cold.deleted == []
 
     cold.cached = True
-    assert claim_cached_magnet(cold, "magnet:?xt=urn:btih:abc", file_index=0, filename="a.mkv", wait_seconds=0) is None
+    result = claim_cached_magnet(
+        cold,
+        "magnet:?xt=urn:btih:abc",
+        file_index=0,
+        filename="a.mkv",
+        wait_seconds=0,
+        blocking_wait=True,
+    )
+    assert result is None
     assert cold.uploaded == ["magnet:?xt=urn:btih:abc"]
     assert cold.deleted == ["9"]
 

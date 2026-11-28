@@ -13665,6 +13665,283 @@
         "title": "TaskDurationOut",
         "type": "object"
       },
+      "TaskRunCollectionOut": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "1h",
+                  "6h",
+                  "24h",
+                  "unlimited",
+                  "timed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "required": [
+          "active",
+          "mode"
+        ],
+        "title": "TaskRunCollectionOut",
+        "type": "object"
+      },
+      "TaskRunCollectionPatch": {
+        "properties": {
+          "duration": {
+            "enum": [
+              "off",
+              "1h",
+              "6h",
+              "24h",
+              "unlimited"
+            ],
+            "title": "Duration",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration"
+        ],
+        "title": "TaskRunCollectionPatch",
+        "type": "object"
+      },
+      "TaskRunListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "number"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "station": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station"
+          }
+        },
+        "required": [
+          "hours",
+          "count"
+        ],
+        "title": "TaskRunListOut",
+        "type": "object"
+      },
+      "TaskRunOut": {
+        "properties": {
+          "blocked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked By"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "edge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edge Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Id"
+          },
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "sequence_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sequence Id"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "station": {
+            "title": "Station",
+            "type": "string"
+          },
+          "subject_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Ref"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          },
+          "waiting_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting On"
+          }
+        },
+        "required": [
+          "id",
+          "line",
+          "station",
+          "trigger",
+          "outcome",
+          "started_at"
+        ],
+        "title": "TaskRunOut",
+        "type": "object"
+      },
       "TmdbHitOut": {
         "properties": {
           "episode_count": {
@@ -24467,6 +24744,76 @@
         ]
       }
     },
+    "/api/v1/metro/activity": {
+      "get": {
+        "operationId": "get_metro_activity_api_v1_metro_activity_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24.0,
+              "maximum": 168.0,
+              "minimum": 1.0,
+              "title": "Hours",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Metro Activity Api V1 Metro Activity Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Metro Activity",
+        "tags": [
+          "metro"
+        ]
+      }
+    },
+    "/api/v1/metro/graph": {
+      "get": {
+        "operationId": "get_metro_graph_api_v1_metro_graph_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Metro Graph Api V1 Metro Graph Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Metro Graph",
+        "tags": [
+          "metro"
+        ]
+      }
+    },
     "/api/v1/providers": {
       "get": {
         "operationId": "list_providers_api_v1_providers_get",
@@ -25252,6 +25599,157 @@
         "summary": "Get Storage",
         "tags": [
           "storage"
+        ]
+      }
+    },
+    "/api/v1/task-runs": {
+      "get": {
+        "operationId": "list_task_runs_api_v1_task_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24.0,
+              "maximum": 168.0,
+              "minimum": 1.0,
+              "title": "Hours",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "station",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 8,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Station"
+            }
+          },
+          {
+            "in": "query",
+            "name": "line",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Line"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 2000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Task Runs",
+        "tags": [
+          "task-runs"
+        ]
+      }
+    },
+    "/api/v1/task-runs/collection": {
+      "get": {
+        "operationId": "get_task_run_collection_api_v1_task_runs_collection_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunCollectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Task Run Collection",
+        "tags": [
+          "task-runs"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_task_run_collection_api_v1_task_runs_collection_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskRunCollectionPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunCollectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Task Run Collection",
+        "tags": [
+          "task-runs"
         ]
       }
     },

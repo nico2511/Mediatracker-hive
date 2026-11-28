@@ -28,6 +28,9 @@ def replace_share_exclusions(
     exclude_all: bool,
     ruche_ids: list[bytes],
 ) -> None:
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     db.execute(delete(HiveShareExclusion).where(HiveShareExclusion.media_item_id == media_item_id))
     if exclude_all:
         db.add(HiveShareExclusion(media_item_id=media_item_id, ruche_id=RUCHE_EXCLUDE_ALL))

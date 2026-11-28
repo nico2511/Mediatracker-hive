@@ -161,7 +161,28 @@ def run_hive_follow_poll(
         else:
             proposed += 1
     if episodes == 0:
-        return None
+        auto = media.new_episode_policy == "auto"
+        message = poll_found_message(media, episodes=0, queued=0, auto=auto)
+        report = _finish(
+            db,
+            media,
+            settings,
+            moment,
+            draw,
+            result="nothing",
+            message=message,
+            episodes=0,
+            queued=0,
+            proposed=0,
+            failed=False,
+            force=force,
+            schedule=schedule_finish,
+        )
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        return report
     if queued > 0:
         if media.type == "film":
             message = poll_found_message(media, episodes=episodes, queued=queued, auto=True)

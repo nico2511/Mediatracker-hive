@@ -46,7 +46,7 @@ Identifiants dans l’UI (**Réglages → Sources**) :
 | `torrentio` | Torrentio / aimants |
 | `stremio_addons` | Une ou plusieurs URLs d’addons Stremio (torrents et liens débridables selon la réponse de l’addon ; sans clé dans l’URL) |
 
-Ordre par défaut (code) : `wawacity,free_telecharger,hive,comet,torrentio,stremio_addons`. Au moins une source doit rester activée.
+Ordre par défaut (code) : `wawacity,hive,comet,torrentio,stremio_addons`. Au moins une source doit rester activée. Free-Télécharger reste disponible, désactivé par défaut ; on l’active dans **Réglages → Sources**.
 
 Une ancienne entrée dédiée aux flux DDL UwU+ est **migrée automatiquement** vers la liste **Addons Stremio** (même URL, une ligne d’addon).
 

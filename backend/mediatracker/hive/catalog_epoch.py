@@ -82,8 +82,6 @@ def apply_catalog_epoch_increase_if_needed(
     purge_ruche_catalog_and_signals(db, ruche_id=ruche_id, now=now, settings=settings)
     sync_ruche_catalog_fields_from_payload(db, ruche_id=ruche_id, payload=payload)
     from mediatracker.hive.catalog import sync_hive_catalog
-    from mediatracker.hive.gossip_burst import mark_local_catalog_change
 
-    sync_hive_catalog(db, settings, now=now)
-    mark_local_catalog_change(db, ruche_id=ruche_id, now=now)
+    sync_hive_catalog(db, settings, now=now, force=True)
     return True

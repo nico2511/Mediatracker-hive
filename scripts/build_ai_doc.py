@@ -16,6 +16,7 @@ EXCLUDE_DIRS = frozenset({"interne", "archives", "exemples"})
 # Ordre logique des fichiers (tous les docs utilisateur inclus doivent y figurer).
 ORDERED_REL_PATHS: tuple[str, ...] = (
     "installation.md",
+    "architecture.md",
     "premier-demarrage.md",
     "telechargements.md",
     "reglages/README.md",

@@ -71,6 +71,7 @@ _FRENCH = {
     "LINK_HOST_UNAVAILABLE": "Hébergeur indisponible.",
     "STALLED": f"Aucun progrès depuis {_STALLED_MINUTES} minutes.",
     "DISCONTINUED": "Cet aimant a été retiré par AllDebrid (DISCONTINUED).",
+    "MAGNET_TIMEOUT": "AllDebrid n'a pas préparé l'aimant à temps.",
     "SIZE_SANITY": "Tous les liens ont une taille incompatible avec la durée attendue.",
     "ARIA2_CDN": "Le lien débridé a échoué (erreur aria2 502). Un autre hébergeur sera essayé.",
 }

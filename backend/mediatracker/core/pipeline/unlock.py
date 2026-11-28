@@ -203,7 +203,6 @@ def _attempt_bypass_profile_links(
     attempt_profile_rank: int = 1,
     journal_live: dict | None = None,
 ):
-    from mediatracker.core.magnet_claim import claim_cached_magnet
     from mediatracker.core.profile_attempt_adapters import manual_provider_link
 
     if not links:
@@ -248,11 +247,19 @@ def _attempt_bypass_profile_links(
                 row.attempt_started_at = now
             _commit(db)
             try:
-                claimed = claim_cached_magnet(
+                claimed = _poll_magnet_claim(
+                    db,
+                    row,
+                    item,
+                    media,
+                    now,
                     debrid,
-                    link.url or "",
+                    settings,
+                    magnet=link.url or "",
                     file_index=getattr(link, "file_index", None),
                     filename=link.filename,
+                    record_failed=record_failed,
+                    link=link,
                 )
             except DebridError as exc:
                 record_failed(
@@ -288,21 +295,22 @@ def _attempt_bypass_profile_links(
                 _bury(db, row, link, exc.code, exc.message)
                 last_code = exc.code
                 continue
+            if claimed == "waiting":
+                return "waiting"
             if claimed is None:
                 record_failed(db, row, media, item, reason="Aimant non disponible.", now=now, link=link)
                 _remember_skip(row, link.id)
                 row.link_id = None
                 continue
-            filename = _prefer_release_name(link.filename, claimed.direct.filename)
-            size = claimed.direct.size or link.size
-            bad = _probed_direct(claimed.direct.url, size)
-            if bad:
-                record_failed(db, row, media, item, reason=bad, now=now, link=link)
-                _bury(db, row, link, "LINK_NOT_VIDEO", bad)
+            packaged = _finalize_magnet_claim(
+                db, row, item, media, now, link, claimed, record_used=record_used
+            )
+            if isinstance(packaged, str):
+                record_failed(db, row, media, item, reason=packaged, now=now, link=link)
+                _bury(db, row, link, "LINK_NOT_VIDEO", packaged)
                 continue
-            row.debrid_magnet_id = claimed.magnet_id
-            record_used(db, row, media, item, now=now, link=link)
-            return (link, claimed.direct.url, filename, size, None)
+            if packaged is not None:
+                return packaged
         if not _hoster_supported(debrid, link):
             code, message = _debrid_skip_reason(debrid)
             if code in _DEBRID_PRECHECK_SKIP_CODES:
@@ -450,7 +458,6 @@ def _from_manual_links(
     known: list,
 ):
     """Try non-dead manual-source links first, without profile or hoster-order filters."""
-    del settings
     manual = db.scalar(select(Provider).where(Provider.kind == "source", Provider.type == "manual"))
     if manual is None:
         return None
@@ -482,7 +489,7 @@ def _from_manual_links(
         log_prefix="Liens manuels",
         defer_final=True,
         allow_manual_magnet=True,
-        settings=None,
+        settings=settings,
     )
 
 
@@ -859,6 +866,276 @@ def _from_hosters(
         return (link, direct_url, filename, size, hoster_url)
 
 
+def _expire_magnet_wait(
+    db: Session,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    debrid,
+    *,
+    link: Link | None,
+    record_failed,
+    next_step: str = "source ou hébergeur suivant",
+) -> None:
+    from mediatracker.core.magnet_wait import (
+        MAGNET_TIMEOUT_CODE,
+        abandon_magnet_wait,
+        is_magnet_wait,
+        log_magnet_wait_end,
+    )
+    from mediatracker.metro.instrument import instrument_adb2_magnet_wait_close
+    from mediatracker.metro.record import safe_instrument
+
+    if is_magnet_wait(row):
+        log_magnet_wait_end(row, item, now, ended="expirée", next_step=next_step)
+    safe_instrument(instrument_adb2_magnet_wait_close, row.id, media_id=media.id, success=False)
+    abandon_magnet_wait(debrid, row)
+    reason = french_error(MAGNET_TIMEOUT_CODE, None)
+    if link is not None:
+        record_failed(db, row, media, item, reason=reason, now=now, link=link)
+        _remember_skip(row, link.id)
+        row.link_id = None
+    _commit(db)
+
+
+def _finalize_magnet_claim(
+    db: Session,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    link: Link,
+    claimed,
+    *,
+    record_used=None,
+    on_success=None,
+):
+    from mediatracker.core.magnet_claim import ClaimedMagnet
+    from mediatracker.core.magnet_wait import clear_magnet_wait_flags, is_magnet_wait, log_magnet_wait_end
+    from mediatracker.metro.instrument import instrument_adb2_magnet_wait_close, instrument_magnet_cache
+    from mediatracker.metro.record import safe_instrument
+
+    if not isinstance(claimed, ClaimedMagnet):
+        return None
+    waiting_before = is_magnet_wait(row)
+    filename = _prefer_release_name(link.filename, claimed.direct.filename)
+    size = claimed.direct.size or link.size
+    bad = _probed_direct(claimed.direct.url, size)
+    if bad:
+        return bad
+    if waiting_before:
+        log_magnet_wait_end(row, item, now, ended="terminée (aimant prêt)", next_step="débridage direct")
+    clear_magnet_wait_flags(row)
+    row.debrid_magnet_id = claimed.magnet_id
+    row.state = "resolving"
+    row.attempt_started_at = now
+    if waiting_before:
+        safe_instrument(instrument_adb2_magnet_wait_close, row.id, media_id=media.id, success=True)
+    else:
+        safe_instrument(instrument_magnet_cache, row.id, media_id=media.id)
+    if record_used is not None:
+        record_used(db, row, media, item, now=now, link=link)
+    if on_success is not None:
+        on_success()
+    return (link, claimed.direct.url, filename, size, None)
+
+
+def _poll_magnet_claim(
+    db: Session,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    debrid,
+    settings: Settings,
+    *,
+    magnet: str,
+    file_index: int | None,
+    filename: str | None,
+    record_failed,
+    link: Link | None = None,
+    expire_next_step: str = "source ou hébergeur suivant",
+):
+    from mediatracker.core.magnet_claim import MagnetClaimPending, claim_cached_magnet
+    from mediatracker.core.magnet_wait import (
+        is_magnet_wait,
+        log_magnet_wait_begin,
+        magnet_wait_expired,
+        mark_magnet_waiting,
+    )
+    from mediatracker.metro.instrument import instrument_adb2_magnet_wait_touch
+    from mediatracker.metro.record import safe_instrument
+
+    existing = row.debrid_magnet_id if is_magnet_wait(row) else None
+    prior_magnet = existing
+    if existing and magnet_wait_expired(row, now, db, settings):
+        _expire_magnet_wait(
+            db,
+            row,
+            item,
+            media,
+            now,
+            debrid,
+            link=link,
+            record_failed=record_failed,
+            next_step=expire_next_step,
+        )
+        return None
+    try:
+        claimed = claim_cached_magnet(
+            debrid,
+            magnet,
+            file_index=file_index,
+            filename=filename,
+            blocking_wait=False,
+            existing_magnet_id=existing,
+        )
+    except DebridError:
+        raise
+    if isinstance(claimed, MagnetClaimPending):
+        reset_budget = not bool(existing)
+        mark_magnet_waiting(
+            row, claimed.magnet_id, now, db, settings, reset_budget=reset_budget
+        )
+        if reset_budget or not prior_magnet or prior_magnet != claimed.magnet_id:
+            log_magnet_wait_begin(row, item, db, settings)
+        safe_instrument(instrument_adb2_magnet_wait_touch, row.id, media_id=media.id)
+        _commit(db)
+        return "waiting"
+    return claimed
+
+
+def continue_magnet_wait_download(
+    db: Session,
+    row: Download,
+    item: MediaItem,
+    media: Media,
+    now: datetime,
+    preference: list[str],
+    debrid_row,
+    debrid,
+    settings: Settings,
+    known: list,
+):
+    """One non-blocking status poll for a job already waiting on AllDebrid."""
+    from mediatracker.core.magnet_wait import is_magnet_wait
+    from mediatracker.core.profile_attempt_adapters import manual_provider_link
+
+    if not is_magnet_wait(row):
+        return None
+    link = db.get(Link, row.link_id) if row.link_id else None
+    if link is None or link.kind not in {"magnet", "torrent"}:
+        from mediatracker.core.magnet_wait import abandon_magnet_wait, is_magnet_wait, log_magnet_wait_end
+
+        if is_magnet_wait(row):
+            log_magnet_wait_end(row, item, now, ended="abandonnée", next_step="lien n'est plus un aimant")
+        abandon_magnet_wait(debrid, row)
+        _commit(db)
+        return None
+    provider = db.get(Provider, link.provider_id) if link.provider_id else None
+    source_type = (provider.type if provider is not None else None) or "magnet"
+    manual = manual_provider_link(link)
+
+    def _resume_failed(db, row, media, item, *, reason: str, now: datetime, link: Link | None = None) -> None:
+        if manual:
+            record_manual_link_failed(db, row, media, item, reason=reason, now=now, link=link)
+        else:
+            _journal_source_attempt(
+                db, row, media, item, source_type, issue="error", reason=reason, now=now
+            )
+
+    row.state = "resolving"
+    _commit(db)
+    was_waiting = is_magnet_wait(row)
+    try:
+        claimed = _poll_magnet_claim(
+            db,
+            row,
+            item,
+            media,
+            now,
+            debrid,
+            settings,
+            magnet=link.url or "",
+            file_index=getattr(link, "file_index", None),
+            filename=link.filename,
+            record_failed=_resume_failed,
+            link=link,
+            expire_next_step="autre source" if not manual else "autre lien manuel",
+        )
+    except DebridError as exc:
+        if exc.code == "AUTH_BLOCKED":
+            if was_waiting or is_magnet_wait(row):
+                from mediatracker.core.magnet_wait import abandon_magnet_wait, log_magnet_wait_end
+
+                log_magnet_wait_end(
+                    row,
+                    item,
+                    now,
+                    ended="abandonnée (erreur AllDebrid)",
+                    next_step=exc.code,
+                )
+                abandon_magnet_wait(debrid, row)
+            _block_queue(db, debrid_row, now)
+            row.state = "pending"
+            row.error_code = "AUTH_BLOCKED"
+            row.error = AUTH_BLOCKED_MESSAGE
+            _commit(db)
+            return "paused"
+        if exc.retryable and (was_waiting or is_magnet_wait(row)):
+            from mediatracker.core.magnet_wait import schedule_magnet_poll_retry
+
+            row.state = "pending"
+            schedule_magnet_poll_retry(row, now, db, settings)
+            _commit(db)
+            return "waiting"
+        if was_waiting or is_magnet_wait(row):
+            from mediatracker.core.magnet_wait import abandon_magnet_wait, log_magnet_wait_end
+
+            log_magnet_wait_end(
+                row,
+                item,
+                now,
+                ended="abandonnée (erreur AllDebrid)",
+                next_step=exc.code or "erreur",
+            )
+            abandon_magnet_wait(debrid, row)
+            _commit(db)
+        return None
+    if claimed == "waiting":
+        return "waiting"
+    if claimed is None:
+        return None
+    packaged = _finalize_magnet_claim(
+        db, row, item, media, now, link, claimed, record_used=record_manual_link_used
+    )
+    if isinstance(packaged, str):
+        if manual:
+            record_manual_link_failed(db, row, media, item, reason=packaged, now=now, link=link)
+            _bury(db, row, link, "LINK_NOT_VIDEO", packaged)
+        else:
+            from mediatracker.providers.base import LinkCandidate
+
+            candidate = LinkCandidate(
+                url=link.url or "",
+                kind=link.kind,
+                hoster=link.hoster,
+                quality=link.quality,
+                language=link.language,
+                size=link.size,
+                filename=link.filename,
+                season=item.season,
+                episode=item.episode,
+                file_index=None,
+                external_id=link.external_id or "",
+            )
+            _reject_source_magnet(db, row, item, candidate, "LINK_NOT_VIDEO", packaged, now, source_type)
+        _commit(db)
+        return None
+    return packaged
+
+
 def _from_named_source(
     db,
     name: str,
@@ -1059,7 +1336,6 @@ def _from_episode_source(
             now=now,
         )
         return None
-    from mediatracker.core.magnet_claim import claim_cached_magnet
     from mediatracker.providers.base import EpisodeQuery, SourceFetchError
 
     if comet_urls is not None:
@@ -1118,6 +1394,7 @@ def _from_episode_source(
         release_names=_stored_release_names(db, item),
     )
     rejected = _rejected_magnets(db, item)
+    rejected |= _skipped_magnet_keys(db, row, item)
     # Comet and AllDebrid are network calls. Do not hold the write lock across them.
     _commit(db)
     try:
@@ -1184,7 +1461,6 @@ def _from_episode_source(
             row.error_code = code
             row.error = message
         return None
-    wait = float(getattr(debrid, "cache_wait_seconds", 8.0))
     attempted = 0
     for candidate in candidates:
         if candidate.kind != "magnet":
@@ -1210,16 +1486,60 @@ def _from_episode_source(
             )
             return "waiting"
         attempted += 1
+        poll_link = _comet_magnet_link_if_matching(db, row, candidate)
+
+        def _magnet_attempt_failed(
+            db,
+            row,
+            media,
+            item,
+            *,
+            reason: str,
+            now: datetime,
+            link: Link | None = None,
+        ) -> None:
+            _journal_source_attempt(
+                db, row, media, item, source_type, issue="error", reason=reason, now=now
+            )
+
         _commit(db)
         try:
-            claimed = claim_cached_magnet(
+            claimed = _poll_magnet_claim(
+                db,
+                row,
+                item,
+                media,
+                now,
                 debrid,
-                candidate.url,
+                settings,
+                magnet=candidate.url,
                 file_index=candidate.file_index,
                 filename=candidate.filename,
-                wait_seconds=wait,
+                record_failed=_magnet_attempt_failed,
+                link=poll_link,
+                expire_next_step="repli hébergeur Comet",
             )
         except DebridError as exc:
+            from mediatracker.core.magnet_wait import abandon_magnet_wait, is_magnet_wait, log_magnet_wait_end
+
+            if is_magnet_wait(row):
+                if exc.code == "AUTH_BLOCKED" or not exc.retryable:
+                    log_magnet_wait_end(
+                        row,
+                        item,
+                        now,
+                        ended="abandonnée (erreur AllDebrid)",
+                        next_step=exc.code or "erreur",
+                    )
+                    abandon_magnet_wait(debrid, row)
+                    _commit(db)
+                elif exc.retryable:
+                    from mediatracker.core.magnet_wait import schedule_magnet_poll_retry
+
+                    row.state = "pending"
+                    schedule_magnet_poll_retry(row, now, db, settings)
+                    _commit(db)
+                    return "waiting"
             if exc.code == "AUTH_BLOCKED":
                 _block_queue(db, debrid_row, now)
                 row.state = "pending"
@@ -1242,26 +1562,33 @@ def _from_episode_source(
                 _schedule_retry(db, row, exc.code, french_error(exc.code, exc.message), now)
                 return "waiting"
             continue
+        if claimed == "waiting":
+            _comet_magnet_link_for_candidate(db, row, item, candidate, now, source_type)
+            _commit(db)
+            return "waiting"
         if claimed is None:
+            rejected |= keys
             continue
         if host_down(row.error_code, row.error):
             row.error_code = None
             row.error = None
-        filename = _prefer_release_name(candidate.filename, claimed.direct.filename)
-        size = claimed.direct.size or candidate.size
-        bad = _probed_direct(claimed.direct.url, size)
-        if bad:
-            _reject_source_magnet(db, row, item, candidate, "LINK_NOT_VIDEO", bad, now, source_type)
-            rejected |= keys
-            continue
         link = _store_source_link(db, item, candidate, now, source_type)
         row.link_id = link.id
-        row.debrid_magnet_id = claimed.magnet_id
-        row.state = "resolving"
-        if row.attempt_started_at is None:
-            row.attempt_started_at = now
-        _journal_source_attempt(db, row, media, item, source_type, issue="found", link_count=len(candidates), now=now)
-        return (link, claimed.direct.url, filename, size, None)
+
+        def _comet_magnet_found() -> None:
+            _journal_source_attempt(
+                db, row, media, item, source_type, issue="found", link_count=len(candidates), now=now
+            )
+
+        packaged = _finalize_magnet_claim(
+            db, row, item, media, now, link, claimed, on_success=_comet_magnet_found
+        )
+        if isinstance(packaged, str):
+            _reject_source_magnet(db, row, item, candidate, "LINK_NOT_VIDEO", packaged, now, source_type)
+            rejected |= keys
+            continue
+        if packaged is not None:
+            return packaged
     for candidate in candidates:
         if candidate.kind not in _HOSTER_LINK_KINDS:
             continue
@@ -1337,6 +1664,38 @@ def _from_episode_source(
         if _aware(row.next_retry_at) is None or _aware(row.next_retry_at) <= now:
             row.next_retry_at = now + COMET_BACKOFFS[0]
     return None
+
+
+def _comet_magnet_link_if_matching(db: Session, row: Download, candidate) -> Link | None:
+    """Return the stored link only when row.link_id already matches this magnet."""
+    want = _magnet_keys(candidate.url, getattr(candidate, "external_id", None))
+    if not row.link_id:
+        return None
+    current = db.get(Link, row.link_id)
+    if current is None:
+        row.link_id = None
+        return None
+    if _magnet_keys(current.url, current.external_id) & want:
+        return current
+    row.link_id = None
+    return None
+
+
+def _comet_magnet_link_for_candidate(
+    db: Session,
+    row: Download,
+    item: MediaItem,
+    candidate,
+    now: datetime,
+    source_type: str,
+) -> Link:
+    """Persist a Comet magnet link once the magnet is in real wait or ready."""
+    link = _comet_magnet_link_if_matching(db, row, candidate)
+    if link is not None:
+        return link
+    link = _store_source_link(db, item, candidate, now, source_type)
+    row.link_id = link.id
+    return link
 
 
 def _store_source_link(db: Session, item: MediaItem, candidate, now: datetime, source_type: str) -> Link:
@@ -1468,9 +1827,25 @@ def _rejected_magnets(db: Session, item: MediaItem) -> set[str]:
     return keys
 
 
+def _skipped_magnet_keys(db: Session, row: Download, item: MediaItem) -> set[str]:
+    keys: set[str] = set()
+    skipped = {int(value) for value in (row.skipped_link_ids or [])}
+    if not skipped:
+        return keys
+    rows = db.scalars(select(Link).where(Link.media_item_id == item.id, Link.id.in_(skipped))).all()
+    for link in rows:
+        if link.kind in {"magnet", "torrent"}:
+            keys |= _magnet_keys(link.url, link.external_id)
+    return keys
+
+
 def _magnet_stays_dead(last_error: str | None) -> bool:
     text = last_error or ""
-    return "DISCONTINUED" in text or "LINK_NOT_VIDEO" in text or "n'est pas une vidéo" in text
+    return (
+        "DISCONTINUED" in text
+        or "LINK_NOT_VIDEO" in text
+        or "n'est pas une vidéo" in text
+    )
 
 
 def _discontinued_strikes(db: Session, item: MediaItem) -> int:
@@ -1558,6 +1933,24 @@ def _switch_host(exc: DebridError) -> bool:
 
 
 def _unlock(
+    debrid,
+    link: Link,
+    known: list,
+    preference: list[str],
+    *,
+    precheck_ctx: HosterUnlockContext | None = None,
+) -> tuple[str | None, str | None, int | None, str]:
+    from mediatracker.metro.record import _monotonic, is_pass_collection_active, note_adb3_unlock_ms
+
+    started = _monotonic()
+    try:
+        return _unlock_inner(debrid, link, known, preference, precheck_ctx=precheck_ctx)
+    finally:
+        if is_pass_collection_active():
+            note_adb3_unlock_ms(int((_monotonic() - started) * 1000))
+
+
+def _unlock_inner(
     debrid,
     link: Link,
     known: list,

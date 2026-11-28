@@ -14,17 +14,34 @@ from mediatracker.settings_store import ensure_settings, migrate_download_source
 
 
 def test_default_download_source_order_matches_registry():
-    expected = "wawacity,free_telecharger,hive,comet,torrentio,stremio_addons"
+    expected = "wawacity,hive,comet,torrentio,stremio_addons"
     assert DEFAULT_DOWNLOAD_SOURCE_ORDER == expected
     assert Settings().download_source_order == expected
     assert parse_download_source_order(DEFAULT_DOWNLOAD_SOURCE_ORDER) == [
         "wawacity",
-        "free_telecharger",
         "hive",
         "comet",
         "torrentio",
         "stremio_addons",
     ]
+
+
+OLD_FACTORY_DOWNLOAD_SOURCE_ORDER = (
+    "wawacity,free_telecharger,hive,comet,torrentio,stremio_addons"
+)
+
+
+def test_migration_keeps_old_factory_default_with_free_telecharger(client, app):
+    del client
+    with session_scope(app.state.session_factory) as db:
+        row = db.get(Setting, "download_source_order")
+        assert row is not None
+        row.value = OLD_FACTORY_DOWNLOAD_SOURCE_ORDER
+        db.commit()
+        migrate_download_source_order_setting(db)
+        db.commit()
+        db.refresh(row)
+        assert row.value == OLD_FACTORY_DOWNLOAD_SOURCE_ORDER
 
 
 def test_replace_uwuplus_in_order_keeps_stremio_position():

@@ -7,6 +7,7 @@ Covers Jellyfin folders, ``Show S01E02``, ``Show.1x02``, release tokens, and a
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 VIDEO_EXT = frozenset({".mkv", ".mp4", ".avi", ".m4v", ".ts", ".webm", ".mov"})
@@ -38,7 +39,8 @@ _SEASON_WORD = re.compile(
 _EPISODE_ONLY_LABEL = re.compile(
     r"(?i)(?:^|[^a-z0-9])(?:episode|épisode|ep\.?)\s*(?P<episode>\d{1,3})(?![0-9])"
 )
-_YEAR = re.compile(r"(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)")
+_YEAR = re.compile(r"(?<![0-9])((?:19|20)\d{2})(?![0-9])")
+_YEAR_PAREN = re.compile(r"\s*\(((?:19|20)\d{2})\)")
 _SEASON_NUMBERED = re.compile(r"(?i)^(?:season|saison)\s*0*(\d{1,2})$")
 _SPECIALS_DIR = re.compile(r"(?i)^(?:specials|spéciaux|speciaux)$")
 _FOLDER = re.compile(r"^(?P<title>.+?)(?: \((?P<year>(?:19|20)\d{2})\))?$")
@@ -244,7 +246,7 @@ def show_key(text: str) -> str:
     raw = _FRENCH_EPISODE.sub(" ", raw)
     raw = _SEASON_RANGE.sub(" ", raw)
     raw = _SEASON_ONLY.sub(" ", raw)
-    raw = _YEAR.sub(" ", raw)
+    raw = _strip_release_years(raw)
     raw = _NOISE.sub(" ", raw)
     if tagged:
         raw = _EPISODE_TAG.sub(" ", raw)
@@ -363,11 +365,43 @@ def _slot_from_parents(path: Path, root: Path) -> tuple[int | None, int | None]:
     return season, int(episode_match.group(1))
 
 
+def _release_year_ceiling() -> int:
+    return date.today().year + 1
+
+
+def _plausible_release_year(value: int) -> bool:
+    return 1900 <= value <= _release_year_ceiling()
+
+
+def _strip_release_years(text: str) -> str:
+    had_paren = _YEAR_PAREN.search(text) is not None
+    text = _YEAR_PAREN.sub(" ", text)
+    if had_paren:
+
+        def repl(match: re.Match[str]) -> str:
+            year = int(match.group(1))
+            return " " if _plausible_release_year(year) else match.group(0)
+
+        return _YEAR.sub(repl, text)
+    last_match: re.Match[str] | None = None
+    for match in _YEAR.finditer(text):
+        if _plausible_release_year(int(match.group(1))):
+            last_match = match
+    if last_match is None:
+        return text
+    return f"{text[: last_match.start()]} {text[last_match.end() :]}"
+
+
 def _year(text: str) -> int | None:
-    match = _YEAR.search(text)
-    if match is None:
-        return None
-    return int(match.group(1))
+    match = _YEAR_PAREN.search(text)
+    if match is not None:
+        return int(match.group(1))
+    chosen: int | None = None
+    for bare in _YEAR.finditer(text):
+        value = int(bare.group(1))
+        if _plausible_release_year(value):
+            chosen = value
+    return chosen
 
 
 def _quality(text: str) -> str | None:
@@ -468,7 +502,7 @@ def _clean_stem(stem: str) -> str:
     had_episode = bool(
         _SEASON_EPISODE.search(stem) or _X_EPISODE.search(stem) or _FRENCH_EPISODE.search(stem)
     )
-    text = _YEAR.sub(" ", text)
+    text = _strip_release_years(text)
     text = _CONTEXTUAL_CA_STRIP.sub(" ", text)
     text = _NOISE.sub(" ", text)
     if had_episode:

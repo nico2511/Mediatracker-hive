@@ -218,8 +218,10 @@ def finalize_received_hive_file(
             row.partial_size = size
             row.updated_at = moment
         from mediatracker.hive.catalog import sync_hive_catalog_item
+        from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
         from mediatracker.hive.share_policy import grant_share_intent, hive_catalog_auto_share_enabled
 
+        mark_hive_catalog_sync_needed(db)
         db.flush()
         if hive_catalog_auto_share_enabled(db):
             grant_share_intent(db, item.id)

@@ -381,6 +381,7 @@ def scan_proposals_after_poll(
     principal_id = int(principal.quality_profile_id)
     items = list(db.scalars(select(MediaItem).where(MediaItem.media_id == media.id)).all())
     created = 0
+    last_repli_id: int | None = None
     for item in items:
         if _item_blocked_for_proposal(db, settings, media, item):
             _clear_stale_active(db, item.id, moment=moment)
@@ -443,6 +444,18 @@ def scan_proposals_after_poll(
                 )
             )
             created += 1
+            last_repli_id = int(repli_id)
+    if created > 0:
+        from mediatracker.metro.instrument import instrument_sui6_replacement_proposal
+        from mediatracker.metro.record import safe_instrument
+
+        safe_instrument(
+            instrument_sui6_replacement_proposal,
+            db=db,
+            media=media,
+            settings=settings,
+            repli_profile_id=last_repli_id,
+        )
     db.flush()
     return created
 

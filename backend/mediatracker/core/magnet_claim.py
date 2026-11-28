@@ -22,6 +22,13 @@ CACHE_WAIT_SECONDS = 8.0
 CACHE_POLL_SECONDS = 2.0
 
 
+class MagnetClaimPending:
+    """Magnet uploaded (or already on the account) but not ready after one status check."""
+
+    def __init__(self, magnet_id: str) -> None:
+        self.magnet_id = magnet_id
+
+
 class ClaimedMagnet:
     def __init__(self, direct: DirectLink, magnet_id: str, file_link: str) -> None:
         self.direct = direct
@@ -38,8 +45,21 @@ def claim_cached_magnet(
     wait_seconds: float = CACHE_WAIT_SECONDS,
     poll_interval: float = CACHE_POLL_SECONDS,
     sleeper=time.sleep,
-) -> ClaimedMagnet | None:
-    """Return a direct link for a cached magnet, or None. Non-cached uploads are deleted."""
+    blocking_wait: bool = False,
+    existing_magnet_id: str | None = None,
+) -> ClaimedMagnet | MagnetClaimPending | None:
+    """Return a direct link, a pending magnet id, or None.
+
+    With ``blocking_wait=False``, a not-yet-ready magnet stays on the account and
+    returns ``MagnetClaimPending`` instead of sleeping in the worker loop.
+    """
+    if existing_magnet_id:
+        snapshot = _status_once(debrid, existing_magnet_id)
+        if snapshot is None:
+            return None
+        if not getattr(snapshot, "ready", False):
+            return MagnetClaimPending(existing_magnet_id)
+        return _finish_claim(debrid, existing_magnet_id, snapshot, file_index, filename)
     if _known_uncached(debrid, magnet):
         return None
     if not hasattr(debrid, "upload_magnet"):
@@ -48,12 +68,32 @@ def claim_cached_magnet(
     magnet_id = str(getattr(uploaded, "id", "") or "")
     if not magnet_id:
         return None
-    snapshot = uploaded if getattr(uploaded, "ready", False) else _wait_ready(
-        debrid, magnet_id, wait_seconds=wait_seconds, poll_interval=poll_interval, sleeper=sleeper
-    )
-    if snapshot is None:
-        _delete(debrid, magnet_id)
+    if getattr(uploaded, "ready", False):
+        snapshot = uploaded
+    elif blocking_wait:
+        snapshot = _wait_ready(
+            debrid, magnet_id, wait_seconds=wait_seconds, poll_interval=poll_interval, sleeper=sleeper
+        )
+        if snapshot is None:
+            _delete(debrid, magnet_id)
+            return None
+    else:
+        snapshot = _status_once(debrid, magnet_id)
+        if snapshot is None:
+            _delete(debrid, magnet_id)
+            return None
+        if not getattr(snapshot, "ready", False):
+            return MagnetClaimPending(magnet_id)
+    return _finish_claim(debrid, magnet_id, snapshot, file_index, filename)
+
+
+def _status_once(debrid, magnet_id: str):
+    if not hasattr(debrid, "magnet_status"):
         return None
+    return debrid.magnet_status(magnet_id)
+
+
+def _finish_claim(debrid, magnet_id: str, snapshot, file_index: int | None, filename: str | None):
     chosen = pick_magnet_file(list(getattr(snapshot, "files", []) or []), file_index, filename)
     if chosen is None or not chosen.link:
         _delete(debrid, magnet_id)

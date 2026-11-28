@@ -45,6 +45,9 @@ def replace_scope_share_exclusions(
             if len(rid) != 16:
                 continue
             db.add(HiveShareScopeExclusion(scope_id=scope_id, ruche_id=rid))
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     db.flush()
 
 
@@ -60,6 +63,9 @@ def persist_share_scope(
         row = HiveShareScope(media_id=media_id, season=season)
         db.add(row)
         db.flush()
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     replace_scope_share_exclusions(db, int(row.id), exclude_all=False, ruche_ids=ruche_ids)
     return row
 
@@ -85,6 +91,9 @@ def clear_share_scope(db: Session, media_id: int, *, season: int | None) -> None
             row = _scope_row(db, media_id, season=season)
             if row is not None:
                 db.delete(row)
+    from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+    mark_hive_catalog_sync_needed(db)
     db.flush()
 
 

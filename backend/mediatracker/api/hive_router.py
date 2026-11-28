@@ -463,7 +463,7 @@ def mount_hive_router(app) -> None:
                     instance=doc.get("instance"),
                     now=now,
                 )
-            ingest_signed_entries(
+            entries_accepted = ingest_signed_entries(
                 session,
                 ruche_id=ruche_id,
                 items=entries_in,
@@ -471,9 +471,13 @@ def mount_hive_router(app) -> None:
                 settings=settings,
                 allow_seq_gap=not is_hint,
             )
-            ingest_signed_signals(
+            signals_accepted = ingest_signed_signals(
                 session, ruche_id=ruche_id, items=signals_in, now=now, allow_seq_gap=not is_hint
             )
+            if entries_accepted > 0 or signals_accepted > 0:
+                from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
+
+                mark_hive_catalog_sync_needed(session)
             try_auto_accept_incoming(session, settings, ruche_id=ruche_id, now=now)
             our_vector = version_vector_for_ruche(session, ruche_id)
             our_signal_vector = signal_version_vector_for_ruche(session, ruche_id)

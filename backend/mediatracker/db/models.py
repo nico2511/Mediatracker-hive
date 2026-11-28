@@ -407,6 +407,7 @@ class Download(Base):
     )
     # When the current unlock or aria2 attempt began. A 0 % job older than this is stalled.
     attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metro_sequence_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
 
 class DownloadHiveFetch(Base):
@@ -415,9 +416,7 @@ class DownloadHiveFetch(Base):
     __tablename__ = "download_hive_fetch"
     __table_args__ = (Index("ix_download_hive_fetch_sha", "sha256_hex"),)
 
-    download_id: Mapped[int] = mapped_column(
-        ForeignKey("download.id", ondelete="CASCADE"), primary_key=True
-    )
+    download_id: Mapped[int] = mapped_column(ForeignKey("download.id", ondelete="CASCADE"), primary_key=True)
     sha256_hex: Mapped[str] = mapped_column(String(64), nullable=False)
     sources_json: Mapped[str] = mapped_column(Text, nullable=False)
     active_source_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -719,6 +718,41 @@ class MetricsHistory(Base):
     task_durations: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
 
+class TaskRun(Base):
+    """Passage d'une station worker (collecte carte réseau, sans interface PR1)."""
+
+    __tablename__ = "task_run"
+    __table_args__ = (
+        Index("ix_task_run_started_at", "started_at"),
+        Index("ix_task_run_station_started", "station", "started_at"),
+        Index("ix_task_run_line_started", "line", "started_at"),
+        Index("ix_task_run_sequence_id", "sequence_id"),
+        Index("ix_task_run_subject_ref", "subject_ref"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    line: Mapped[str] = mapped_column(String(32), nullable=False)
+    station: Mapped[str] = mapped_column(String(8), nullable=False)
+    sequence_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parent_run_id: Mapped[int | None] = mapped_column(ForeignKey("task_run.id", ondelete="SET NULL"), nullable=True)
+    edge_id: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False)
+    cause: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subject_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    media_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media.id", name="fk_task_run_media_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    blocked_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    waiting_on: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class SourceState(Base):
     """Dernier état connu d'une source distante ou d'un hébergeur AllDebrid."""
 
@@ -778,9 +812,7 @@ class HiveRuche(Base):
     members: Mapped[list["HiveMember"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
     entries: Mapped[list["HiveEntry"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
     signals: Mapped[list["HiveSignal"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
-    versions: Mapped[list["HiveVersions"]] = relationship(
-        back_populates="ruche", cascade="all, delete-orphan"
-    )
+    versions: Mapped[list["HiveVersions"]] = relationship(back_populates="ruche", cascade="all, delete-orphan")
     signal_versions: Mapped[list["HiveSignalVersions"]] = relationship(
         back_populates="ruche", cascade="all, delete-orphan"
     )
@@ -1009,9 +1041,7 @@ class HiveFileFingerprint(Base):
 
     __tablename__ = "hive_file_fingerprint"
 
-    media_item_id: Mapped[int] = mapped_column(
-        ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True
-    )
+    media_item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -1033,9 +1063,7 @@ class HiveShareIntent(Base):
 
     __tablename__ = "hive_share_intent"
 
-    media_item_id: Mapped[int] = mapped_column(
-        ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True
-    )
+    media_item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True)
 
 
 class HiveFetchGrant(Base):
@@ -1054,9 +1082,7 @@ class HiveFetchGrant(Base):
     )
     file_id: Mapped[bytes] = mapped_column(LargeBinary(16), nullable=False)
     requester_instance_id: Mapped[str] = mapped_column(String(48), nullable=False)
-    media_item_id: Mapped[int] = mapped_column(
-        ForeignKey("media_item.id", ondelete="CASCADE"), nullable=False
-    )
+    media_item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id", ondelete="CASCADE"), nullable=False)
     content_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     content_mtime_ns: Mapped[int] = mapped_column(BigInteger, nullable=False)
     content_sha256_hex: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -1226,9 +1252,7 @@ class HiveChercheMissPrompt(Base):
 
     __tablename__ = "hive_cherche_miss_prompt"
 
-    media_item_id: Mapped[int] = mapped_column(
-        ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True
-    )
+    media_item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True)
     prompted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -1237,9 +1261,7 @@ class HiveChercheRetract(Base):
 
     __tablename__ = "hive_cherche_retract"
 
-    media_item_id: Mapped[int] = mapped_column(
-        ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True
-    )
+    media_item_id: Mapped[int] = mapped_column(ForeignKey("media_item.id", ondelete="CASCADE"), primary_key=True)
     retracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 

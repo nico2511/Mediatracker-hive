@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
+import HealthActivityView from "./HealthActivityView.vue";
 import HealthServiceDetail from "../components/HealthServiceDetail.vue";
 import HealthSeriesChart from "../components/HealthSeriesChart.vue";
 import MetricSparkline from "../components/MetricSparkline.vue";
@@ -108,6 +109,7 @@ const refreshing = ref(false);
 const history = ref<MetricsHistoryBody | null>(null);
 const historyError = ref("");
 const techOpen = ref(false);
+const healthTab = ref<"etat" | "activite">("etat");
 
 const { hiveEnabled } = useHiveEnabled();
 
@@ -635,11 +637,19 @@ onUnmounted(() => {
   <section class="stack health-page sante-page">
     <header class="sante-head">
       <h1>Santé</h1>
-      <button type="button" :disabled="refreshing" @click="refresh">
+      <button v-if="healthTab === 'etat'" type="button" :disabled="refreshing" @click="refresh">
         {{ refreshing ? "Actualisation…" : "Actualiser" }}
       </button>
     </header>
 
+    <nav class="hive-tabs sante-tabs" aria-label="Sections Santé">
+      <button type="button" class="hive-tab" :class="{ on: healthTab === 'etat' }" @click="healthTab = 'etat'">État</button>
+      <button type="button" class="hive-tab" data-testid="health-tab-activite" :class="{ on: healthTab === 'activite' }" @click="healthTab = 'activite'">Activité</button>
+    </nav>
+
+    <HealthActivityView v-if="healthTab === 'activite'" />
+
+    <template v-else>
     <p v-if="error" class="error">{{ error }}</p>
 
     <article
@@ -856,5 +866,6 @@ onUnmounted(() => {
         </p>
       </div>
     </details>
+    </template>
   </section>
 </template>

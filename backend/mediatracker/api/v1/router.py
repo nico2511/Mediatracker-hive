@@ -18,6 +18,7 @@ from mediatracker.api.v1 import (
     links,
     maintenance,
     media,
+    metro,
     metadata,
     providers,
     quality_profiles,
@@ -25,6 +26,7 @@ from mediatracker.api.v1 import (
     setup,
     source_bindings,
     storage,
+    task_runs,
     tmdb_trial,
     tokens,
     wawacity_domain,
@@ -41,6 +43,8 @@ router.include_router(wawacity_domain.router)
 router.include_router(quality_profiles.router)
 router.include_router(storage.router)
 router.include_router(health.router)
+router.include_router(task_runs.router)
+router.include_router(metro.router)
 router.include_router(images.router)
 router.include_router(ha.router)
 router.include_router(media.router)

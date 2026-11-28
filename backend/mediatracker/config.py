@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     alldebrid_api_key: str | None = None
     # After a file lands in the library, drop that link from the AllDebrid account.
     alldebrid_auto_purge: bool = True
+    # Worker polls a pending magnet at this interval instead of blocking the loop.
+    alldebrid_magnet_poll_seconds: int = 30
+    # After this, the job falls back to the next link or source.
+    alldebrid_magnet_wait_max_seconds: int = 600
     # Newly followed media use automatic download unless the request says otherwise.
     auto_download_default: bool = True
     # Identifying a library folder links TMDB. It does not follow unless this is on.

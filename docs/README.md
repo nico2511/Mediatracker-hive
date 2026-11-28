@@ -46,6 +46,12 @@ Index : [Réglages](reglages/README.md) — URLs du type `http://<hôte>:8080/re
 | API et jetons | [reglages/jetons.md](reglages/jetons.md) |
 | Réinitialiser la base | [reglages/reset.md](reglages/reset.md) |
 
+### Développement (repérage code)
+
+| Document | Contenu |
+| --- | --- |
+| [Carte d'architecture](architecture.md) | Domaines, points d'entrée, tâches périodiques worker et polling UI |
+
 ### Maintenance
 
 | Document | Contenu |

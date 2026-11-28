@@ -249,7 +249,12 @@ def _retire_obtained_films(db: Session, *, emit_events: bool = True) -> bool:
             media,
             reason="downloaded",
             emit_event=emit_events,
+            instrument_metro=False,
         )
+        from mediatracker.metro.instrument import instrument_sui4_retire_obtained
+        from mediatracker.metro.record import safe_instrument
+
+        safe_instrument(instrument_sui4_retire_obtained, media_id=media.id)
     return True
 
 
@@ -1129,14 +1134,16 @@ def _apply(
             if _requeue_failed_download(db, item.id, now, poll_quality_profile_id, fresh_links=fresh_links > 0):
                 queued += 1
             else:
-                db.add(
-                    Download(
-                        media_item_id=item.id,
-                        state="pending",
-                        created_at=now,
-                        poll_quality_profile_id=poll_quality_profile_id,
-                    )
+                pending = Download(
+                    media_item_id=item.id,
+                    state="pending",
+                    created_at=now,
+                    poll_quality_profile_id=poll_quality_profile_id,
                 )
+                db.add(pending)
+                from mediatracker.metro.record import defer_source_apply_download
+
+                defer_source_apply_download(pending)
                 queued += 1
         else:
             proposed += 1
@@ -1696,8 +1703,13 @@ def _gate(
     ongoing_only: bool | None = None,
     window_days: int | None = None,
 ) -> tuple[bool, str]:
+    from mediatracker.metro.instrument import instrument_library_volume_block
+    from mediatracker.metro.record import safe_instrument
+
     if is_suspended(db):
+        safe_instrument(instrument_library_volume_block, blocked=True)
         return False, "library_suspended"
+    safe_instrument(instrument_library_volume_block, blocked=False)
     gone = _missing_library_ids(db, settings, items)
     subject = PollSubject(
         followed=media.followed,

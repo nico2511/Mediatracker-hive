@@ -55,6 +55,10 @@ def _maybe_savepoint(db, label: str, fn) -> None:
     except OperationalError as exc:
         if is_sqlite_locked(exc):
             logger.warning("%s : base occupée, nouvel essai au prochain passage.", label)
+            from mediatracker.metro.instrument import instrument_sqlite_locked
+            from mediatracker.metro.record import safe_instrument
+
+            safe_instrument(instrument_sqlite_locked, label=label)
             rollback_if_inactive(db)
             return
         logger.exception("%s a échoué ; le passage continue.", label)
@@ -81,7 +85,14 @@ def _catchup_cherche_signals(db, settings) -> None:
 
 
 def _hive_gossip_isolated(factory, settings) -> None:
+    from mediatracker.metro.record import _monotonic, account_hourly_station, is_pass_collection_active
+
+    started = _monotonic()
     run_worker_hive_gossip_isolated(factory, settings)
+    if is_pass_collection_active():
+        from mediatracker.metro.record import safe_instrument
+
+        safe_instrument(account_hourly_station, "RUC3", int((_monotonic() - started) * 1000))
 
 
 def _poll_sources_isolated(factory, settings) -> None:
@@ -100,6 +111,15 @@ def _poll_sources_isolated(factory, settings) -> None:
 
 def _run_worker_pass(db, settings, factory) -> None:
     """One worker iteration body; failures are isolated per step."""
+    from mediatracker.metro.record import load_pass_collection_flag, metro_pass, set_pass_factory
+
+    load_pass_collection_flag(factory)
+    set_pass_factory(factory)
+    with metro_pass():
+        _worker_pass_body(db, settings, factory)
+
+
+def _worker_pass_body(db, settings, factory) -> None:
     _maybe_savepoint(db, "Réconciliation aria2", lambda: maybe_reconcile_aria2(db, settings))
     # tick() commits while starting pending downloads: no SAVEPOINT here.
     _maybe_session(db, "Pipeline", lambda: tick(db, settings, commit=False))
@@ -109,7 +129,18 @@ def _run_worker_pass(db, settings, factory) -> None:
     _maybe_session(db, "Push Jellyfin", lambda: maybe_push_jellyfin(db, settings))
     commit_retry(db)
     _poll_sources_isolated(factory, settings)
-    _maybe_session(db, "Hive catalogue", lambda: sync_hive_catalog(db, settings))
+
+    def _hive_catalog_pass() -> None:
+        from mediatracker.metro.record import _monotonic, account_hourly_station, is_pass_collection_active
+
+        started = _monotonic()
+        sync_hive_catalog(db, settings)
+        if is_pass_collection_active():
+            from mediatracker.metro.record import safe_instrument
+
+            safe_instrument(account_hourly_station, "RUC2", int((_monotonic() - started) * 1000))
+
+    _maybe_session(db, "Hive catalogue", _hive_catalog_pass)
     _maybe_savepoint(
         db,
         "Hive signaux cherche (rattrapage)",
@@ -143,6 +174,9 @@ def _run_worker_pass(db, settings, factory) -> None:
         lambda: maybe_persist_worker_metrics(db, force=history_recorded[0]),
     )
     _maybe_savepoint(db, "Métriques worker (tampon)", lambda: maybe_persist_worker_metrics(db))
+    from mediatracker.metro.record import maybe_purge_old_task_runs
+
+    _maybe_savepoint(db, "Purge passages réseau", lambda: maybe_purge_old_task_runs(db))
 
 
 def compute_worker_pause(factory, settings) -> float:
@@ -215,12 +249,23 @@ def main() -> None:
             db = factory()
             try:
                 if worker_maintenance_active(db):
+                    from mediatracker.metro.instrument import instrument_maintenance_block
+                    from mediatracker.metro.record import load_pass_collection_flag, safe_instrument
+
+                    load_pass_collection_flag(factory)
+                    safe_instrument(instrument_maintenance_block)
                     acknowledge_worker_maintenance(db)
                     commit_retry(db)
                     waiter.wait(1.0)
                     continue
                 _run_worker_pass(db, settings, factory)
+                from mediatracker.metro.instrument import instrument_worker_pass_soc_unblock
+                from mediatracker.metro.record import flush_pass_buffer, resolve_deferred_instruments, safe_instrument
+
+                safe_instrument(instrument_worker_pass_soc_unblock)
                 commit_retry(db)
+                resolve_deferred_instruments()
+                flush_pass_buffer(factory)
             finally:
                 db.close()
         except OperationalError as exc:

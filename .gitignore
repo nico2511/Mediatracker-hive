@@ -155,3 +155,4 @@ backend/mediatracker/core/.build-id
 sandbox/hive-t8/runtime/
 sandbox/hive-t8/certs/
 sandbox/hive-t8/nginx.generated.conf
+.capture-metro/

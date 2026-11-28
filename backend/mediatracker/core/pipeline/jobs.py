@@ -700,6 +700,10 @@ def _fail(db: Session, row: Download, code: str, message: str, now: datetime) ->
             new_dest=None,
             now=now,
         )
+    from mediatracker.metro.instrument import instrument_download_sequence_end
+    from mediatracker.metro.record import safe_instrument
+
+    safe_instrument(instrument_download_sequence_end, row.id)
 
 
 def _block_queue(db: Session, row: Provider | None, now: datetime) -> None:

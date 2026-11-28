@@ -19,7 +19,7 @@ import {
   settingBoundMin,
 } from "../../settingsMeta";
 import { openInstallPanel, usePwaInstall } from "../../pwa/pwaInstall";
-import { formatParisClock, parseInstant } from "../../time";
+import { formatParisCollectionEnd, formatParisClock, parseInstant } from "../../time";
 import {
   formatProfileFallbackOrder,
   parseProfileFallbackOrder,
@@ -34,6 +34,55 @@ import { sectionBySlug, SETTINGS_SECTION_SLUGS } from "./sections";
 const route = useRoute();
 const router = useRouter();
 const { deferred: installPrompt } = usePwaInstall();
+
+type TaskRunCollectionStatus = {
+  active: boolean;
+  until: string | null;
+  mode: string;
+  duration?: "off" | "1h" | "6h" | "24h" | "unlimited" | "timed" | null;
+};
+const taskRunCollection = ref<TaskRunCollectionStatus | null>(null);
+const taskRunDurationChoice = ref<"off" | "1h" | "6h" | "24h" | "unlimited">("off");
+const taskRunCollectionBusy = ref(false);
+const taskRunCollectionMessage = ref("");
+
+async function loadTaskRunCollection() {
+  try {
+    taskRunCollection.value = await api<TaskRunCollectionStatus>("/api/v1/task-runs/collection");
+    const duration = taskRunCollection.value.duration;
+    if (duration === "1h" || duration === "6h" || duration === "24h" || duration === "unlimited") {
+      taskRunDurationChoice.value = duration;
+    } else if (!taskRunCollection.value.active) {
+      taskRunDurationChoice.value = "off";
+    }
+  } catch {
+    taskRunCollection.value = null;
+  }
+}
+
+async function saveTaskRunCollection() {
+  taskRunCollectionBusy.value = true;
+  taskRunCollectionMessage.value = "";
+  try {
+    taskRunCollection.value = await api<TaskRunCollectionStatus>("/api/v1/task-runs/collection", {
+      method: "PATCH",
+      body: JSON.stringify({ duration: taskRunDurationChoice.value }),
+    });
+    const saved = taskRunCollection.value.duration;
+    if (saved === "1h" || saved === "6h" || saved === "24h" || saved === "unlimited") {
+      taskRunDurationChoice.value = saved;
+    } else if (!taskRunCollection.value.active) {
+      taskRunDurationChoice.value = "off";
+    }
+    taskRunCollectionMessage.value = taskRunCollection.value.active
+      ? "Collecte des passages activée."
+      : "Collecte des passages désactivée.";
+  } catch (err) {
+    taskRunCollectionMessage.value = userFacingApiError(err, "Réglage impossible.");
+  } finally {
+    taskRunCollectionBusy.value = false;
+  }
+}
 
 const section = computed(() => {
   const raw = route.params.section;
@@ -52,6 +101,10 @@ watch(
   (slug) => {
     if (!slug || !SETTINGS_SECTION_SLUGS.has(slug)) {
       void router.replace({ name: "settings-index" });
+      return;
+    }
+    if (slug === "application") {
+      void loadTaskRunCollection();
     }
   },
   { immediate: true },
@@ -2722,6 +2775,38 @@ async function saveProfileFallback() {
           Installer MediaTracker
         </button>
       </p>
+      <article class="stack">
+        <h3 class="settings-subsection-title">Collecte des passages (diagnostic)</h3>
+        <p class="hint">
+          Enregistre les passages des stations worker pour la future carte réseau. Hors période activée, rien
+          n'est écrit en base.
+        </p>
+        <label class="stack gap-tight">
+          <span>Durée de collecte</span>
+          <select v-model="taskRunDurationChoice" class="field">
+            <option value="off">Désactivée</option>
+            <option value="1h">1 heure</option>
+            <option value="6h">6 heures</option>
+            <option value="24h">24 heures</option>
+            <option value="unlimited">Sans limite</option>
+          </select>
+        </label>
+        <p v-if="taskRunCollection?.active && taskRunCollection.until" class="hint">
+          Fin prévue : {{ formatParisCollectionEnd(taskRunCollection.until) }}.
+        </p>
+        <p v-else-if="taskRunCollection?.active" class="hint">Collecte active sans limite.</p>
+        <p class="actions">
+          <button
+            type="button"
+            class="primary"
+            :disabled="taskRunCollectionBusy"
+            @click="saveTaskRunCollection"
+          >
+            Enregistrer
+          </button>
+        </p>
+        <p v-if="taskRunCollectionMessage" class="hint">{{ taskRunCollectionMessage }}</p>
+      </article>
     </section>
     <section v-if="section === 'maj'" class="settings-section panel stack">
       <h2 class="settings-section-title">Mise à jour et redémarrage</h2>

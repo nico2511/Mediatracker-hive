@@ -624,6 +624,25 @@ def orchestrate_profile_first_poll(
             return last
         final = chosen or last
         if final is None:
+            if row.followed:
+                from mediatracker.core.profile_replacement import scan_proposals_after_poll
+
+                scan_proposals_after_poll(db, row, settings, now=moment)
+                return _finish(
+                    db,
+                    row,
+                    settings,
+                    moment,
+                    draw,
+                    result="nothing",
+                    message="Aucune source configurée.",
+                    episodes=0,
+                    queued=0,
+                    proposed=0,
+                    failed=False,
+                    force=force,
+                    schedule=True,
+                )
             return None
         if chosen is None and row.followed and final.result in {"nothing", "found"} and final.queued == 0:
             from mediatracker.hive.signal_policy import maybe_publish_cherche_on_source_miss

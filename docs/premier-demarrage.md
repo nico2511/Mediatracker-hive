@@ -22,7 +22,7 @@ Champs **tous optionnels** ; une valeur vide laisse le réglage actuel ou le dé
 | Champ assistant | Stockage (même clé que Réglages → Sources) |
 | --- | --- |
 | Wawacity | `wawacity_base_url` |
-| Free-Télécharger | URL dans la fiche fournisseur `free_telecharger` (pas de clé SQLite dédiée) |
+| Free-Télécharger | URL dans la fiche fournisseur `free_telecharger` (pas de clé SQLite dédiée) ; renseigner l’URL dans l’assistant ne l’active pas — l’activation se fait dans **Réglages → Sources** |
 | Comet (une ligne par instance) | `comet_base_urls` |
 | Torrentio | `torrentio_base_url` |
 | Addons Stremio (optionnel) | `stremio_addons` |

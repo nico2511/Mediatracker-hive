@@ -97,6 +97,15 @@ def tick(
         hold_downloads(db, downloader_client)
     paused = _refresh_pause(db, debrid_row, debrid_client, moment)
     disk_low = enforce_disk_guard(db, settings, downloader_client, moment, disk_free)
+    from mediatracker.metro.instrument import instrument_pipeline_tick
+    from mediatracker.metro.record import safe_instrument
+
+    safe_instrument(
+        instrument_pipeline_tick,
+        held=held,
+        paused=paused,
+        disk_low=disk_low,
+    )
     if not held and not disk_low:
         from mediatracker.core.aria2_reconcile import unpause_stale_paused_handles
 
@@ -563,9 +572,19 @@ def _finalize_download_row(
     record_event(db, "download.completed", media_id=media.id, item_id=item.id, payload={"download_id": row.id})
     from mediatracker.core.film_follow import stop_following_downloaded_film
     from mediatracker.core.series_follow import stop_following_complete_series
+    from mediatracker.metro.record import bind_download_sequence, safe_instrument
 
+    safe_instrument(bind_download_sequence, row.id, row)
+    stopped_follow = False
     if media.type == "film":
-        stop_following_downloaded_film(db, media, reason="downloaded", settings=settings)
+        stopped_follow = stop_following_downloaded_film(
+            db,
+            media,
+            reason="downloaded",
+            settings=settings,
+            download_id=row.id,
+            instrument_metro=False,
+        )
     else:
         stop_following_complete_series(db, media, today=now.date(), settings=settings)
     import_path = library_path_for_import or str(dest)
@@ -583,21 +602,46 @@ def _finalize_download_row(
     from mediatracker.core.cleanup_classify import request_classify
 
     request_classify(db)
+    from mediatracker.metro.instrument import (
+        instrument_download_sequence_end,
+        instrument_finalize,
+        instrument_hive_catalog_sync,
+        instrument_sui3_stop_follow,
+    )
+
+    hive_synced = False
     if item.id is not None:
         from mediatracker.hive.identity import hive_enabled_in_db
 
-        if hive_enabled_in_db(db):
-            from mediatracker.hive.catalog import sync_hive_catalog_item
+        hive_synced = hive_enabled_in_db(db)
+    safe_instrument(instrument_finalize, row.id, media_id=media.id)
+    if stopped_follow:
+        safe_instrument(
+            instrument_sui3_stop_follow,
+            db=db,
+            media=media,
+            item=item,
+            settings=settings,
+            download_id=row.id,
+        )
+    if hive_synced and item.id is not None:
+        from mediatracker.hive.catalog import sync_hive_catalog_item
+        from mediatracker.hive.catalog_sync_gate import mark_hive_catalog_sync_needed
 
-            try:
-                with db.begin_nested():
-                    sync_hive_catalog_item(db, settings, item.id, now=now)
-            except Exception as exc:
-                logger.warning(
-                    "Synchronisation catalogue Hive ignorée après téléchargement (%s, créneau %s).",
-                    type(exc).__name__,
-                    item.id,
-                )
+        mark_hive_catalog_sync_needed(db)
+        sync_ok = False
+        try:
+            with db.begin_nested():
+                sync_hive_catalog_item(db, settings, item.id, now=now)
+            sync_ok = True
+        except Exception as exc:
+            logger.warning(
+                "Synchronisation catalogue Hive ignorée après téléchargement (%s, créneau %s).",
+                type(exc).__name__,
+                item.id,
+            )
+        safe_instrument(instrument_hive_catalog_sync, row.id, success=sync_ok, media_id=media.id)
+    safe_instrument(instrument_download_sequence_end, row.id)
 
 
 def _finish_download(
@@ -739,8 +783,13 @@ def _import_ready(db: Session, now: datetime, settings: Settings, downloader=Non
 
 
 def _import_one(db: Session, row: Download, now: datetime, settings: Settings) -> None:
+    from mediatracker.metro.instrument import instrument_import_ready
+    from mediatracker.metro.record import bind_download_sequence, safe_instrument
+
+    safe_instrument(bind_download_sequence, row.id, row)
     item = db.get(MediaItem, row.media_item_id)
     media = db.get(Media, item.media_id) if item is not None else None
+    safe_instrument(instrument_import_ready, row.id, media_id=media.id if media is not None else None)
     source = Path(row.error) if row.error and row.error.startswith("/") else None
     layout = storage_layout(db, settings)
     if source is None or not source.is_file():
@@ -922,7 +971,23 @@ def _begin(
         row.error = "Déjà présent dans la bibliothèque."
         row.finished_at = now
         return "waiting"
-    # Magnet cache before any hoster URL is inspected, unlocked, or sent to aria2.
+    from mediatracker.metro.instrument import instrument_unlock
+    from mediatracker.metro.record import bind_download_sequence, clear_adb3_unlock_ms, safe_instrument
+
+    safe_instrument(bind_download_sequence, row.id, row)
+    clear_adb3_unlock_ms()
+    found = None
+    from mediatracker.core.magnet_wait import is_magnet_wait
+    from mediatracker.core.pipeline.unlock import continue_magnet_wait_download
+
+    if is_magnet_wait(row):
+        resumed = continue_magnet_wait_download(
+            db, row, item, media, now, preference, debrid_row, debrid, settings, known
+        )
+        if isinstance(resumed, str):
+            return resumed
+        if resumed is not None:
+            found = resumed
     if magnet_cache_first(db, debrid, item) == "paused":
         _block_queue(db, debrid_row, now)
         row.state = "pending"
@@ -947,29 +1012,11 @@ def _begin(
         remote_search_reserved_same_pass,
     )
 
-    found = None
     effective_known = [] if should_bypass_remote_dedup(row, item) else known
-    reset_pass_error_fields(row)
-    begin_download_pass(row)
-    manual_outcome = _from_manual_links(
-        db,
-        row,
-        item,
-        media,
-        now,
-        preference,
-        debrid_row,
-        debrid,
-        settings,
-        effective_known,
-    )
-    if isinstance(manual_outcome, str):
-        return manual_outcome
-    if manual_outcome is not None:
-        found = manual_outcome
-        reset_source_rounds(row)
     if found is None:
-        page_outcome = _from_manual_source_page(
+        reset_pass_error_fields(row)
+        begin_download_pass(row)
+        manual_outcome = _from_manual_links(
             db,
             row,
             item,
@@ -981,21 +1028,14 @@ def _begin(
             settings,
             effective_known,
         )
-        if isinstance(page_outcome, str):
-            return page_outcome
-        if page_outcome is not None:
-            found = page_outcome
+        if isinstance(manual_outcome, str):
+            return manual_outcome
+        if manual_outcome is not None:
+            found = manual_outcome
             reset_source_rounds(row)
-    while found is None:
-        reset_pass_error_fields(row)
-        begin_download_pass(row)
-        effective_known = [] if should_bypass_remote_dedup(row, item) else known
-        order = _usable_download_sources(db, media, settings)
-        for index, name in enumerate(order):
-            defer_final = index < len(order) - 1
-            outcome = _from_named_source(
+        if found is None:
+            page_outcome = _from_manual_source_page(
                 db,
-                name,
                 row,
                 item,
                 media,
@@ -1005,35 +1045,69 @@ def _begin(
                 debrid,
                 settings,
                 effective_known,
-                defer_final=defer_final,
             )
-            if isinstance(outcome, str):
-                return outcome
-            if outcome is None:
-                if index < len(order) - 1:
-                    _record_download_source_switch(db, row, media, item, order[index], order[index + 1], now=now)
-                continue
-            found = outcome
-            reset_source_rounds(row)
-            break
-        if found is not None:
-            break
-        if peek_next_download_profile_repli(db, media, settings, row) is None:
-            break
-        slot_reused = remote_search_reserved_same_pass(media, now)
-        slot_ok = slot_reused or begin_remote_search(media, now, db, settings)
-        if not advance_download_profile_repli(db, media, item, row, settings, now=now):
-            break
-        # Nouveau créneau seulement : un créneau déjà pris sur ce passage a déjà
-        # servi à la recherche Wawacity (_ingest_other_versions). Ensuite la boucle
-        # refait le tour des sources avec le profil de repli.
-        if slot_ok and not slot_reused:
-            _rediscover(db, settings, media, now, download=row, search_slot_reserved=True)
-        row.error_code = None
-        row.error = None
-        row.skipped_link_ids = []
-        _commit(db)
-        row._download_repli_advanced = True
+            if isinstance(page_outcome, str):
+                return page_outcome
+            if page_outcome is not None:
+                found = page_outcome
+                reset_source_rounds(row)
+        while found is None:
+            reset_pass_error_fields(row)
+            begin_download_pass(row)
+            effective_known = [] if should_bypass_remote_dedup(row, item) else known
+            order = _usable_download_sources(db, media, settings)
+            for index, name in enumerate(order):
+                defer_final = index < len(order) - 1
+                outcome = _from_named_source(
+                    db,
+                    name,
+                    row,
+                    item,
+                    media,
+                    now,
+                    preference,
+                    debrid_row,
+                    debrid,
+                    settings,
+                    effective_known,
+                    defer_final=defer_final,
+                )
+                if isinstance(outcome, str):
+                    return outcome
+                if outcome is None:
+                    if index < len(order) - 1:
+                        _record_download_source_switch(db, row, media, item, order[index], order[index + 1], now=now)
+                    continue
+                found = outcome
+                reset_source_rounds(row)
+                break
+            if found is not None:
+                break
+            if peek_next_download_profile_repli(db, media, settings, row) is None:
+                break
+            slot_reused = remote_search_reserved_same_pass(media, now)
+            slot_ok = slot_reused or begin_remote_search(media, now, db, settings)
+            if not advance_download_profile_repli(db, media, item, row, settings, now=now):
+                break
+            # Nouveau créneau seulement : un créneau déjà pris sur ce passage a déjà
+            # servi à la recherche Wawacity (_ingest_other_versions). Ensuite la boucle
+            # refait le tour des sources avec le profil de repli.
+            if slot_ok and not slot_reused:
+                _rediscover(db, settings, media, now, download=row, search_slot_reserved=True)
+            row.error_code = None
+            row.error = None
+            row.skipped_link_ids = []
+            _commit(db)
+            row._download_repli_advanced = True
+    from mediatracker.metro.record import take_adb3_unlock_ms
+
+    safe_instrument(
+        instrument_unlock,
+        row.id,
+        deferred=found is None,
+        media_id=media.id,
+        duration_ms=take_adb3_unlock_ms(),
+    )
     if found is None:
         composed = compose_download_pass_failure(row, order)
         if composed is not None:
@@ -1105,6 +1179,9 @@ def _begin(
     if hoster_url:
         row.debrid_link = hoster_url
     row.state = "queued"
+    from mediatracker.metro.instrument import instrument_download_started
+
+    safe_instrument(instrument_download_started, row.id, row, media_id=media.id)
     if row.attempt_started_at is None:
         row.attempt_started_at = now
     row.error_code = None
