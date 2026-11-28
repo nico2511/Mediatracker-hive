@@ -223,7 +223,8 @@ def migrate_download_source_order_setting(db: Session) -> None:
         rewritten = replace_uwuplus_in_source_order(rewritten)
     normalized = ",".join(rewritten)
     # Do not rewrite factory default still equal to
-    # wawacity,free_telecharger,hive,comet,torrentio,stremio_addons — existing instances keep FT active until manual opt-out.
+    # wawacity,free_telecharger,hive,comet,torrentio,stremio_addons —
+    # existing instances keep FT active until manual opt-out.
     if stripped == DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS:
         normalized = DEFAULT_DOWNLOAD_SOURCE_ORDER
     elif normalized in {LEGACY_DOWNLOAD_SOURCE_ORDER, DOWNLOAD_SOURCE_ORDER_WITH_UWUPLUS}:
